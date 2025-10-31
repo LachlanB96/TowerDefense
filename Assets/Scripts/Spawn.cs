@@ -29,6 +29,7 @@ public class Spawn : MonoBehaviour
         GameObject newUnit = Instantiate(unit, transform.position, Quaternion.identity);
         newUnit.GetComponent<Movement>().Waypoints = Waypoints;
         newUnit.transform.parent = transform;
+        newUnit.GetComponent<Movement>().insides = 5;
         spawnedUnits.Add(newUnit);
     }
 

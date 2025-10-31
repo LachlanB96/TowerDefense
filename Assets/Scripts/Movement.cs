@@ -4,14 +4,13 @@ using UnityEngine;
 public class Movement : MonoBehaviour
 {
     public GameObject Waypoints;
-    public GameObject subUnit;
     private GameObject currentWaypoint;
     private int waypointIndex = 0;
     public float speed = 1.0f;
 
     private int health = 1;
     private int deaths = 0;
-    public int insides = 10;
+    public int insides = 1;
     void Start()
     {
         print("Hello, Unity Console!");
@@ -42,8 +41,12 @@ public class Movement : MonoBehaviour
         if (deaths == 0)
         {
             deaths++;
-            GameObject newUnit = Instantiate(subUnit, transform.position, Quaternion.identity);
-            newUnit.transform.parent = transform.parent;
+            for (int i = 0; i < insides; i++)
+            {
+                GameObject newUnit = Instantiate(gameObject, transform.position, Quaternion.identity);
+                newUnit.transform.position += new Vector3(UnityEngine.Random.Range(-1f, 1f), UnityEngine.Random.Range(-1f, 1f), UnityEngine.Random.Range(-1f, 1f));
+                newUnit.transform.parent = transform.parent;
+            }
         }
         Destroy(gameObject);
     }

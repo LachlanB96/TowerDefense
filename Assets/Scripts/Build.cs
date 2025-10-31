@@ -24,6 +24,15 @@ public class Build : MonoBehaviour
         print("Building Base Tower");
         GameObject newTower = Instantiate(baseTower, new Vector3(0, 0, 0), Quaternion.identity);
         newTower.GetComponent<Attack>().units = units;
+
+    }
+    
+        public void BuildBladeTower()
+    {
+        print("Building Blade Tower");
+        GameObject newTower = Instantiate(baseTower, new Vector3(0, 0, 0), Quaternion.identity);
+        newTower.GetComponent<Attack>().units = units;
+        newTower.GetComponent<Attack>().attackType = "blade";
     
     }
 }

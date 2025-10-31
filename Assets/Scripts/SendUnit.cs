@@ -23,6 +23,5 @@ public class SendUnit : MonoBehaviour
         print("I was clicked");
         GameObject newUnit = Instantiate(unit, new Vector3(0, 0, 0), Quaternion.identity);
         newUnit.AddComponent<Movement>();
-        
     }
 }

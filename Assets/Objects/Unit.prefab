@@ -134,3 +134,4 @@ MonoBehaviour:
   Waypoints: {fileID: 1969661367129435262, guid: 4b01c9b2865f2a94a9e569d4313c3c62, type: 3}
   subUnit: {fileID: 4622141477549231493, guid: 6f30c9a012798b44598e742c6e4d8505, type: 3}
   speed: 0.005
+  insides: 1
