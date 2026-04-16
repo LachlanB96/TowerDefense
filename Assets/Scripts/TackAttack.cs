@@ -29,7 +29,8 @@ public class TackAttack : MonoBehaviour
         {
             string n = child.name;
             if (n.StartsWith("TackHead") || n.StartsWith("TackShaft") || n.StartsWith("TackTip")
-                || n.StartsWith("_")) continue;
+                || n.StartsWith("_TackRing") || n.StartsWith("_Range")
+                || n.StartsWith("_outline") || n.StartsWith("_Sniper")) continue;
             _bodyParts.Add(child);
             _bodyOriginalScales.Add(child.localScale);
         }

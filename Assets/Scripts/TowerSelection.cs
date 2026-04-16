@@ -135,9 +135,13 @@ public class TowerSelection : MonoBehaviour
 
     void ShowRangeIndicator()
     {
-        var attack = _selectedTower.GetComponent<TackAttack>();
-        if (attack == null) return;
-        _rangeIndicator = RangeIndicator.Create(attack.range, _selectedTower.transform);
+        float range = 0f;
+        var tackAttack = _selectedTower.GetComponent<TackAttack>();
+        var sniperAttack = _selectedTower.GetComponent<SniperAttack>();
+        if (tackAttack != null) range = tackAttack.range;
+        else if (sniperAttack != null) range = sniperAttack.range;
+        if (range <= 0f) return;
+        _rangeIndicator = RangeIndicator.Create(range, _selectedTower.transform);
     }
 
     void HideRangeIndicator()

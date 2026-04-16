@@ -6,6 +6,7 @@ using UnityEngine.UI;
 public class TowerPlacer : MonoBehaviour
 {
     [SerializeField] private GameObject _towerPrefab;
+    [SerializeField] private GameObject _sniperPrefab;
     [SerializeField] private LayerMask _groundLayer;
     [SerializeField] private float _overlapRadius = 1.4f;
 
@@ -23,10 +24,12 @@ public class TowerPlacer : MonoBehaviour
     private int _skipFrames;
     private Material[][] _originalMaterials;
     private Renderer[] _previewRenderers;
+    private string _placingType = "tack000";
 
     // ── Dev Tools ──────────────────────────────────────
     private static readonly bool DEV_AUTO_PLACE = true;
     private static readonly Vector3 DEV_TACK_POS = new Vector3(13.96f, -0.05f, 8.70f);
+    private static readonly Vector3 DEV_SNIPER_POS = new Vector3(10f, -0.05f, 6f);
     // ─────────────────────────────────────────────────────
 
     void Start()
@@ -39,7 +42,10 @@ public class TowerPlacer : MonoBehaviour
         BuildShopPanel();
 
         if (DEV_AUTO_PLACE)
+        {
             DevPlaceTack(DEV_TACK_POS);
+            DevPlaceSniper(DEV_SNIPER_POS);
+        }
     }
 
     void DevPlaceTack(Vector3 pos)
@@ -69,6 +75,37 @@ public class TowerPlacer : MonoBehaviour
         attack.diskColor = _projectileColor;
         attack.diskMetallic = _projectileMetallic;
         attack.diskSmoothness = _projectileSmoothness;
+    }
+
+    void DevPlaceSniper(Vector3 pos)
+    {
+        if (_sniperPrefab == null) return;
+
+        var tower = Instantiate(_sniperPrefab);
+        tower.name = "sniper000";
+        tower.transform.position = pos;
+
+        foreach (var col in tower.GetComponentsInChildren<Collider>(true))
+            col.enabled = true;
+
+        if (tower.GetComponentInChildren<Collider>() == null)
+        {
+            Bounds bounds = new Bounds(tower.transform.position, Vector3.zero);
+            foreach (var r in tower.GetComponentsInChildren<Renderer>())
+                bounds.Encapsulate(r.bounds);
+            BoxCollider box = tower.AddComponent<BoxCollider>();
+            box.center = tower.transform.InverseTransformPoint(bounds.center);
+            box.size = bounds.size;
+        }
+
+        TowerData data = tower.GetComponent<TowerData>() ?? tower.AddComponent<TowerData>();
+        data.towerType = "sniper000";
+        data.totalInvested = 0;
+
+        if (tower.GetComponent<SniperIdle>() == null)
+            tower.AddComponent<SniperIdle>();
+        if (tower.GetComponent<SniperAttack>() == null)
+            tower.AddComponent<SniperAttack>();
     }
 
     void BuildShopPanel()
@@ -110,12 +147,16 @@ public class TowerPlacer : MonoBehaviour
 
         // Tack tower icon button (large)
         MakeTowerButton("tack000", panel.transform);
+
+        // Sniper tower icon button
+        MakeTowerButton("sniper000", panel.transform);
     }
 
     void MakeTowerButton(string towerType, Transform parent)
     {
         int cost = TowerCosts.GetPlacementCost(towerType);
-        Sprite iconSprite = Resources.Load<Sprite>("UI/tack_icon");
+        string iconName = towerType == "sniper000" ? "UI/sniper_icon" : "UI/tack_icon";
+        Sprite iconSprite = Resources.Load<Sprite>(iconName);
 
         // Button container
         var go = new GameObject("TowerBtn_" + towerType);
@@ -124,7 +165,8 @@ public class TowerPlacer : MonoBehaviour
         go.AddComponent<LayoutElement>().preferredHeight = 150;
 
         var btn = go.AddComponent<Button>();
-        btn.onClick.AddListener(BeginPlacement);
+        string capturedType = towerType;
+        btn.onClick.AddListener(() => BeginPlacement(capturedType));
 
         ColorBlock cb = btn.colors;
         cb.normalColor = Color.white;
@@ -192,10 +234,22 @@ public class TowerPlacer : MonoBehaviour
         go.AddComponent<LayoutElement>().preferredHeight = 25;
     }
 
-    public void BeginPlacement()
+    public void BeginPlacement(string towerType = "tack000")
     {
         if (_isPlacing) return;
+        _placingType = towerType;
         SpawnPreview();
+    }
+
+    GameObject GetPrefab(string towerType)
+    {
+        if (towerType == "sniper000" && _sniperPrefab != null) return _sniperPrefab;
+        return _towerPrefab;
+    }
+
+    float GetTowerRange(string towerType)
+    {
+        return towerType == "sniper000" ? 7f : 3f;
     }
 
     void SpawnPreview()
@@ -204,8 +258,8 @@ public class TowerPlacer : MonoBehaviour
         _skipFrames = 2;
         _canPlace = false;
 
-        _preview = Instantiate(_towerPrefab);
-        _preview.name = "tack_preview";
+        _preview = Instantiate(GetPrefab(_placingType));
+        _preview.name = _placingType + "_preview";
 
         foreach (var col in _preview.GetComponentsInChildren<Collider>())
             col.enabled = false;
@@ -218,7 +272,7 @@ public class TowerPlacer : MonoBehaviour
 
         SetPreviewColor(new Color(1f, 1f, 1f, 0.4f));
 
-        _rangeIndicator = RangeIndicator.Create(3f, _preview.transform);
+        _rangeIndicator = RangeIndicator.Create(GetTowerRange(_placingType), _preview.transform);
     }
 
     void Update()
@@ -248,7 +302,7 @@ public class TowerPlacer : MonoBehaviour
 
         if (mouse.leftButton.wasPressedThisFrame && _canPlace)
         {
-            int cost = TowerCosts.GetPlacementCost("tack000");
+            int cost = TowerCosts.GetPlacementCost(_placingType);
             if (EconomyManager.Instance == null || !EconomyManager.Instance.TrySpend(cost))
                 return;
 
@@ -321,7 +375,7 @@ public class TowerPlacer : MonoBehaviour
             _rangeIndicator = null;
         }
 
-        _preview.name = "tack000";
+        _preview.name = _placingType;
 
         foreach (var col in _preview.GetComponentsInChildren<Collider>(true))
             col.enabled = true;
@@ -345,19 +399,29 @@ public class TowerPlacer : MonoBehaviour
         TowerData data = _preview.GetComponent<TowerData>();
         if (data == null)
             data = _preview.AddComponent<TowerData>();
-        data.towerType = "tack000";
-        int cost = TowerCosts.GetPlacementCost("tack000");
+        data.towerType = _placingType;
+        int cost = TowerCosts.GetPlacementCost(_placingType);
         data.totalInvested = cost;
 
         SpawnCostText(_preview.transform.position, cost);
 
-        // Attack behavior
-        TackAttack attack = _preview.GetComponent<TackAttack>();
-        if (attack == null)
-            attack = _preview.AddComponent<TackAttack>();
-        attack.diskColor = _projectileColor;
-        attack.diskMetallic = _projectileMetallic;
-        attack.diskSmoothness = _projectileSmoothness;
+        // Attack behavior depends on tower type
+        if (_placingType == "sniper000")
+        {
+            if (_preview.GetComponent<SniperIdle>() == null)
+                _preview.AddComponent<SniperIdle>();
+            if (_preview.GetComponent<SniperAttack>() == null)
+                _preview.AddComponent<SniperAttack>();
+        }
+        else
+        {
+            TackAttack attack = _preview.GetComponent<TackAttack>();
+            if (attack == null)
+                attack = _preview.AddComponent<TackAttack>();
+            attack.diskColor = _projectileColor;
+            attack.diskMetallic = _projectileMetallic;
+            attack.diskSmoothness = _projectileSmoothness;
+        }
 
         _preview = null;
         _previewRenderers = null;

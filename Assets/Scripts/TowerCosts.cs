@@ -18,6 +18,7 @@ public static class TowerCosts
     private static readonly Dictionary<string, int> _placementCosts = new()
     {
         { "tack000", 300 },
+        { "sniper000", 500 },
     };
 
     // [towerType][path index][upgrade level] = UpgradeInfo
