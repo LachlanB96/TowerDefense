@@ -71,6 +71,7 @@ public class Attack : MonoBehaviour
             GameObject newProjectile = Instantiate(projectile, transform.position, Quaternion.identity, unit);
             newProjectile.GetComponent<Velocity>().target = unit.gameObject;
             newProjectile.GetComponent<Velocity>().speed = 0.1f;
+            newProjectile.GetComponent<Velocity>().damage = damage;
             newProjectile.GetComponent<Velocity>().homing = false;
             lastShow = Time.time;
             didNotAttack = false;
@@ -81,6 +82,7 @@ public class Attack : MonoBehaviour
             GameObject newProjectile = Instantiate(projectile, transform.position, Quaternion.identity, unit);
             newProjectile.GetComponent<Velocity>().target = unit.gameObject;
             newProjectile.GetComponent<Velocity>().speed = 0.1f;
+            newProjectile.GetComponent<Velocity>().damage = damage;
             newProjectile.GetComponent<Velocity>().homing = true;
             lastShow = Time.time;
             didNotAttack = false;
@@ -90,7 +92,7 @@ public class Attack : MonoBehaviour
 
     void UpdateBuildMode()
     {
-        transform.position = new Vector3(Mathf.Round(Mouse.current.position.x.ReadValue() / 160), Mathf.Round(Mouse.current.position.y.ReadValue() / 160), 0);
+        transform.position = new Vector3(Mathf.Round(Mouse.current.position.x.ReadValue() / 160 - 7), Mathf.Round(Mouse.current.position.y.ReadValue() / 160 - 3), 0);
         GetComponent<Renderer>().material = build;
         if (Mouse.current.leftButton.wasPressedThisFrame)
         {

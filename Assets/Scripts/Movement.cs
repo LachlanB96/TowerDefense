@@ -1,39 +1,172 @@
-using System;
 using UnityEngine;
+using UnityEngine.UI;
 
 public class Movement : MonoBehaviour
 {
     public GameObject Waypoints;
-    private GameObject currentWaypoint;
+    private Transform currentWaypoint;
     private int waypointIndex = 0;
-    public float speed = 1.0f;
+    public float speed = 300.7f;
 
-    private int health = 1;
+    public int health = 1;
+    private int maxHealth;
     private int deaths = 0;
     public int insides = 1;
+
+    private static Canvas _sharedCanvas;
+    private GameObject _healthBarObj;
+    private Image _healthFill;
+    private RectTransform _healthBarRect;
+    private float _feetOffset;
+    private bool _feetOffsetReady;
+    private Vector3 _healthBarWorldOffset = new Vector3(0, 3f, 0);
+
     void Start()
     {
-        print("Hello, Unity Console!");
-        Debug.Log("Hello, Unity Console!");
-        Console.WriteLine("Movement script started");
-        currentWaypoint = Waypoints.GetComponent<Transform>().GetChild(waypointIndex).gameObject;
-    }
-
-    public void Test()
-    {
-        print("Hello, Unity Console!");
-        transform.position = Vector3.MoveTowards(transform.position, Vector3.zero, 30);
+        maxHealth = health;
+        currentWaypoint = Waypoints.transform.GetChild(waypointIndex);
+        CreateHealthBar();
     }
 
     void Update()
     {
-        if (Vector3.Distance(transform.position, currentWaypoint.transform.position) < 0.1f)
+        if (currentWaypoint == null) return;
+
+        // Compute feet offset on first frame when renderer bounds are valid
+        if (!_feetOffsetReady)
         {
-            currentWaypoint = Waypoints.GetComponent<Transform>().GetChild(++waypointIndex % Waypoints.transform.childCount).gameObject;
+            Renderer r = GetComponentInChildren<Renderer>();
+            if (r != null)
+                _feetOffset = transform.position.y - r.bounds.min.y;
+            _feetOffsetReady = true;
+            SnapToPath();
         }
-        transform.position = Vector3.MoveTowards(transform.position, currentWaypoint.transform.position, speed);
-        transform.Rotate(new Vector3(1, 2, 3), 0.1f);
-        //transform.position.z += 0.01f;
+
+        // Move in XZ toward waypoint, then set Y to stand on path
+        Vector3 target = currentWaypoint.position;
+        target.y = transform.position.y; // keep current Y so speed isn't wasted on vertical
+        transform.position = Vector3.MoveTowards(transform.position, target, speed * Time.deltaTime);
+
+        // Face the waypoint horizontally (no tilt)
+        Vector3 lookTarget = currentWaypoint.position;
+        lookTarget.y = transform.position.y;
+        if (lookTarget != transform.position)
+            transform.LookAt(lookTarget);
+
+        SnapToPath();
+
+        // Use XZ distance to check waypoint arrival
+        float dx = transform.position.x - currentWaypoint.position.x;
+        float dz = transform.position.z - currentWaypoint.position.z;
+        if (dx * dx + dz * dz < 0.01f)
+        {
+            waypointIndex++;
+            if (waypointIndex >= Waypoints.transform.childCount)
+            {
+                Destroy(gameObject);
+                return;
+            }
+            currentWaypoint = Waypoints.transform.GetChild(waypointIndex);
+        }
+    }
+
+    void OnDestroy()
+    {
+        if (_healthBarObj != null)
+            Destroy(_healthBarObj);
+    }
+
+    void SnapToPath()
+    {
+        // Place feet on path surface (waypoint Y + small offset for path thickness)
+        float pathSurface = currentWaypoint.position.y + 0.05f;
+        Vector3 pos = transform.position;
+        pos.y = pathSurface + _feetOffset;
+        transform.position = pos;
+    }
+
+    static Canvas GetOrCreateSharedCanvas()
+    {
+        if (_sharedCanvas != null) return _sharedCanvas;
+
+        var canvasObj = new GameObject("HealthBarCanvas");
+        DontDestroyOnLoad(canvasObj);
+        _sharedCanvas = canvasObj.AddComponent<Canvas>();
+        _sharedCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        _sharedCanvas.sortingOrder = 100;
+
+        var scaler = canvasObj.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920, 1080);
+
+        canvasObj.AddComponent<GraphicRaycaster>();
+        return _sharedCanvas;
+    }
+
+    void CreateHealthBar()
+    {
+        Canvas canvas = GetOrCreateSharedCanvas();
+
+        _healthBarObj = new GameObject("HealthBar_" + gameObject.GetInstanceID());
+        _healthBarObj.transform.SetParent(canvas.transform, false);
+        _healthBarRect = _healthBarObj.AddComponent<RectTransform>();
+        _healthBarRect.sizeDelta = new Vector2(60f, 8f);
+
+        // Background (dark)
+        GameObject bg = new GameObject("BG");
+        bg.transform.SetParent(_healthBarObj.transform, false);
+        Image bgImg = bg.AddComponent<Image>();
+        bgImg.color = new Color(0.2f, 0.2f, 0.2f, 0.8f);
+        RectTransform bgrt = bg.GetComponent<RectTransform>();
+        bgrt.anchorMin = Vector2.zero;
+        bgrt.anchorMax = Vector2.one;
+        bgrt.offsetMin = Vector2.zero;
+        bgrt.offsetMax = Vector2.zero;
+
+        // Fill (green)
+        GameObject fill = new GameObject("Fill");
+        fill.transform.SetParent(_healthBarObj.transform, false);
+        _healthFill = fill.AddComponent<Image>();
+        _healthFill.color = Color.green;
+        RectTransform frt = fill.GetComponent<RectTransform>();
+        frt.anchorMin = Vector2.zero;
+        frt.anchorMax = Vector2.one;
+        frt.pivot = new Vector2(0, 0.5f);
+        frt.offsetMin = Vector2.zero;
+        frt.offsetMax = Vector2.zero;
+    }
+
+    void LateUpdate()
+    {
+        if (_healthBarRect == null || Camera.main == null) return;
+
+        Vector3 worldPos = transform.position + _healthBarWorldOffset;
+        Vector3 screenPos = Camera.main.WorldToScreenPoint(worldPos);
+
+        if (screenPos.z > 0)
+        {
+            _healthBarRect.position = screenPos;
+            _healthBarObj.SetActive(true);
+        }
+        else
+        {
+            _healthBarObj.SetActive(false);
+        }
+    }
+
+    void UpdateHealthBar()
+    {
+        if (_healthFill == null) return;
+        float ratio = Mathf.Clamp01((float)health / maxHealth);
+        RectTransform frt = _healthFill.GetComponent<RectTransform>();
+        frt.anchorMax = new Vector2(ratio, 1);
+
+        if (ratio > 0.5f)
+            _healthFill.color = Color.green;
+        else if (ratio > 0.25f)
+            _healthFill.color = Color.yellow;
+        else
+            _healthFill.color = Color.red;
     }
 
     public void Death()
@@ -44,16 +177,33 @@ public class Movement : MonoBehaviour
             for (int i = 0; i < insides; i++)
             {
                 GameObject newUnit = Instantiate(gameObject, transform.position, Quaternion.identity);
-                newUnit.transform.position += new Vector3(UnityEngine.Random.Range(-1f, 1f), UnityEngine.Random.Range(-1f, 1f), UnityEngine.Random.Range(-1f, 1f));
+                newUnit.transform.position += new Vector3(Random.Range(-1f, 1f), 0f, Random.Range(-1f, 1f));
                 newUnit.transform.parent = transform.parent;
+                newUnit.transform.localScale = Vector3.one;
+
+                Movement m = newUnit.GetComponent<Movement>();
+                m.waypointIndex = waypointIndex;
+                m.health = 1;
+                m.insides = 0;
             }
         }
-        Destroy(gameObject);
+
+        // Disable movement and health bar, play death animation
+        enabled = false;
+        if (_healthBarObj != null)
+            Destroy(_healthBarObj);
+
+        // Unparent so the dying unit doesn't count as a target
+        transform.SetParent(null);
+
+        gameObject.AddComponent<DeathAnimation>();
     }
 
     internal void Hit(int v)
     {
-        if (v >= health)
+        health -= v;
+        UpdateHealthBar();
+        if (health <= 0)
         {
             Death();
         }
