@@ -5,6 +5,7 @@ public class PathTree : MonoBehaviour
     public int damage = 1;
     public float lifetime = 10f;
     public float hitRadius = 0.4f;
+    public System.Action onDestroyed;
 
     private float _spawnTime;
     private Transform _unitsParent;
@@ -21,11 +22,16 @@ public class PathTree : MonoBehaviour
     {
         if (Time.time - _spawnTime >= lifetime)
         {
-            Destroy(gameObject);
+            ReturnAndDestroy();
             return;
         }
 
-        if (_unitsParent == null) return;
+        if (_unitsParent == null)
+        {
+            Spawn spawner = FindAnyObjectByType<Spawn>();
+            if (spawner != null) _unitsParent = spawner.transform;
+            if (_unitsParent == null) return;
+        }
 
         foreach (Transform unit in _unitsParent)
         {
@@ -38,10 +44,16 @@ public class PathTree : MonoBehaviour
                 if (m != null)
                 {
                     m.Hit(damage);
-                    Destroy(gameObject);
+                    ReturnAndDestroy();
                     return;
                 }
             }
         }
+    }
+
+    void ReturnAndDestroy()
+    {
+        onDestroyed?.Invoke();
+        Destroy(gameObject);
     }
 }

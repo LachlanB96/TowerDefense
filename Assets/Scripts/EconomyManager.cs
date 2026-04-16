@@ -5,14 +5,16 @@ public class EconomyManager : MonoBehaviour
 {
     public static EconomyManager Instance { get; private set; }
 
-    public int money = 500;
+    public int money = 2000;
     public int economy = 250;
+    public int lives = 100;
 
     private float _incomeTimer;
     private const float INCOME_INTERVAL = 6f;
 
     private Text _moneyText;
     private Text _economyText;
+    private Text _livesText;
     private Image _incomeBarFill;
 
     void Awake()
@@ -36,14 +38,29 @@ public class EconomyManager : MonoBehaviour
 
         _moneyText.text = $"${money}";
         _economyText.text = $"Economy: {economy}";
+        _livesText.text = $"\u2764 {lives}";
 
         float ratio = Mathf.Clamp01(_incomeTimer / INCOME_INTERVAL);
         _incomeBarFill.rectTransform.anchorMax = new Vector2(ratio, 1);
     }
 
+    public bool CanAfford(int amount) => money >= amount;
+
+    public bool TrySpend(int amount)
+    {
+        if (money < amount) return false;
+        money -= amount;
+        return true;
+    }
+
     public void AddEconomy(int amount)
     {
         economy += amount;
+    }
+
+    public void LoseLives(int amount)
+    {
+        lives = Mathf.Max(0, lives - amount);
     }
 
     void BuildUI()
@@ -84,6 +101,10 @@ public class EconomyManager : MonoBehaviour
         // Money text
         _moneyText = MakeText("MoneyText", panel.transform, 24, Color.yellow);
         _moneyText.text = $"${money}";
+
+        // Lives text (red with heart)
+        _livesText = MakeText("LivesText", panel.transform, 22, new Color(0.95f, 0.2f, 0.2f));
+        _livesText.text = $"\u2764 {lives}";
 
         // Economy text
         _economyText = MakeText("EconomyText", panel.transform, 18, new Color(0.6f, 0.9f, 0.6f));

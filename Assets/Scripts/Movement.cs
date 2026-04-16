@@ -7,6 +7,7 @@ public class Movement : MonoBehaviour
     private Transform currentWaypoint;
     private int waypointIndex = 0;
     public float speed = 300.7f;
+    public float rotationSpeed = 8f;
 
     public int health = 1;
     private int maxHealth;
@@ -47,11 +48,15 @@ public class Movement : MonoBehaviour
         target.y = transform.position.y; // keep current Y so speed isn't wasted on vertical
         transform.position = Vector3.MoveTowards(transform.position, target, speed * Time.deltaTime);
 
-        // Face the waypoint horizontally (no tilt)
+        // Smoothly rotate toward the waypoint
         Vector3 lookTarget = currentWaypoint.position;
         lookTarget.y = transform.position.y;
-        if (lookTarget != transform.position)
-            transform.LookAt(lookTarget);
+        Vector3 direction = lookTarget - transform.position;
+        if (direction.sqrMagnitude > 0.001f)
+        {
+            Quaternion targetRotation = Quaternion.LookRotation(direction);
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSpeed * Time.deltaTime);
+        }
 
         SnapToPath();
 
@@ -63,6 +68,8 @@ public class Movement : MonoBehaviour
             waypointIndex++;
             if (waypointIndex >= Waypoints.transform.childCount)
             {
+                if (EconomyManager.Instance != null)
+                    EconomyManager.Instance.LoseLives(health);
                 Destroy(gameObject);
                 return;
             }
@@ -201,11 +208,75 @@ public class Movement : MonoBehaviour
 
     internal void Hit(int v)
     {
+        SpawnDamageText(v);
         health -= v;
         UpdateHealthBar();
         if (health <= 0)
         {
             Death();
         }
+    }
+
+    void SpawnDamageText(int amount)
+    {
+        Canvas canvas = GetOrCreateSharedCanvas();
+
+        var go = new GameObject("DmgText");
+        go.transform.SetParent(canvas.transform, false);
+
+        var txt = go.AddComponent<Text>();
+        txt.text = amount.ToString();
+        txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        txt.fontSize = 24;
+        txt.color = Color.red;
+        txt.alignment = TextAnchor.MiddleCenter;
+        txt.fontStyle = FontStyle.Bold;
+        txt.raycastTarget = false;
+
+        var outline = go.AddComponent<Outline>();
+        outline.effectColor = Color.black;
+        outline.effectDistance = new Vector2(1, -1);
+
+        var rt = go.GetComponent<RectTransform>();
+        rt.sizeDelta = new Vector2(100, 30);
+
+        Vector3 screenPos = Camera.main.WorldToScreenPoint(transform.position + _healthBarWorldOffset);
+        rt.position = screenPos;
+
+        var popup = go.AddComponent<DamagePopup>();
+        popup.Init(rt, txt, outline);
+    }
+}
+
+public class DamagePopup : MonoBehaviour
+{
+    private RectTransform _rt;
+    private Text _txt;
+    private Outline _outline;
+    private Vector3 _startPos;
+    private float _elapsed;
+    private const float Duration = 0.9f;
+
+    public void Init(RectTransform rt, Text txt, Outline outline)
+    {
+        _rt = rt;
+        _txt = txt;
+        _outline = outline;
+        _startPos = rt.position;
+    }
+
+    void Update()
+    {
+        _elapsed += Time.deltaTime;
+        float t = _elapsed / Duration;
+
+        _rt.position = _startPos + Vector3.up * (60f * t);
+
+        float alpha = t < 0.4f ? 1f : 1f - (t - 0.4f) / 0.6f;
+        _txt.color = new Color(1f, 0f, 0f, alpha);
+        _outline.effectColor = new Color(0f, 0f, 0f, alpha);
+
+        if (_elapsed >= Duration)
+            Destroy(gameObject);
     }
 }

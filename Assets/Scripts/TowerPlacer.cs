@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
@@ -23,11 +24,172 @@ public class TowerPlacer : MonoBehaviour
     private Material[][] _originalMaterials;
     private Renderer[] _previewRenderers;
 
+    // ── Dev Tools ──────────────────────────────────────
+    private static readonly bool DEV_AUTO_PLACE = true;
+    private static readonly Vector3 DEV_TACK_POS = new Vector3(13.96f, -0.05f, 8.70f);
+    // ─────────────────────────────────────────────────────
+
     void Start()
     {
-        var btn = GameObject.Find("PlaceTowerButton");
-        if (btn != null)
-            btn.GetComponent<Button>().onClick.AddListener(BeginPlacement);
+        // Hide the old scene button
+        var oldBtn = GameObject.Find("PlaceTowerButton");
+        if (oldBtn != null)
+            oldBtn.SetActive(false);
+
+        BuildShopPanel();
+
+        if (DEV_AUTO_PLACE)
+            DevPlaceTack(DEV_TACK_POS);
+    }
+
+    void DevPlaceTack(Vector3 pos)
+    {
+        var tower = Instantiate(_towerPrefab);
+        tower.name = "tack000";
+        tower.transform.position = pos;
+
+        foreach (var col in tower.GetComponentsInChildren<Collider>(true))
+            col.enabled = true;
+
+        if (tower.GetComponentInChildren<Collider>() == null)
+        {
+            Bounds bounds = new Bounds(tower.transform.position, Vector3.zero);
+            foreach (var r in tower.GetComponentsInChildren<Renderer>())
+                bounds.Encapsulate(r.bounds);
+            BoxCollider box = tower.AddComponent<BoxCollider>();
+            box.center = tower.transform.InverseTransformPoint(bounds.center);
+            box.size = bounds.size;
+        }
+
+        TowerData data = tower.GetComponent<TowerData>() ?? tower.AddComponent<TowerData>();
+        data.towerType = "tack000";
+        data.totalInvested = 0;
+
+        TackAttack attack = tower.GetComponent<TackAttack>() ?? tower.AddComponent<TackAttack>();
+        attack.diskColor = _projectileColor;
+        attack.diskMetallic = _projectileMetallic;
+        attack.diskSmoothness = _projectileSmoothness;
+    }
+
+    void BuildShopPanel()
+    {
+        // Canvas
+        var canvasGO = new GameObject("ShopUI");
+        var canvas = canvasGO.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 10;
+
+        var scaler = canvasGO.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920, 1080);
+
+        canvasGO.AddComponent<GraphicRaycaster>();
+
+        // Panel anchored to left side (mirroring selection panel on right)
+        var panel = new GameObject("ShopPanel");
+        panel.transform.SetParent(canvasGO.transform, false);
+
+        var prt = panel.AddComponent<RectTransform>();
+        prt.anchorMin = new Vector2(0, 0.3f);
+        prt.anchorMax = new Vector2(0, 0.7f);
+        prt.pivot = new Vector2(0, 0.5f);
+        prt.anchoredPosition = Vector2.zero;
+        prt.sizeDelta = new Vector2(170, 0);
+
+        panel.AddComponent<Image>().color = new Color(0.627f, 0.322f, 0.176f, 0.95f);
+
+        var layout = panel.AddComponent<VerticalLayoutGroup>();
+        layout.padding = new RectOffset(10, 10, 10, 10);
+        layout.spacing = 8;
+        layout.childForceExpandWidth = true;
+        layout.childForceExpandHeight = false;
+        layout.childAlignment = TextAnchor.UpperCenter;
+
+        // Header
+        MakeLabel("-- Towers --", panel.transform);
+
+        // Tack tower icon button (large)
+        MakeTowerButton("tack000", panel.transform);
+    }
+
+    void MakeTowerButton(string towerType, Transform parent)
+    {
+        int cost = TowerCosts.GetPlacementCost(towerType);
+        Sprite iconSprite = Resources.Load<Sprite>("UI/tack_icon");
+
+        // Button container
+        var go = new GameObject("TowerBtn_" + towerType);
+        go.transform.SetParent(parent, false);
+
+        go.AddComponent<LayoutElement>().preferredHeight = 150;
+
+        var btn = go.AddComponent<Button>();
+        btn.onClick.AddListener(BeginPlacement);
+
+        ColorBlock cb = btn.colors;
+        cb.normalColor = Color.white;
+        cb.highlightedColor = new Color(1.2f, 1.2f, 1.2f, 1f);
+        cb.pressedColor = new Color(0.8f, 0.8f, 0.8f, 1f);
+        btn.colors = cb;
+
+        // Background
+        var bg = go.AddComponent<Image>();
+        bg.color = new Color(0.545f, 0.271f, 0.075f);
+
+        // Icon image (fills most of the button)
+        var iconGO = new GameObject("Icon");
+        iconGO.transform.SetParent(go.transform, false);
+
+        var iconImg = iconGO.AddComponent<Image>();
+        if (iconSprite != null)
+        {
+            iconImg.sprite = iconSprite;
+            iconImg.preserveAspect = true;
+        }
+        iconImg.color = Color.white;
+
+        var iconRT = iconGO.GetComponent<RectTransform>();
+        iconRT.anchorMin = new Vector2(0.05f, 0.2f);
+        iconRT.anchorMax = new Vector2(0.95f, 0.95f);
+        iconRT.offsetMin = Vector2.zero;
+        iconRT.offsetMax = Vector2.zero;
+
+        // Price label at the bottom
+        var priceGO = new GameObject("PriceLabel");
+        priceGO.transform.SetParent(go.transform, false);
+
+        var priceTxt = priceGO.AddComponent<Text>();
+        priceTxt.text = $"${cost}";
+        priceTxt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        priceTxt.fontSize = 20;
+        priceTxt.color = Color.white;
+        priceTxt.alignment = TextAnchor.MiddleCenter;
+        priceTxt.fontStyle = FontStyle.Bold;
+
+        var outline = priceGO.AddComponent<Outline>();
+        outline.effectColor = Color.black;
+        outline.effectDistance = new Vector2(1, -1);
+
+        var priceRT = priceGO.GetComponent<RectTransform>();
+        priceRT.anchorMin = new Vector2(0, 0);
+        priceRT.anchorMax = new Vector2(1, 0.22f);
+        priceRT.offsetMin = Vector2.zero;
+        priceRT.offsetMax = Vector2.zero;
+    }
+
+    void MakeLabel(string text, Transform parent)
+    {
+        var go = new GameObject("Label");
+        go.transform.SetParent(parent, false);
+
+        var txt = go.AddComponent<Text>();
+        txt.text = text;
+        txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        txt.alignment = TextAnchor.MiddleCenter;
+        txt.color = new Color(1f, 1f, 1f, 0.6f);
+        txt.fontSize = 14;
+
+        go.AddComponent<LayoutElement>().preferredHeight = 25;
     }
 
     public void BeginPlacement()
@@ -86,6 +248,10 @@ public class TowerPlacer : MonoBehaviour
 
         if (mouse.leftButton.wasPressedThisFrame && _canPlace)
         {
+            int cost = TowerCosts.GetPlacementCost("tack000");
+            if (EconomyManager.Instance == null || !EconomyManager.Instance.TrySpend(cost))
+                return;
+
             PlaceTower();
 
             if (Keyboard.current.leftShiftKey.isPressed || Keyboard.current.rightShiftKey.isPressed)
@@ -105,8 +271,6 @@ public class TowerPlacer : MonoBehaviour
         {
             if (col.transform.IsChildOf(_preview.transform)) continue;
             if (col.gameObject.layer == 8) continue; // Ground layer
-            if (col.GetComponent<Tile>() != null) continue;
-            if (col.GetComponentInParent<GridManager>() != null) continue;
             return true;
         }
 
@@ -120,12 +284,8 @@ public class TowerPlacer : MonoBehaviour
         var pathRenderer = FindAnyObjectByType<PathRenderer>();
         if (pathRenderer == null) return false;
 
-        var wpField = typeof(PathRenderer).GetField("_waypoints", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var widthField = typeof(PathRenderer).GetField("_pathWidth", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        if (wpField == null || widthField == null) return false;
-
-        var waypoints = wpField.GetValue(pathRenderer) as Transform;
-        float pathWidth = (float)widthField.GetValue(pathRenderer);
+        var waypoints = pathRenderer.Waypoints;
+        float pathWidth = pathRenderer.PathWidth;
         if (waypoints == null || waypoints.childCount < 2) return false;
 
         float halfWidth = pathWidth / 2f + _overlapRadius;
@@ -186,6 +346,10 @@ public class TowerPlacer : MonoBehaviour
         if (data == null)
             data = _preview.AddComponent<TowerData>();
         data.towerType = "tack000";
+        int cost = TowerCosts.GetPlacementCost("tack000");
+        data.totalInvested = cost;
+
+        SpawnCostText(_preview.transform.position, cost);
 
         // Attack behavior
         TackAttack attack = _preview.GetComponent<TackAttack>();
@@ -240,4 +404,81 @@ public class TowerPlacer : MonoBehaviour
         mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
     }
 
+    static Canvas _floatingTextCanvas;
+
+    static Canvas GetFloatingTextCanvas()
+    {
+        if (_floatingTextCanvas != null) return _floatingTextCanvas;
+
+        // Try to find existing overlay canvas
+        foreach (var c in FindObjectsByType<Canvas>(FindObjectsSortMode.None))
+        {
+            if (c.renderMode == RenderMode.ScreenSpaceOverlay)
+            {
+                _floatingTextCanvas = c;
+                return c;
+            }
+        }
+
+        // Create one
+        var go = new GameObject("FloatingTextCanvas");
+        _floatingTextCanvas = go.AddComponent<Canvas>();
+        _floatingTextCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        _floatingTextCanvas.sortingOrder = 100;
+        go.AddComponent<CanvasScaler>();
+        return _floatingTextCanvas;
+    }
+
+    void SpawnCostText(Vector3 worldPos, int amount)
+    {
+        Canvas canvas = GetFloatingTextCanvas();
+        if (canvas == null) return;
+
+        var go = new GameObject("CostText");
+        go.transform.SetParent(canvas.transform, false);
+
+        var txt = go.AddComponent<Text>();
+        txt.text = $"-${amount}";
+        txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        txt.fontSize = 28;
+        txt.color = new Color(0.9f, 0.15f, 0.1f);
+        txt.alignment = TextAnchor.MiddleCenter;
+        txt.fontStyle = FontStyle.Bold;
+        txt.raycastTarget = false;
+
+        var outline = go.AddComponent<Outline>();
+        outline.effectColor = Color.black;
+        outline.effectDistance = new Vector2(2, -2);
+
+        var rt = go.GetComponent<RectTransform>();
+        rt.sizeDelta = new Vector2(200, 40);
+
+        Vector3 screenPos = Camera.main.WorldToScreenPoint(worldPos);
+        rt.position = screenPos;
+
+        StartCoroutine(FloatDown(rt, txt, outline));
+    }
+
+    IEnumerator FloatDown(RectTransform rt, Text txt, Outline outline)
+    {
+        float duration = 1.2f;
+        float elapsed = 0f;
+        Vector3 startPos = rt.position;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / duration;
+
+            rt.position = startPos + Vector3.down * (80f * t);
+
+            float alpha = t < 0.5f ? 1f : 1f - (t - 0.5f) / 0.5f;
+            txt.color = new Color(0.9f, 0.15f, 0.1f, alpha);
+            outline.effectColor = new Color(0, 0, 0, alpha);
+
+            yield return null;
+        }
+
+        Destroy(rt.gameObject);
+    }
 }

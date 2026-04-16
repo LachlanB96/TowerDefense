@@ -5,42 +5,21 @@ public class DeathAnimation : MonoBehaviour
     private Animator _animator;
     private float _timer;
     private float _fadeDuration = 1.5f;
-    private float _fadeDelay;
-    private float _totalDuration;
+    private float _shrinkDuration = 0.2f;
     private Renderer[] _renderers;
     private Material[][] _materials;
-    private bool _fading;
+    private Vector3 _startScale;
+    private float _groundY;
 
     void Start()
     {
         _animator = GetComponentInChildren<Animator>();
 
         if (_animator != null)
-        {
             _animator.SetTrigger("Die");
 
-            // Get the Die clip length to know when to destroy
-            var clips = _animator.runtimeAnimatorController.animationClips;
-            float dieLength = 0f;
-            foreach (var clip in clips)
-            {
-                if (clip.name == "Die")
-                {
-                    dieLength = clip.length;
-                    break;
-                }
-            }
-
-            // Start fading partway through the animation (when it lies on the ground)
-            _fadeDelay = dieLength * 0.55f;
-            _totalDuration = _fadeDelay + _fadeDuration;
-        }
-        else
-        {
-            // Fallback if no animator
-            _fadeDelay = 0.5f;
-            _totalDuration = _fadeDelay + _fadeDuration;
-        }
+        _startScale = transform.localScale;
+        _groundY = transform.position.y;
 
         // Collect all renderers and prepare materials for fading
         _renderers = GetComponentsInChildren<Renderer>();
@@ -49,42 +28,56 @@ public class DeathAnimation : MonoBehaviour
         {
             _materials[i] = _renderers[i].materials;
         }
+
+        // Immediately tint all materials black and make transparent
+        foreach (var mats in _materials)
+        {
+            foreach (var mat in mats)
+            {
+                MakeTransparent(mat);
+                if (mat.HasProperty("_BaseColor"))
+                    mat.SetColor("_BaseColor", new Color(0f, 0f, 0f, 1f));
+            }
+        }
     }
 
     void Update()
     {
         _timer += Time.deltaTime;
 
-        // Start fading after the fall portion of the animation
-        if (_timer > _fadeDelay && !_fading)
+        // Shrink to half over 0.2s, anchored to ground
+        if (_timer < _shrinkDuration)
         {
-            _fading = true;
-            foreach (var mats in _materials)
-                foreach (var mat in mats)
-                    MakeTransparent(mat);
+            float shrinkT = Mathf.SmoothStep(0f, 1f, _timer / _shrinkDuration);
+            float s = Mathf.Lerp(1f, 0.5f, shrinkT);
+            transform.localScale = _startScale * s;
+
+            // Keep bottom anchored: offset Y up by half the lost height
+            float fullHeight = _startScale.y;
+            float newHeight = fullHeight * s;
+            float yOffset = (fullHeight - newHeight) * 0.5f;
+            Vector3 pos = transform.position;
+            pos.y = _groundY - yOffset;
+            transform.position = pos;
         }
 
-        if (_fading)
-        {
-            float fadeT = (_timer - _fadeDelay) / _fadeDuration;
-            fadeT = Mathf.Clamp01(fadeT);
-            float alpha = 1f - fadeT;
+        float fadeT = Mathf.Clamp01(_timer / _fadeDuration);
+        float alpha = 1f - fadeT;
 
-            for (int i = 0; i < _renderers.Length; i++)
+        for (int i = 0; i < _renderers.Length; i++)
+        {
+            foreach (var mat in _materials[i])
             {
-                foreach (var mat in _materials[i])
+                if (mat.HasProperty("_BaseColor"))
                 {
-                    if (mat.HasProperty("_BaseColor"))
-                    {
-                        Color c = mat.GetColor("_BaseColor");
-                        c.a = alpha;
-                        mat.SetColor("_BaseColor", c);
-                    }
+                    Color c = mat.GetColor("_BaseColor");
+                    c.a = alpha;
+                    mat.SetColor("_BaseColor", c);
                 }
             }
         }
 
-        if (_timer >= _totalDuration)
+        if (_timer >= _fadeDuration)
         {
             Destroy(gameObject);
         }

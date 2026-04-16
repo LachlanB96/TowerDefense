@@ -37,13 +37,11 @@ public class GroundGenerator : MonoBehaviour
                 float xPos = (float)x / _xSegments * _width;
                 float zPos = (float)z / _zSegments * _depth;
 
-                float n1 = Mathf.PerlinNoise((xPos + _seed) * _noiseScale, (zPos + _seed) * _noiseScale);
-                float n2 = Mathf.PerlinNoise((xPos + _seed) * _noiseScale * 2.5f, (zPos + _seed) * _noiseScale * 2.5f);
-                float y = n1 * _noiseHeight + n2 * _noiseHeight * 0.3f;
+                float y = 0f;
 
                 int index = z * vertCountX + x;
                 vertices[index] = new Vector3(xPos, y, zPos);
-                uvs[index] = new Vector2(xPos * 0.5f, zPos * 0.5f);
+                uvs[index] = new Vector2(xPos / _width, zPos / _depth);
             }
         }
 
@@ -77,14 +75,15 @@ public class GroundGenerator : MonoBehaviour
 
     void GenerateGrassTexture()
     {
-        int size = 256;
+        int size = 2048;
         Texture2D tex = new Texture2D(size, size);
-        tex.filterMode = FilterMode.Point;
+        tex.filterMode = FilterMode.Bilinear;
 
-        Color grassGreen = new Color(0.3f, 0.65f, 0.2f);
-        Color grassDark = new Color(0.18f, 0.45f, 0.12f);
-        Color grassLight = new Color(0.45f, 0.8f, 0.3f);
-        Color clover = new Color(0.22f, 0.55f, 0.18f);
+        // BTD-style bright, saturated cartoon greens
+        Color mainGreen = new Color(0.30f, 0.72f, 0.18f);
+        Color lightGreen = new Color(0.40f, 0.82f, 0.25f);
+        Color darkGreen = new Color(0.22f, 0.58f, 0.12f);
+        Color accentGreen = new Color(0.35f, 0.78f, 0.22f);
 
         for (int y = 0; y < size; y++)
         {
@@ -93,39 +92,34 @@ public class GroundGenerator : MonoBehaviour
                 float fx = x / (float)size;
                 float fy = y / (float)size;
 
-                // Large patches
-                float n1 = Mathf.PerlinNoise(fx * 6f + 10f, fy * 6f + 10f);
-                // Medium detail
-                float n2 = Mathf.PerlinNoise(fx * 15f + 30f, fy * 15f + 30f);
-                // Fine grass blades
-                float n3 = Mathf.PerlinNoise(fx * 40f, fy * 40f);
+                // Large, soft patches — low frequency for clean cartoon look
+                float broad = Mathf.PerlinNoise(fx * 2f + 5f, fy * 2f + 5f);
+                Color c = Color.Lerp(darkGreen, lightGreen, broad);
 
-                Color c = Color.Lerp(grassDark, grassLight, n1);
-                c = Color.Lerp(c, grassGreen, n2 * 0.4f);
+                // Medium blobs for subtle variety
+                float mid = Mathf.PerlinNoise(fx * 4f + 20f, fy * 4f + 20f);
+                c = Color.Lerp(c, accentGreen, mid * 0.25f);
 
-                // Grass blade highlights
-                if (n3 > 0.6f)
-                    c = Color.Lerp(c, grassLight, (n3 - 0.6f) * 1.5f);
+                // Soft radial lighter center (like BTD maps with lighter middle)
+                float cx = fx - 0.5f;
+                float cy = fy - 0.5f;
+                float dist = Mathf.Sqrt(cx * cx + cy * cy);
+                float vignette = Mathf.Clamp01(1f - dist * 0.6f);
+                c = Color.Lerp(c, lightGreen, vignette * 0.15f);
 
-                // Dark clover patches
-                float patch = Mathf.PerlinNoise(fx * 10f + 70f, fy * 10f + 70f);
-                if (patch > 0.65f)
-                    c = Color.Lerp(c, clover, (patch - 0.65f) * 2f);
-
-                // Slight yellow flowers scattered
-                float flower = Mathf.PerlinNoise(fx * 50f + 200f, fy * 50f + 200f);
-                if (flower > 0.82f)
-                    c = Color.Lerp(c, new Color(0.85f, 0.85f, 0.25f), 0.5f);
+                // Very subtle fine detail — just enough to avoid pure flat
+                float fine = Mathf.PerlinNoise(fx * 12f + 50f, fy * 12f + 50f);
+                c = Color.Lerp(c, mainGreen, (fine - 0.5f) * 0.1f);
 
                 tex.SetPixel(x, y, c);
             }
         }
         tex.Apply();
-        tex.wrapMode = TextureWrapMode.Repeat;
+        tex.wrapMode = TextureWrapMode.Clamp;
 
         var mat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
         mat.SetTexture("_BaseMap", tex);
-        mat.SetFloat("_Smoothness", 0.05f);
+        mat.SetFloat("_Smoothness", 0.0f);
 
         GetComponent<MeshRenderer>().material = mat;
     }

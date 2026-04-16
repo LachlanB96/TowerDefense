@@ -10,6 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 6073309067716683806}
   - component: {fileID: 6555763747803485699}
+  - component: {fileID: 5929506243025971574}
   m_Layer: 0
   m_Name: Unit
   m_TagString: Untagged
@@ -47,8 +48,23 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   Waypoints: {fileID: 1969661367129435262, guid: 4b01c9b2865f2a94a9e569d4313c3c62, type: 3}
   speed: 0.925
+  rotationSpeed: 8
   health: 1
   insides: 1
+--- !u!114 &5929506243025971574
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4622141477549231493}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b2d5e72abc9b15f48a3ab493b8d696f2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ToonOutline
+  _outlineWidth: 0.04
+  _outlineColor: {r: 0, g: 0, b: 0, a: 1}
 --- !u!1001 &7842316747075396650
 PrefabInstance:
   m_ObjectHideFlags: 0

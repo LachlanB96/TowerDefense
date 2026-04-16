@@ -2530,6 +2530,8 @@ GameObject:
   m_Component:
   - component: {fileID: 1225128777174800350}
   - component: {fileID: 7827792447176267244}
+  - component: {fileID: 3765883486215963510}
+  - component: {fileID: 1305933697454018356}
   m_Layer: 0
   m_Name: tack100
   m_TagString: Untagged
@@ -2621,6 +2623,33 @@ SphereCollider:
   serializedVersion: 3
   m_Radius: 0.5
   m_Center: {x: 0, y: 0, z: 0}
+--- !u!114 &3765883486215963510
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5216120156361198315}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b2d5e72abc9b15f48a3ab493b8d696f2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ToonOutline
+  _outlineWidth: 0.04
+  _outlineColor: {r: 0, g: 0, b: 0, a: 1}
+--- !u!114 &1305933697454018356
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5216120156361198315}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 533f25ffcea359c40bc37feba66f70f2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TackSpin
+  spinSpeed: 30
 --- !u!1 &5240377833955689230
 GameObject:
   m_ObjectHideFlags: 0
