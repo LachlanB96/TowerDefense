@@ -51,13 +51,7 @@ public class BurnEffect : MonoBehaviour
 
         var innerMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
         innerMat.SetColor("_BaseColor", new Color(1f, 0.6f, 0.1f, 0.7f));
-        innerMat.SetFloat("_Surface", 1);
-        innerMat.SetOverrideTag("RenderType", "Transparent");
-        innerMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        innerMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-        innerMat.SetInt("_ZWrite", 0);
-        innerMat.renderQueue = 3000;
-        innerMat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        MaterialUtils.MakeTransparent(innerMat);
         inner.GetComponent<Renderer>().material = innerMat;
 
         // Outer flame glow

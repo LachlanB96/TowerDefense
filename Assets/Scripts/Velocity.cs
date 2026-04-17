@@ -15,14 +15,10 @@ public class Velocity : MonoBehaviour
 
     private HashSet<GameObject> _hitTargets = new HashSet<GameObject>();
     private Vector3 _origin;
-    private Transform _unitsParent;
 
     void Start()
     {
         _origin = transform.position;
-        Spawn spawner = FindAnyObjectByType<Spawn>();
-        if (spawner != null)
-            _unitsParent = spawner.transform;
     }
 
     void Update()
@@ -59,14 +55,10 @@ public class Velocity : MonoBehaviour
         }
 
         // Check hits against all units
-        if (_unitsParent == null)
-        {
-            Spawn spawner = FindAnyObjectByType<Spawn>();
-            if (spawner != null) _unitsParent = spawner.transform;
-            if (_unitsParent == null) return;
-        }
+        Transform units = Spawn.UnitsParent;
+        if (units == null) return;
 
-        foreach (Transform unit in _unitsParent)
+        foreach (Transform unit in units)
         {
             if (_hitTargets.Contains(unit.gameObject)) continue;
             var m = unit.GetComponent<Movement>();
@@ -113,17 +105,13 @@ public class Velocity : MonoBehaviour
 
     GameObject FindNextTarget()
     {
-        if (_unitsParent == null)
-        {
-            Spawn spawner = FindAnyObjectByType<Spawn>();
-            if (spawner != null) _unitsParent = spawner.transform;
-            if (_unitsParent == null) return null;
-        }
+        Transform units = Spawn.UnitsParent;
+        if (units == null) return null;
 
         GameObject closest = null;
         float closestDist = float.MaxValue;
 
-        foreach (Transform unit in _unitsParent)
+        foreach (Transform unit in units)
         {
             if (_hitTargets.Contains(unit.gameObject)) continue;
             var m = unit.GetComponent<Movement>();

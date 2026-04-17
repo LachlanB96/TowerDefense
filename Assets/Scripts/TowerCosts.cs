@@ -2,6 +2,20 @@ using System.Collections.Generic;
 
 public static class TowerCosts
 {
+    public struct TowerInfo
+    {
+        public int cost;
+        public string iconPath;
+        public float range;
+
+        public TowerInfo(int cost, string iconPath, float range)
+        {
+            this.cost = cost;
+            this.iconPath = iconPath;
+            this.range = range;
+        }
+    }
+
     public struct UpgradeInfo
     {
         public int cost;
@@ -14,11 +28,11 @@ public static class TowerCosts
         }
     }
 
-    // upgrades[towerType][path (0-2)][level (0-2)]
-    private static readonly Dictionary<string, int> _placementCosts = new()
+    // Tower base info: cost, icon, default range
+    private static readonly Dictionary<string, TowerInfo> _towerInfo = new()
     {
-        { "tack000", 300 },
-        { "sniper000", 500 },
+        { "tack000", new TowerInfo(300, "UI/tack_icon", 3f) },
+        { "sniper000", new TowerInfo(500, "UI/sniper_icon", 7f) },
     };
 
     // [towerType][path index][upgrade level] = UpgradeInfo
@@ -39,7 +53,17 @@ public static class TowerCosts
 
     public static int GetPlacementCost(string towerType)
     {
-        return _placementCosts.TryGetValue(towerType, out int cost) ? cost : 0;
+        return _towerInfo.TryGetValue(towerType, out var info) ? info.cost : 0;
+    }
+
+    public static string GetIconPath(string towerType)
+    {
+        return _towerInfo.TryGetValue(towerType, out var info) ? info.iconPath : null;
+    }
+
+    public static float GetRange(string towerType)
+    {
+        return _towerInfo.TryGetValue(towerType, out var info) ? info.range : 0f;
     }
 
     public static bool TryGetUpgrade(string towerType, int path, int currentLevel, out UpgradeInfo info)

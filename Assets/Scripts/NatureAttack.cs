@@ -2,7 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class NatureAttack : MonoBehaviour
+public class NatureAttack : MonoBehaviour, ITowerAttack
 {
     public float range = 3f;
     public float cooldown = 1f;
@@ -11,17 +11,14 @@ public class NatureAttack : MonoBehaviour
     public float orbitSpeed = 25f;
     public float launchSpeed = 8f;
 
+    public float Range => range;
+
     private float _lastAttackTime = -999f;
     private Transform _waypoints;
     private float _pathWidth;
-    private Transform _unitsParent;
     private Transform _orbitRing;
     private Material _purpleMat;
-
-    // Squash animation
-    private List<Transform> _bodyParts = new List<Transform>();
-    private List<Vector3> _bodyOriginalScales = new List<Vector3>();
-    private Coroutine _squashRoutine;
+    private SquashStretch _squash;
 
     // Tree slots
     private List<TreeSlot> _slots = new List<TreeSlot>();
@@ -42,23 +39,13 @@ public class NatureAttack : MonoBehaviour
             _pathWidth = pathRenderer.PathWidth;
         }
 
-        var spawner = FindAnyObjectByType<Spawn>();
-        if (spawner != null)
-            _unitsParent = spawner.transform;
-
         // Purple telekinesis material
         _purpleMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
         _purpleMat.SetColor("_BaseColor", new Color(0.6f, 0.1f, 0.9f, 0.5f));
-        _purpleMat.SetFloat("_Surface", 1);
-        _purpleMat.SetOverrideTag("RenderType", "Transparent");
-        _purpleMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        _purpleMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-        _purpleMat.SetInt("_ZWrite", 0);
-        _purpleMat.renderQueue = 3000;
-        _purpleMat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        MaterialUtils.MakeTransparent(_purpleMat);
 
         GroupTreeParts();
-        SetupBodyParts();
+        SetupSquash();
     }
 
     void GroupTreeParts()
@@ -67,12 +54,8 @@ public class NatureAttack : MonoBehaviour
         _orbitRing = new GameObject("_TreeOrbit").transform;
         _orbitRing.SetParent(transform, false);
 
-        // Find all TreeSymbol parts and group by tree index
-        // Naming: TreeSymbol_Trunk, TreeSymbol_Trunk_0 .. _7
-        // TreeSymbol_Canopy_Bot, TreeSymbol_Canopy_Bot_0 .. _7 etc.
         var treeGroups = new Dictionary<int, List<Transform>>();
 
-        // Search recursively for TreeSymbol parts
         var allChildren = GetComponentsInChildren<Transform>(true);
         foreach (var child in allChildren)
         {
@@ -80,8 +63,8 @@ public class NatureAttack : MonoBehaviour
             if (!child.name.StartsWith("TreeSymbol")) continue;
 
             int index = GetTreeIndex(child.name);
-            if (index <= 0) continue; // skip decorative tree on top (index 0)
-            int slot = index - 1; // remap: _0=slot0, _1=slot1, ..., _7=slot7
+            if (index <= 0) continue;
+            int slot = index - 1;
             if (slot >= MAX_TREES) continue;
 
             if (!treeGroups.ContainsKey(slot))
@@ -89,7 +72,6 @@ public class NatureAttack : MonoBehaviour
             treeGroups[slot].Add(child);
         }
 
-        // Create slots and reparent to orbit ring
         for (int i = 0; i < MAX_TREES; i++)
         {
             var slot = new TreeSlot();
@@ -105,25 +87,21 @@ public class NatureAttack : MonoBehaviour
 
     int GetTreeIndex(string name)
     {
-        // "TreeSymbol_Trunk" → index 0 (the original, no suffix)
-        // "TreeSymbol_Trunk_3" → index 4 (offset by 1 since original is 0)
-        // Find the last segment after splitting by '_'
-        // Parts like: TreeSymbol_Canopy_Bot_5
-
-        // Check if name ends with _N where N is a digit
         int lastUnderscore = name.LastIndexOf('_');
         if (lastUnderscore >= 0)
         {
             string suffix = name.Substring(lastUnderscore + 1);
             if (int.TryParse(suffix, out int num))
-                return num + 1; // _0 = tree 1, _1 = tree 2, etc.
+                return num + 1;
         }
-        // No numeric suffix = the original = tree 0
         return 0;
     }
 
-    void SetupBodyParts()
+    void SetupSquash()
     {
+        _squash = GetComponent<SquashStretch>();
+        if (_squash == null) _squash = gameObject.AddComponent<SquashStretch>();
+
         foreach (Transform child in transform)
         {
             if (child == _orbitRing) continue;
@@ -138,15 +116,13 @@ public class NatureAttack : MonoBehaviour
                     string sn = sub.name;
                     if (sn.StartsWith("TreeSymbol") || sn.StartsWith("_")) continue;
                     if (sn.StartsWith("TackHead") || sn.StartsWith("TackShaft") || sn.StartsWith("TackTip")) continue;
-                    _bodyParts.Add(sub);
-                    _bodyOriginalScales.Add(sub.localScale);
+                    _squash.AddPart(sub);
                 }
                 continue;
             }
 
             if (n.StartsWith("TackHead") || n.StartsWith("TackShaft") || n.StartsWith("TackTip")) continue;
-            _bodyParts.Add(child);
-            _bodyOriginalScales.Add(child.localScale);
+            _squash.AddPart(child);
         }
     }
 
@@ -169,7 +145,7 @@ public class NatureAttack : MonoBehaviour
                 break;
             }
         }
-        if (slotIndex < 0) return; // all 8 deployed
+        if (slotIndex < 0) return;
 
         // Place tree on a random path spot within range
         Vector3? spot = FindRandomPathSpotInRange();
@@ -228,10 +204,7 @@ public class NatureAttack : MonoBehaviour
         var slot = _slots[slotIndex];
         slot.deployed = true;
 
-        // Squash animation
-        if (_squashRoutine != null)
-            StopCoroutine(_squashRoutine);
-        _squashRoutine = StartCoroutine(ShootSquash());
+        _squash.Play();
 
         // Get orbit world position of tree (average of parts)
         Vector3 orbitPos = Vector3.zero;
@@ -252,7 +225,6 @@ public class NatureAttack : MonoBehaviour
 
     GameObject CloneTreeWithOutline(TreeSlot slot, Vector3 position)
     {
-        // Compute average mesh bounds center to offset children so visuals are centered on root
         Vector3 avgMeshCenter = Vector3.zero;
         int meshCount = 0;
         foreach (var part in slot.orbitParts)
@@ -307,9 +279,7 @@ public class NatureAttack : MonoBehaviour
         {
             elapsed += Time.deltaTime;
             float linear = elapsed / duration;
-            // Ease-in-out: slow start, fast middle, slow end
             float t = linear * linear * (3f - 2f * linear);
-            // Arc upward during flight
             Vector3 pos = Vector3.Lerp(from, to, t);
             pos.y += Mathf.Sin(t * Mathf.PI) * 1.0f;
             tree.transform.position = pos;
@@ -343,51 +313,10 @@ public class NatureAttack : MonoBehaviour
         var slot = _slots[slotIndex];
         slot.deployed = false;
 
-        // Show orbit parts again
         foreach (var p in slot.orbitParts)
         {
             if (p != null)
                 p.gameObject.SetActive(true);
-        }
-    }
-
-    // ── Squash/Stretch Animation ────────────────────────────────────────────
-
-    IEnumerator ShootSquash()
-    {
-        yield return ScaleBodyTo(new Vector3(1.15f, 0.8f, 1.15f), 0.08f);
-        yield return ScaleBodyTo(new Vector3(0.95f, 1.05f, 0.95f), 0.1f);
-        yield return ScaleBodyTo(Vector3.one, 0.08f);
-        _squashRoutine = null;
-    }
-
-    IEnumerator ScaleBodyTo(Vector3 scaleMultiplier, float duration)
-    {
-        Vector3[] startScales = new Vector3[_bodyParts.Count];
-        for (int i = 0; i < _bodyParts.Count; i++)
-            startScales[i] = _bodyParts[i] != null ? _bodyParts[i].localScale : _bodyOriginalScales[i];
-
-        Vector3[] targetScales = new Vector3[_bodyParts.Count];
-        for (int i = 0; i < _bodyParts.Count; i++)
-            targetScales[i] = Vector3.Scale(_bodyOriginalScales[i], scaleMultiplier);
-
-        float elapsed = 0f;
-        while (elapsed < duration)
-        {
-            elapsed += Time.deltaTime;
-            float t = Mathf.SmoothStep(0f, 1f, elapsed / duration);
-            for (int i = 0; i < _bodyParts.Count; i++)
-            {
-                if (_bodyParts[i] == null) continue;
-                _bodyParts[i].localScale = Vector3.LerpUnclamped(startScales[i], targetScales[i], t);
-            }
-            yield return null;
-        }
-
-        for (int i = 0; i < _bodyParts.Count; i++)
-        {
-            if (_bodyParts[i] != null)
-                _bodyParts[i].localScale = targetScales[i];
         }
     }
 }

@@ -8,14 +8,10 @@ public class PathTree : MonoBehaviour
     public System.Action onDestroyed;
 
     private float _spawnTime;
-    private Transform _unitsParent;
 
     void Start()
     {
         _spawnTime = Time.time;
-        Spawn spawner = FindAnyObjectByType<Spawn>();
-        if (spawner != null)
-            _unitsParent = spawner.transform;
     }
 
     void Update()
@@ -26,14 +22,10 @@ public class PathTree : MonoBehaviour
             return;
         }
 
-        if (_unitsParent == null)
-        {
-            Spawn spawner = FindAnyObjectByType<Spawn>();
-            if (spawner != null) _unitsParent = spawner.transform;
-            if (_unitsParent == null) return;
-        }
+        Transform units = Spawn.UnitsParent;
+        if (units == null) return;
 
-        foreach (Transform unit in _unitsParent)
+        foreach (Transform unit in units)
         {
             float dx = transform.position.x - unit.position.x;
             float dz = transform.position.z - unit.position.z;

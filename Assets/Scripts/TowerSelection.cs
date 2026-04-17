@@ -1,7 +1,5 @@
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
 
@@ -28,11 +26,54 @@ public class TowerSelection : MonoBehaviour
     private Image _upgrade2Icon;
     private Image _upgrade3Icon;
 
+    private Dictionary<string, GameObject> _upgradePrefabs;
+    private Dictionary<string, System.Action<GameObject>> _upgradeSetup;
+
     void Start()
     {
         _outlineMaterial = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
         _outlineMaterial.SetColor("_BaseColor", Color.white);
-        _outlineMaterial.SetFloat("_Cull", 1f); // front-face cull for inverted hull outline
+        _outlineMaterial.SetFloat("_Cull", 1f);
+
+        _upgradePrefabs = new Dictionary<string, GameObject>
+        {
+            { "tack100", tack100Prefab },
+            { "tack010", tack010Prefab },
+            { "tack001", tack001Prefab },
+        };
+
+        _upgradeSetup = new Dictionary<string, System.Action<GameObject>>
+        {
+            { "tack100", tower =>
+                {
+                    var attack = tower.AddComponent<TackAttack>();
+                    attack.damage = 0;
+                    attack.useFireball = true;
+                }
+            },
+            { "tack010", tower =>
+                {
+                    var attack = tower.AddComponent<TackAttack>();
+                    attack.damage = 1;
+                    attack.diskColor = new Color(0.7f, 0.88f, 1.0f, 0.6f);
+                    attack.diskMetallic = 0f;
+                    attack.diskSmoothness = 0.1f;
+                    attack.projectileSpeed = 0.12f;
+                    attack.useAirPuff = true;
+                    attack.pierce = 2;
+                }
+            },
+            { "tack001", tower =>
+                {
+                    var attack = tower.AddComponent<NatureAttack>();
+                    attack.range = 3f;
+                    attack.cooldown = 1f;
+                    attack.damage = 1;
+                    attack.treeLifetime = 10f;
+                }
+            },
+        };
+
         BuildUI();
     }
 
@@ -76,11 +117,11 @@ public class TowerSelection : MonoBehaviour
         if (foundTower == null)
         {
             Camera cam = Camera.main;
-            float closestScreenDist = 50f; // max pixel distance to count as a click
+            float closestScreenDist = 50f;
             foreach (var td in FindObjectsByType<TowerData>(FindObjectsSortMode.None))
             {
                 Vector3 screenPt = cam.WorldToScreenPoint(td.transform.position);
-                if (screenPt.z < 0) continue; // behind camera
+                if (screenPt.z < 0) continue;
                 float dist = Vector2.Distance(mousePos, new Vector2(screenPt.x, screenPt.y));
                 if (dist < closestScreenDist)
                 {
@@ -135,11 +176,9 @@ public class TowerSelection : MonoBehaviour
 
     void ShowRangeIndicator()
     {
-        float range = 0f;
-        var tackAttack = _selectedTower.GetComponent<TackAttack>();
-        var sniperAttack = _selectedTower.GetComponent<SniperAttack>();
-        if (tackAttack != null) range = tackAttack.range;
-        else if (sniperAttack != null) range = sniperAttack.range;
+        var attack = _selectedTower.GetComponent<ITowerAttack>();
+        if (attack == null) return;
+        float range = attack.Range;
         if (range <= 0f) return;
         _rangeIndicator = RangeIndicator.Create(range, _selectedTower.transform);
     }
@@ -365,24 +404,14 @@ public class TowerSelection : MonoBehaviour
         {
             bool available = TowerCosts.TryGetUpgrade(data.towerType, i, levels[i], out var info);
             bool canAfford = available && EconomyManager.Instance != null && EconomyManager.Instance.CanAfford(info.cost);
-            buttons[i].interactable = available && canAfford && GetUpgradePrefab(info.resultType) != null;
+            bool hasPrefab = available && _upgradePrefabs.TryGetValue(info.resultType, out var prefab) && prefab != null;
+            buttons[i].interactable = available && canAfford && hasPrefab;
 
             var txt = buttons[i].GetComponentInChildren<Text>();
             if (available)
                 txt.text = $"Path {i + 1} (${info.cost})";
             else
                 txt.text = $"Path {i + 1}";
-        }
-    }
-
-    GameObject GetUpgradePrefab(string resultType)
-    {
-        switch (resultType)
-        {
-            case "tack100": return tack100Prefab;
-            case "tack010": return tack010Prefab;
-            case "tack001": return tack001Prefab;
-            default: return null;
         }
     }
 
@@ -401,76 +430,10 @@ public class TowerSelection : MonoBehaviour
         if (refund > 0 && EconomyManager.Instance != null)
         {
             EconomyManager.Instance.money += refund;
-            SpawnSellText(worldPos, refund);
+            FloatingText.Spawn(worldPos, $"+${refund}", new Color(1f, 0.85f, 0.1f), 1.2f, 28, true, 80f);
         }
 
         Destroy(tower);
-    }
-
-    void SpawnSellText(Vector3 worldPos, int amount)
-    {
-        Canvas canvas = null;
-        foreach (var c in FindObjectsByType<Canvas>(FindObjectsSortMode.None))
-        {
-            if (c.renderMode == RenderMode.ScreenSpaceOverlay)
-            {
-                canvas = c;
-                break;
-            }
-        }
-        if (canvas == null) return;
-
-        var go = new GameObject("SellText");
-        go.transform.SetParent(canvas.transform, false);
-
-        var txt = go.AddComponent<Text>();
-        txt.text = $"+${amount}";
-        txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        txt.fontSize = 28;
-        txt.color = new Color(1f, 0.85f, 0.1f); // gold
-        txt.alignment = TextAnchor.MiddleCenter;
-        txt.fontStyle = FontStyle.Bold;
-        txt.raycastTarget = false;
-
-        var outline = go.AddComponent<Outline>();
-        outline.effectColor = Color.black;
-        outline.effectDistance = new Vector2(2, -2);
-
-        var rt = go.GetComponent<RectTransform>();
-        rt.sizeDelta = new Vector2(200, 40);
-
-        // Position at tower's screen position
-        Vector3 screenPos = Camera.main.WorldToScreenPoint(worldPos);
-        rt.position = screenPos;
-
-        StartCoroutine(FloatAndFade(rt, txt, outline));
-    }
-
-    IEnumerator FloatAndFade(RectTransform rt, Text txt, Outline outline)
-    {
-        float duration = 1.2f;
-        float elapsed = 0f;
-        Vector3 startPos = rt.position;
-        Color startColor = txt.color;
-        Color startOutline = outline.effectColor;
-
-        while (elapsed < duration)
-        {
-            elapsed += Time.deltaTime;
-            float t = elapsed / duration;
-
-            // Rise up
-            rt.position = startPos + Vector3.up * (80f * t);
-
-            // Fade out in second half
-            float alpha = t < 0.5f ? 1f : 1f - (t - 0.5f) / 0.5f;
-            txt.color = new Color(startColor.r, startColor.g, startColor.b, alpha);
-            outline.effectColor = new Color(0, 0, 0, alpha);
-
-            yield return null;
-        }
-
-        Destroy(rt.gameObject);
     }
 
     void OnUpgrade(int path)
@@ -479,133 +442,37 @@ public class TowerSelection : MonoBehaviour
         var data = _selectedTower.GetComponent<TowerData>();
         if (data == null) return;
 
+        int pathIndex = path - 1;
+        int currentLevel = pathIndex == 0 ? data.upgradePath1Level
+                         : pathIndex == 1 ? data.upgradePath2Level
+                         : data.upgradePath3Level;
+
+        if (!TowerCosts.TryGetUpgrade(data.towerType, pathIndex, currentLevel, out var upgradeInfo)) return;
+        if (!_upgradePrefabs.TryGetValue(upgradeInfo.resultType, out var prefab) || prefab == null) return;
+        if (EconomyManager.Instance == null || !EconomyManager.Instance.TrySpend(upgradeInfo.cost)) return;
+
         int previousInvestment = data.totalInvested;
+        Vector3 pos = _selectedTower.transform.position;
+        Quaternion rot = _selectedTower.transform.rotation;
 
-        if (path == 1 && data.towerType == "tack000" && data.upgradePath1Level == 0
-            && tack100Prefab != null)
-        {
-            if (!TowerCosts.TryGetUpgrade(data.towerType, 0, data.upgradePath1Level, out var upgradeInfo)) return;
-            if (EconomyManager.Instance == null || !EconomyManager.Instance.TrySpend(upgradeInfo.cost)) return;
+        Deselect();
+        Destroy(data.gameObject);
 
-            Vector3 pos = _selectedTower.transform.position;
-            Quaternion rot = _selectedTower.transform.rotation;
+        GameObject newTower = Instantiate(prefab, pos, rot);
+        newTower.name = upgradeInfo.resultType;
 
-            Deselect();
-            Destroy(data.gameObject);
+        TowerUtils.EnsureCollider(newTower);
 
-            GameObject newTower = Instantiate(tack100Prefab, pos, rot);
-            newTower.name = "tack100";
+        var nd = newTower.AddComponent<TowerData>();
+        nd.towerType = upgradeInfo.resultType;
+        if (pathIndex == 0) nd.upgradePath1Level = currentLevel + 1;
+        else if (pathIndex == 1) nd.upgradePath2Level = currentLevel + 1;
+        else nd.upgradePath3Level = currentLevel + 1;
+        nd.totalInvested = previousInvestment + upgradeInfo.cost;
 
-            // Collider for click detection
-            if (newTower.GetComponentInChildren<Collider>() == null)
-            {
-                var col = newTower.AddComponent<BoxCollider>();
-                Bounds bounds = new Bounds(newTower.transform.position, Vector3.zero);
-                foreach (var r in newTower.GetComponentsInChildren<Renderer>())
-                    bounds.Encapsulate(r.bounds);
-                col.center = newTower.transform.InverseTransformPoint(bounds.center);
-                col.size = bounds.size;
-            }
+        if (_upgradeSetup.TryGetValue(upgradeInfo.resultType, out var setup))
+            setup(newTower);
 
-            // Tower data
-            var nd = newTower.AddComponent<TowerData>();
-            nd.towerType = "tack100";
-            nd.upgradePath1Level = 1;
-            nd.totalInvested = previousInvestment + upgradeInfo.cost;
-
-            // Attack with fireballs that apply burn
-            var attack = newTower.AddComponent<TackAttack>();
-            attack.damage = 0;
-            attack.useFireball = true;
-
-            Select(newTower);
-        }
-
-        if (path == 2 && data.towerType == "tack000" && data.upgradePath2Level == 0
-            && tack010Prefab != null)
-        {
-            if (!TowerCosts.TryGetUpgrade(data.towerType, 1, data.upgradePath2Level, out var upgradeInfo)) return;
-            if (EconomyManager.Instance == null || !EconomyManager.Instance.TrySpend(upgradeInfo.cost)) return;
-
-            Vector3 pos = _selectedTower.transform.position;
-            Quaternion rot = _selectedTower.transform.rotation;
-
-            Deselect();
-            Destroy(data.gameObject);
-
-            GameObject newTower = Instantiate(tack010Prefab, pos, rot);
-            newTower.name = "tack010";
-
-            // Collider for click detection
-            if (newTower.GetComponentInChildren<Collider>() == null)
-            {
-                var col = newTower.AddComponent<BoxCollider>();
-                Bounds bounds = new Bounds(newTower.transform.position, Vector3.zero);
-                foreach (var r in newTower.GetComponentsInChildren<Renderer>())
-                    bounds.Encapsulate(r.bounds);
-                col.center = newTower.transform.InverseTransformPoint(bounds.center);
-                col.size = bounds.size;
-            }
-
-            // Tower data
-            var nd = newTower.AddComponent<TowerData>();
-            nd.towerType = "tack010";
-            nd.upgradePath2Level = 1;
-            nd.totalInvested = previousInvestment + upgradeInfo.cost;
-
-            // Attack with air puffs
-            var attack = newTower.AddComponent<TackAttack>();
-            attack.damage = 1;
-            attack.diskColor = new Color(0.7f, 0.88f, 1.0f, 0.6f);
-            attack.diskMetallic = 0f;
-            attack.diskSmoothness = 0.1f;
-            attack.projectileSpeed = 0.12f;
-            attack.useAirPuff = true;
-            attack.pierce = 2;
-
-            Select(newTower);
-        }
-
-        if (path == 3 && data.towerType == "tack000" && data.upgradePath3Level == 0
-            && tack001Prefab != null)
-        {
-            if (!TowerCosts.TryGetUpgrade(data.towerType, 2, data.upgradePath3Level, out var upgradeInfo)) return;
-            if (EconomyManager.Instance == null || !EconomyManager.Instance.TrySpend(upgradeInfo.cost)) return;
-
-            Vector3 pos = _selectedTower.transform.position;
-            Quaternion rot = _selectedTower.transform.rotation;
-
-            Deselect();
-            Destroy(data.gameObject);
-
-            GameObject newTower = Instantiate(tack001Prefab, pos, rot);
-            newTower.name = "tack001";
-
-            // Collider for click detection
-            if (newTower.GetComponentInChildren<Collider>() == null)
-            {
-                var col = newTower.AddComponent<BoxCollider>();
-                Bounds bounds = new Bounds(newTower.transform.position, Vector3.zero);
-                foreach (var r in newTower.GetComponentsInChildren<Renderer>())
-                    bounds.Encapsulate(r.bounds);
-                col.center = newTower.transform.InverseTransformPoint(bounds.center);
-                col.size = bounds.size;
-            }
-
-            // Tower data
-            var nd = newTower.AddComponent<TowerData>();
-            nd.towerType = "tack001";
-            nd.upgradePath3Level = 1;
-            nd.totalInvested = previousInvestment + upgradeInfo.cost;
-
-            // Nature attack - launches orbit trees onto the path
-            var attack = newTower.AddComponent<NatureAttack>();
-            attack.range = 3f;
-            attack.cooldown = 1f;
-            attack.damage = 1;
-            attack.treeLifetime = 10f;
-
-            Select(newTower);
-        }
+        Select(newTower);
     }
 }

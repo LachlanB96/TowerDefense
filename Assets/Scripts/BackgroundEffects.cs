@@ -87,13 +87,8 @@ public class BackgroundEffects : MonoBehaviour
 
         // Unlit material for glowing particles
         _particleMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
-        _particleMat.SetFloat("_Surface", 1);
-        _particleMat.SetOverrideTag("RenderType", "Transparent");
-        _particleMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        _particleMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-        _particleMat.SetInt("_ZWrite", 0);
+        MaterialUtils.MakeTransparent(_particleMat);
         _particleMat.renderQueue = 2999;
-        _particleMat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
     }
 
     void Update()

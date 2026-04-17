@@ -14,13 +14,7 @@ public static class RangeIndicator
 
         var mat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
         mat.SetColor("_BaseColor", new Color(0f, 0f, 0f, 0.25f));
-        mat.SetFloat("_Surface", 1);
-        mat.SetOverrideTag("RenderType", "Transparent");
-        mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-        mat.SetInt("_ZWrite", 0);
-        mat.renderQueue = 3000;
-        mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        MaterialUtils.MakeTransparent(mat);
         indicator.GetComponent<Renderer>().material = mat;
 
         // Black border ring using LineRenderer

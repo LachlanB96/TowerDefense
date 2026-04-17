@@ -4,9 +4,22 @@ using UnityEngine.UI;
 
 public class Spawn : MonoBehaviour
 {
+    public static Transform UnitsParent { get; private set; }
+
     public GameObject unit;
     private List<GameObject> spawnedUnits = new List<GameObject>();
     public GameObject Waypoints;
+
+    void Awake()
+    {
+        UnitsParent = transform;
+    }
+
+    void OnDestroy()
+    {
+        if (UnitsParent == transform)
+            UnitsParent = null;
+    }
 
     void Start()
     {

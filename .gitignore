@@ -100,3 +100,6 @@ InitTestScene*.unity*
 
 # Screenshots
 /**/screenshot*.png
+/**/screenshot*.png.meta
+Obsidian/TD/.obsidian/
+.claude/

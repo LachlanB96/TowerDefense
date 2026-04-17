@@ -1,4 +1,4 @@
-using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
@@ -26,6 +26,10 @@ public class TowerPlacer : MonoBehaviour
     private Renderer[] _previewRenderers;
     private string _placingType = "tack000";
 
+    private Dictionary<string, GameObject> _prefabs;
+    private Dictionary<string, System.Action<GameObject>> _placementSetup;
+    private PathRenderer _pathRenderer;
+
     // ── Dev Tools ──────────────────────────────────────
     private static readonly bool DEV_AUTO_PLACE = true;
     private static readonly Vector3 DEV_TACK_POS = new Vector3(13.96f, -0.05f, 8.70f);
@@ -34,6 +38,34 @@ public class TowerPlacer : MonoBehaviour
 
     void Start()
     {
+        _pathRenderer = FindAnyObjectByType<PathRenderer>();
+
+        _prefabs = new Dictionary<string, GameObject>
+        {
+            { "tack000", _towerPrefab },
+            { "sniper000", _sniperPrefab },
+        };
+
+        _placementSetup = new Dictionary<string, System.Action<GameObject>>
+        {
+            { "tack000", tower =>
+                {
+                    var attack = tower.GetComponent<TackAttack>() ?? tower.AddComponent<TackAttack>();
+                    attack.diskColor = _projectileColor;
+                    attack.diskMetallic = _projectileMetallic;
+                    attack.diskSmoothness = _projectileSmoothness;
+                }
+            },
+            { "sniper000", tower =>
+                {
+                    if (tower.GetComponent<SniperIdle>() == null)
+                        tower.AddComponent<SniperIdle>();
+                    if (tower.GetComponent<SniperAttack>() == null)
+                        tower.AddComponent<SniperAttack>();
+                }
+            },
+        };
+
         // Hide the old scene button
         var oldBtn = GameObject.Find("PlaceTowerButton");
         if (oldBtn != null)
@@ -43,69 +75,30 @@ public class TowerPlacer : MonoBehaviour
 
         if (DEV_AUTO_PLACE)
         {
-            DevPlaceTack(DEV_TACK_POS);
-            DevPlaceSniper(DEV_SNIPER_POS);
+            DevPlaceTower("tack000", DEV_TACK_POS);
+            DevPlaceTower("sniper000", DEV_SNIPER_POS);
         }
     }
 
-    void DevPlaceTack(Vector3 pos)
+    void DevPlaceTower(string type, Vector3 pos)
     {
-        var tower = Instantiate(_towerPrefab);
-        tower.name = "tack000";
+        if (!_prefabs.TryGetValue(type, out var prefab) || prefab == null) return;
+
+        var tower = Instantiate(prefab);
+        tower.name = type;
         tower.transform.position = pos;
 
         foreach (var col in tower.GetComponentsInChildren<Collider>(true))
             col.enabled = true;
 
-        if (tower.GetComponentInChildren<Collider>() == null)
-        {
-            Bounds bounds = new Bounds(tower.transform.position, Vector3.zero);
-            foreach (var r in tower.GetComponentsInChildren<Renderer>())
-                bounds.Encapsulate(r.bounds);
-            BoxCollider box = tower.AddComponent<BoxCollider>();
-            box.center = tower.transform.InverseTransformPoint(bounds.center);
-            box.size = bounds.size;
-        }
+        TowerUtils.EnsureCollider(tower);
 
         TowerData data = tower.GetComponent<TowerData>() ?? tower.AddComponent<TowerData>();
-        data.towerType = "tack000";
+        data.towerType = type;
         data.totalInvested = 0;
 
-        TackAttack attack = tower.GetComponent<TackAttack>() ?? tower.AddComponent<TackAttack>();
-        attack.diskColor = _projectileColor;
-        attack.diskMetallic = _projectileMetallic;
-        attack.diskSmoothness = _projectileSmoothness;
-    }
-
-    void DevPlaceSniper(Vector3 pos)
-    {
-        if (_sniperPrefab == null) return;
-
-        var tower = Instantiate(_sniperPrefab);
-        tower.name = "sniper000";
-        tower.transform.position = pos;
-
-        foreach (var col in tower.GetComponentsInChildren<Collider>(true))
-            col.enabled = true;
-
-        if (tower.GetComponentInChildren<Collider>() == null)
-        {
-            Bounds bounds = new Bounds(tower.transform.position, Vector3.zero);
-            foreach (var r in tower.GetComponentsInChildren<Renderer>())
-                bounds.Encapsulate(r.bounds);
-            BoxCollider box = tower.AddComponent<BoxCollider>();
-            box.center = tower.transform.InverseTransformPoint(bounds.center);
-            box.size = bounds.size;
-        }
-
-        TowerData data = tower.GetComponent<TowerData>() ?? tower.AddComponent<TowerData>();
-        data.towerType = "sniper000";
-        data.totalInvested = 0;
-
-        if (tower.GetComponent<SniperIdle>() == null)
-            tower.AddComponent<SniperIdle>();
-        if (tower.GetComponent<SniperAttack>() == null)
-            tower.AddComponent<SniperAttack>();
+        if (_placementSetup.TryGetValue(type, out var setup))
+            setup(tower);
     }
 
     void BuildShopPanel()
@@ -145,18 +138,16 @@ public class TowerPlacer : MonoBehaviour
         // Header
         MakeLabel("-- Towers --", panel.transform);
 
-        // Tack tower icon button (large)
+        // Tower buttons
         MakeTowerButton("tack000", panel.transform);
-
-        // Sniper tower icon button
         MakeTowerButton("sniper000", panel.transform);
     }
 
     void MakeTowerButton(string towerType, Transform parent)
     {
         int cost = TowerCosts.GetPlacementCost(towerType);
-        string iconName = towerType == "sniper000" ? "UI/sniper_icon" : "UI/tack_icon";
-        Sprite iconSprite = Resources.Load<Sprite>(iconName);
+        string iconPath = TowerCosts.GetIconPath(towerType);
+        Sprite iconSprite = iconPath != null ? Resources.Load<Sprite>(iconPath) : null;
 
         // Button container
         var go = new GameObject("TowerBtn_" + towerType);
@@ -241,24 +232,16 @@ public class TowerPlacer : MonoBehaviour
         SpawnPreview();
     }
 
-    GameObject GetPrefab(string towerType)
-    {
-        if (towerType == "sniper000" && _sniperPrefab != null) return _sniperPrefab;
-        return _towerPrefab;
-    }
-
-    float GetTowerRange(string towerType)
-    {
-        return towerType == "sniper000" ? 7f : 3f;
-    }
-
     void SpawnPreview()
     {
         _isPlacing = true;
         _skipFrames = 2;
         _canPlace = false;
 
-        _preview = Instantiate(GetPrefab(_placingType));
+        if (!_prefabs.TryGetValue(_placingType, out var prefab) || prefab == null)
+            prefab = _towerPrefab;
+
+        _preview = Instantiate(prefab);
         _preview.name = _placingType + "_preview";
 
         foreach (var col in _preview.GetComponentsInChildren<Collider>())
@@ -272,7 +255,7 @@ public class TowerPlacer : MonoBehaviour
 
         SetPreviewColor(new Color(1f, 1f, 1f, 0.4f));
 
-        _rangeIndicator = RangeIndicator.Create(GetTowerRange(_placingType), _preview.transform);
+        _rangeIndicator = RangeIndicator.Create(TowerCosts.GetRange(_placingType), _preview.transform);
     }
 
     void Update()
@@ -328,42 +311,10 @@ public class TowerPlacer : MonoBehaviour
             return true;
         }
 
-        if (IsOnPath(position)) return true;
+        if (_pathRenderer != null && _pathRenderer.IsPointOnPath(new Vector2(position.x, position.z), _overlapRadius))
+            return true;
 
         return false;
-    }
-
-    bool IsOnPath(Vector3 position)
-    {
-        var pathRenderer = FindAnyObjectByType<PathRenderer>();
-        if (pathRenderer == null) return false;
-
-        var waypoints = pathRenderer.Waypoints;
-        float pathWidth = pathRenderer.PathWidth;
-        if (waypoints == null || waypoints.childCount < 2) return false;
-
-        float halfWidth = pathWidth / 2f + _overlapRadius;
-        Vector2 pos2D = new Vector2(position.x, position.z);
-
-        for (int i = 0; i < waypoints.childCount - 1; i++)
-        {
-            Vector3 a = waypoints.GetChild(i).position;
-            Vector3 b = waypoints.GetChild(i + 1).position;
-            Vector2 a2 = new Vector2(a.x, a.z);
-            Vector2 b2 = new Vector2(b.x, b.z);
-
-            float dist = DistanceToSegment(pos2D, a2, b2);
-            if (dist < halfWidth) return true;
-        }
-        return false;
-    }
-
-    float DistanceToSegment(Vector2 p, Vector2 a, Vector2 b)
-    {
-        Vector2 ab = b - a;
-        float t = Mathf.Clamp01(Vector2.Dot(p - a, ab) / ab.sqrMagnitude);
-        Vector2 closest = a + ab * t;
-        return Vector2.Distance(p, closest);
     }
 
     void PlaceTower()
@@ -380,48 +331,21 @@ public class TowerPlacer : MonoBehaviour
         foreach (var col in _preview.GetComponentsInChildren<Collider>(true))
             col.enabled = true;
 
-        // Ensure tower has a collider for click detection
-        if (_preview.GetComponentInChildren<Collider>() == null)
-        {
-            Bounds bounds = new Bounds(_preview.transform.position, Vector3.zero);
-            foreach (var r in _preview.GetComponentsInChildren<Renderer>())
-                bounds.Encapsulate(r.bounds);
-            BoxCollider box = _preview.AddComponent<BoxCollider>();
-            box.center = _preview.transform.InverseTransformPoint(bounds.center);
-            box.size = bounds.size;
-        }
+        TowerUtils.EnsureCollider(_preview);
 
         // Restore original materials (with Blender colors)
         for (int i = 0; i < _previewRenderers.Length; i++)
             _previewRenderers[i].sharedMaterials = _originalMaterials[i];
 
-        // Tower data for selection system
-        TowerData data = _preview.GetComponent<TowerData>();
-        if (data == null)
-            data = _preview.AddComponent<TowerData>();
+        TowerData data = _preview.GetComponent<TowerData>() ?? _preview.AddComponent<TowerData>();
         data.towerType = _placingType;
         int cost = TowerCosts.GetPlacementCost(_placingType);
         data.totalInvested = cost;
 
-        SpawnCostText(_preview.transform.position, cost);
+        FloatingText.Spawn(_preview.transform.position, $"-${cost}", new Color(0.9f, 0.15f, 0.1f), 1.2f, 28, false, 80f);
 
-        // Attack behavior depends on tower type
-        if (_placingType == "sniper000")
-        {
-            if (_preview.GetComponent<SniperIdle>() == null)
-                _preview.AddComponent<SniperIdle>();
-            if (_preview.GetComponent<SniperAttack>() == null)
-                _preview.AddComponent<SniperAttack>();
-        }
-        else
-        {
-            TackAttack attack = _preview.GetComponent<TackAttack>();
-            if (attack == null)
-                attack = _preview.AddComponent<TackAttack>();
-            attack.diskColor = _projectileColor;
-            attack.diskMetallic = _projectileMetallic;
-            attack.diskSmoothness = _projectileSmoothness;
-        }
+        if (_placementSetup.TryGetValue(_placingType, out var setup))
+            setup(_preview);
 
         _preview = null;
         _previewRenderers = null;
@@ -448,101 +372,12 @@ public class TowerPlacer : MonoBehaviour
         {
             foreach (var mat in r.materials)
             {
-                MakeTransparent(mat);
+                MaterialUtils.MakeTransparent(mat);
                 if (mat.HasProperty("_BaseColor"))
                     mat.SetColor("_BaseColor", tint);
                 if (mat.HasProperty("_Color"))
                     mat.SetColor("_Color", tint);
             }
         }
-    }
-
-    void MakeTransparent(Material mat)
-    {
-        mat.SetFloat("_Surface", 1);
-        mat.SetOverrideTag("RenderType", "Transparent");
-        mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-        mat.SetInt("_ZWrite", 0);
-        mat.renderQueue = 3000;
-        mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-    }
-
-    static Canvas _floatingTextCanvas;
-
-    static Canvas GetFloatingTextCanvas()
-    {
-        if (_floatingTextCanvas != null) return _floatingTextCanvas;
-
-        // Try to find existing overlay canvas
-        foreach (var c in FindObjectsByType<Canvas>(FindObjectsSortMode.None))
-        {
-            if (c.renderMode == RenderMode.ScreenSpaceOverlay)
-            {
-                _floatingTextCanvas = c;
-                return c;
-            }
-        }
-
-        // Create one
-        var go = new GameObject("FloatingTextCanvas");
-        _floatingTextCanvas = go.AddComponent<Canvas>();
-        _floatingTextCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        _floatingTextCanvas.sortingOrder = 100;
-        go.AddComponent<CanvasScaler>();
-        return _floatingTextCanvas;
-    }
-
-    void SpawnCostText(Vector3 worldPos, int amount)
-    {
-        Canvas canvas = GetFloatingTextCanvas();
-        if (canvas == null) return;
-
-        var go = new GameObject("CostText");
-        go.transform.SetParent(canvas.transform, false);
-
-        var txt = go.AddComponent<Text>();
-        txt.text = $"-${amount}";
-        txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        txt.fontSize = 28;
-        txt.color = new Color(0.9f, 0.15f, 0.1f);
-        txt.alignment = TextAnchor.MiddleCenter;
-        txt.fontStyle = FontStyle.Bold;
-        txt.raycastTarget = false;
-
-        var outline = go.AddComponent<Outline>();
-        outline.effectColor = Color.black;
-        outline.effectDistance = new Vector2(2, -2);
-
-        var rt = go.GetComponent<RectTransform>();
-        rt.sizeDelta = new Vector2(200, 40);
-
-        Vector3 screenPos = Camera.main.WorldToScreenPoint(worldPos);
-        rt.position = screenPos;
-
-        StartCoroutine(FloatDown(rt, txt, outline));
-    }
-
-    IEnumerator FloatDown(RectTransform rt, Text txt, Outline outline)
-    {
-        float duration = 1.2f;
-        float elapsed = 0f;
-        Vector3 startPos = rt.position;
-
-        while (elapsed < duration)
-        {
-            elapsed += Time.deltaTime;
-            float t = elapsed / duration;
-
-            rt.position = startPos + Vector3.down * (80f * t);
-
-            float alpha = t < 0.5f ? 1f : 1f - (t - 0.5f) / 0.5f;
-            txt.color = new Color(0.9f, 0.15f, 0.1f, alpha);
-            outline.effectColor = new Color(0, 0, 0, alpha);
-
-            yield return null;
-        }
-
-        Destroy(rt.gameObject);
     }
 }

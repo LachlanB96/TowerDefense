@@ -333,6 +333,35 @@ public class PathRenderer : MonoBehaviour
 
     float Frac(float v) { return v - Mathf.Floor(v); }
 
+    // ── Path query helpers ─────────────────────────────────────────────────
+
+    public bool IsPointOnPath(Vector2 point2D, float margin)
+    {
+        if (_waypoints == null || _waypoints.childCount < 2) return false;
+
+        float halfWidth = _pathWidth / 2f + margin;
+
+        for (int i = 0; i < _waypoints.childCount - 1; i++)
+        {
+            Vector3 a = _waypoints.GetChild(i).position;
+            Vector3 b = _waypoints.GetChild(i + 1).position;
+            Vector2 a2 = new Vector2(a.x, a.z);
+            Vector2 b2 = new Vector2(b.x, b.z);
+
+            if (DistanceToSegment(point2D, a2, b2) < halfWidth)
+                return true;
+        }
+        return false;
+    }
+
+    public static float DistanceToSegment(Vector2 p, Vector2 a, Vector2 b)
+    {
+        Vector2 ab = b - a;
+        float t = Mathf.Clamp01(Vector2.Dot(p - a, ab) / ab.sqrMagnitude);
+        Vector2 closest = a + ab * t;
+        return Vector2.Distance(p, closest);
+    }
+
     void ClearBorder()
     {
         foreach (var obj in _borderObjects)

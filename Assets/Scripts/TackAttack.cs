@@ -1,8 +1,6 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
-public class TackAttack : MonoBehaviour
+public class TackAttack : MonoBehaviour, ITowerAttack
 {
     public float range = 3f;
     public float cooldown = 0.5f;
@@ -16,40 +14,31 @@ public class TackAttack : MonoBehaviour
     public bool useFireball = false;
     public int pierce = 1;
 
+    public float Range => range;
+
     private float lastAttackTime = -999f;
-    private Transform unitsParent;
     private Material diskMaterial;
-    private List<Transform> _bodyParts = new List<Transform>();
-    private List<Vector3> _bodyOriginalScales = new List<Vector3>();
-    private Coroutine _squashRoutine;
+    private SquashStretch _squash;
 
     void Start()
     {
+        _squash = GetComponent<SquashStretch>();
+        if (_squash == null) _squash = gameObject.AddComponent<SquashStretch>();
+
         foreach (Transform child in transform)
         {
             string n = child.name;
             if (n.StartsWith("TackHead") || n.StartsWith("TackShaft") || n.StartsWith("TackTip")
                 || n.StartsWith("_TackRing") || n.StartsWith("_Range")
                 || n.StartsWith("_outline") || n.StartsWith("_Sniper")) continue;
-            _bodyParts.Add(child);
-            _bodyOriginalScales.Add(child.localScale);
+            _squash.AddPart(child);
         }
-
-        Spawn spawner = FindAnyObjectByType<Spawn>();
-        if (spawner != null)
-            unitsParent = spawner.transform;
 
         if (useAirPuff)
         {
             diskMaterial = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
             diskMaterial.SetColor("_BaseColor", diskColor);
-            diskMaterial.SetFloat("_Surface", 1);
-            diskMaterial.SetOverrideTag("RenderType", "Transparent");
-            diskMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            diskMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-            diskMaterial.SetInt("_ZWrite", 0);
-            diskMaterial.renderQueue = 3000;
-            diskMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            MaterialUtils.MakeTransparent(diskMaterial);
         }
         else
         {
@@ -69,16 +58,12 @@ public class TackAttack : MonoBehaviour
     {
         if (Time.time - lastAttackTime < cooldown) return;
 
-        if (unitsParent == null)
-        {
-            Spawn spawner = FindAnyObjectByType<Spawn>();
-            if (spawner != null) unitsParent = spawner.transform;
-            if (unitsParent == null) return;
-        }
+        Transform units = Spawn.UnitsParent;
+        if (units == null) return;
 
         Transform closest = null;
         float closestDist = range;
-        foreach (Transform unit in unitsParent)
+        foreach (Transform unit in units)
         {
             float dist = Vector3.Distance(transform.position, unit.position);
             if (dist < closestDist)
@@ -95,15 +80,11 @@ public class TackAttack : MonoBehaviour
     void Shoot(Transform target)
     {
         lastAttackTime = Time.time;
-
-        if (_squashRoutine != null)
-            StopCoroutine(_squashRoutine);
-        _squashRoutine = StartCoroutine(ShootSquash());
+        _squash.Play();
 
         int count = useFireball ? 4 : 8;
         float startAngle = useFireball ? 45f : 0f;
 
-        // Each directional projectile deals damage with pierce
         for (int i = 0; i < count; i++)
         {
             float angle = startAngle + i * (360f / count);
@@ -111,7 +92,7 @@ public class TackAttack : MonoBehaviour
             GameObject proj = useFireball ? CreateFireball() : (useAirPuff ? CreatePuff() : CreateDisk());
             proj.transform.position = transform.position;
             proj.transform.rotation = Quaternion.LookRotation(dir);
-            SetProjectileLayer(proj);
+            TowerUtils.SetProjectileLayer(proj);
 
             Velocity vel = proj.AddComponent<Velocity>();
             vel.direction = dir;
@@ -120,58 +101,6 @@ public class TackAttack : MonoBehaviour
             vel.pierce = pierce;
             vel.maxRange = range + 1f;
             vel.applyBurn = useFireball;
-        }
-    }
-
-    static void SetProjectileLayer(GameObject go)
-    {
-        int layer = LayerMask.NameToLayer("Projectiles");
-        if (layer < 0) return;
-        go.layer = layer;
-        foreach (Transform child in go.transform)
-            child.gameObject.layer = layer;
-    }
-
-    IEnumerator ShootSquash()
-    {
-        // Phase 1: Squash (wider + shorter)
-        yield return ScaleBodyTo(new Vector3(1.15f, 0.8f, 1.15f), 0.08f);
-        // Phase 2: Overshoot stretch (narrower + taller)
-        yield return ScaleBodyTo(new Vector3(0.95f, 1.05f, 0.95f), 0.1f);
-        // Phase 3: Settle back to normal
-        yield return ScaleBodyTo(Vector3.one, 0.08f);
-        _squashRoutine = null;
-    }
-
-    IEnumerator ScaleBodyTo(Vector3 scaleMultiplier, float duration)
-    {
-        // Capture each part's current scale
-        Vector3[] startScales = new Vector3[_bodyParts.Count];
-        for (int i = 0; i < _bodyParts.Count; i++)
-            startScales[i] = _bodyParts[i] != null ? _bodyParts[i].localScale : _bodyOriginalScales[i];
-
-        // Target = original scale * multiplier
-        Vector3[] targetScales = new Vector3[_bodyParts.Count];
-        for (int i = 0; i < _bodyParts.Count; i++)
-            targetScales[i] = Vector3.Scale(_bodyOriginalScales[i], scaleMultiplier);
-
-        float elapsed = 0f;
-        while (elapsed < duration)
-        {
-            elapsed += Time.deltaTime;
-            float t = Mathf.SmoothStep(0f, 1f, elapsed / duration);
-            for (int i = 0; i < _bodyParts.Count; i++)
-            {
-                if (_bodyParts[i] == null) continue;
-                _bodyParts[i].localScale = Vector3.LerpUnclamped(startScales[i], targetScales[i], t);
-            }
-            yield return null;
-        }
-
-        for (int i = 0; i < _bodyParts.Count; i++)
-        {
-            if (_bodyParts[i] != null)
-                _bodyParts[i].localScale = targetScales[i];
         }
     }
 
@@ -217,13 +146,7 @@ public class TackAttack : MonoBehaviour
 
         var glowMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
         glowMat.SetColor("_BaseColor", new Color(1f, 0.35f, 0.0f, 0.5f));
-        glowMat.SetFloat("_Surface", 1);
-        glowMat.SetOverrideTag("RenderType", "Transparent");
-        glowMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        glowMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-        glowMat.SetInt("_ZWrite", 0);
-        glowMat.renderQueue = 3000;
-        glowMat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        MaterialUtils.MakeTransparent(glowMat);
         glow.GetComponent<Renderer>().material = glowMat;
 
         return fireball;

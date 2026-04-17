@@ -11,19 +11,13 @@ public class GrassSpawner : MonoBehaviour
     public float minScale = 0.6f;
     public float maxScale = 1.2f;
 
-    private Transform _waypoints;
-    private float _pathWidth;
+    private PathRenderer _pathRenderer;
     private Bounds _houseBounds;
     private bool _hasHouse;
 
     void Start()
     {
-        var pathRenderer = FindAnyObjectByType<PathRenderer>();
-        if (pathRenderer != null)
-        {
-            _waypoints = pathRenderer.Waypoints;
-            _pathWidth = pathRenderer.PathWidth;
-        }
+        _pathRenderer = FindAnyObjectByType<PathRenderer>();
 
         var house = GameObject.Find("BlueHouse");
         if (house != null)
@@ -65,25 +59,8 @@ public class GrassSpawner : MonoBehaviour
 
     bool IsOnPath(float x, float z)
     {
-        if (_waypoints == null || _waypoints.childCount < 2) return false;
-
-        float halfWidth = _pathWidth / 2f + 0.5f;
-        Vector2 pos = new Vector2(x, z);
-
-        for (int i = 0; i < _waypoints.childCount - 1; i++)
-        {
-            Vector3 a = _waypoints.GetChild(i).position;
-            Vector3 b = _waypoints.GetChild(i + 1).position;
-            Vector2 a2 = new Vector2(a.x, a.z);
-            Vector2 b2 = new Vector2(b.x, b.z);
-
-            Vector2 ab = b2 - a2;
-            float t = Mathf.Clamp01(Vector2.Dot(pos - a2, ab) / ab.sqrMagnitude);
-            Vector2 closest = a2 + ab * t;
-            if (Vector2.Distance(pos, closest) < halfWidth)
-                return true;
-        }
-        return false;
+        if (_pathRenderer == null) return false;
+        return _pathRenderer.IsPointOnPath(new Vector2(x, z), 0.5f);
     }
 
     bool IsInHouse(float x, float z)
