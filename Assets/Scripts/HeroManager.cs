@@ -87,16 +87,7 @@ public class HeroManager : MonoBehaviour
 
     void BuildUI()
     {
-        _canvasObj = new GameObject("HeroBarUI");
-        var canvas = _canvasObj.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 25;
-
-        var scaler = _canvasObj.AddComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920, 1080);
-
-        _canvasObj.AddComponent<GraphicRaycaster>();
+        _canvasObj = UIBuilder.Canvas("HeroBarUI", 25);
 
         _barRoot = new GameObject("HeroBar");
         _barRoot.transform.SetParent(_canvasObj.transform, false);
@@ -166,32 +157,14 @@ public class HeroManager : MonoBehaviour
         iconRT.offsetMax = Vector2.zero;
         widgets.icon = iconImg;
 
-        var sweepGO = new GameObject("CooldownSweep");
-        sweepGO.transform.SetParent(root.transform, false);
-        var sweepImg = sweepGO.AddComponent<Image>();
-        sweepImg.color = new Color(0f, 0f, 0f, 0.55f);
-        sweepImg.type = Image.Type.Filled;
-        sweepImg.fillMethod = Image.FillMethod.Radial360;
-        sweepImg.fillOrigin = (int)Image.Origin360.Top;
-        sweepImg.fillAmount = 0f;
-        sweepImg.raycastTarget = false;
-        var sweepRT = sweepGO.GetComponent<RectTransform>();
-        sweepRT.anchorMin = Vector2.zero;
-        sweepRT.anchorMax = Vector2.one;
-        sweepRT.offsetMin = Vector2.zero;
-        sweepRT.offsetMax = Vector2.zero;
-        widgets.cooldownSweep = sweepImg;
+        widgets.cooldownSweep = UIBuilder.RadialCooldown("CooldownSweep", root.transform, new Color(0f, 0f, 0f, 0.55f));
 
         var lockGO = new GameObject("Lock");
         lockGO.transform.SetParent(root.transform, false);
         var lockImg = lockGO.AddComponent<Image>();
         lockImg.color = new Color(0f, 0f, 0f, 0.75f);
         lockImg.raycastTarget = false;
-        var lockRT = lockGO.GetComponent<RectTransform>();
-        lockRT.anchorMin = Vector2.zero;
-        lockRT.anchorMax = Vector2.one;
-        lockRT.offsetMin = Vector2.zero;
-        lockRT.offsetMax = Vector2.zero;
+        UIBuilder.Stretch(lockGO);
         widgets.lockOverlay = lockGO;
         widgets.lockText = AddTextChild(lockGO, "L?", 14, Color.white);
 
@@ -208,24 +181,10 @@ public class HeroManager : MonoBehaviour
 
     static Text AddTextChild(GameObject parent, string txt, int size, Color color)
     {
-        var go = new GameObject("Text");
-        go.transform.SetParent(parent.transform, false);
-        var t = go.AddComponent<Text>();
-        t.text = txt;
-        t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        t.alignment = TextAnchor.MiddleCenter;
-        t.color = color;
-        t.fontSize = size;
-        t.fontStyle = FontStyle.Bold;
+        var t = UIBuilder.Text("Text", parent.transform, txt, size, color, bold: true);
         t.raycastTarget = false;
-        var outline = go.AddComponent<Outline>();
-        outline.effectColor = Color.black;
-        outline.effectDistance = new Vector2(1, -1);
-        var rt = go.GetComponent<RectTransform>();
-        rt.anchorMin = Vector2.zero;
-        rt.anchorMax = Vector2.one;
-        rt.offsetMin = Vector2.zero;
-        rt.offsetMax = Vector2.zero;
+        UIBuilder.AddOutline(t.gameObject);
+        UIBuilder.Stretch(t.gameObject);
         return t;
     }
 

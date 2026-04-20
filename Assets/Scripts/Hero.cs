@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-public class Hero : MonoBehaviour, ITowerAttack
+public class Hero : MonoBehaviour, ITowerAttack, IDamageCredit
 {
     [Header("Identity")]
     public string heroType = "knight000";
@@ -52,30 +52,9 @@ public class Hero : MonoBehaviour, ITowerAttack
         if (IsChanneling) return;
         if (Time.time - _lastAttackTime < attackCooldown) return;
 
-        Transform target = FindStrongestInRange();
+        Transform target = UnitScanner.StrongestInRange(transform.position, range);
         if (target != null)
             ShootSword(target);
-    }
-
-    Transform FindStrongestInRange()
-    {
-        Transform units = Spawn.UnitsParent;
-        if (units == null) return null;
-
-        Transform best = null;
-        int bestHealth = -1;
-        foreach (Transform unit in units)
-        {
-            var m = unit.GetComponent<Movement>();
-            if (m == null || !m.enabled) continue;
-            if (Vector3.Distance(transform.position, unit.position) > range) continue;
-            if (m.health > bestHealth)
-            {
-                bestHealth = m.health;
-                best = unit;
-            }
-        }
-        return best;
     }
 
     void ShootSword(Transform target)
@@ -99,7 +78,7 @@ public class Hero : MonoBehaviour, ITowerAttack
         vel.speed = projectileSpeed;
         vel.damage = attackDamage;
         vel.pierce = 1;
-        vel.heroSource = this;
+        vel.source = this;
     }
 
     public void SetChanneling(bool value) => IsChanneling = value;

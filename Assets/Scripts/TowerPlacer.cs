@@ -110,19 +110,8 @@ public class TowerPlacer : MonoBehaviour
 
     void BuildShopPanel()
     {
-        // Canvas
-        var canvasGO = new GameObject("ShopUI");
-        var canvas = canvasGO.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 10;
+        var canvasGO = UIBuilder.Canvas("ShopUI", 10);
 
-        var scaler = canvasGO.AddComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920, 1080);
-
-        canvasGO.AddComponent<GraphicRaycaster>();
-
-        // Panel anchored to left side (mirroring selection panel on right)
         var panel = new GameObject("ShopPanel");
         panel.transform.SetParent(canvasGO.transform, false);
 
@@ -169,12 +158,7 @@ public class TowerPlacer : MonoBehaviour
         var btn = go.AddComponent<Button>();
         string capturedType = towerType;
         btn.onClick.AddListener(() => BeginPlacement(capturedType));
-
-        ColorBlock cb = btn.colors;
-        cb.normalColor = Color.white;
-        cb.highlightedColor = new Color(1.2f, 1.2f, 1.2f, 1f);
-        cb.pressedColor = new Color(0.8f, 0.8f, 0.8f, 1f);
-        btn.colors = cb;
+        UIBuilder.ApplyStandardColors(btn);
 
         // Background
         var bg = go.AddComponent<Image>();
@@ -199,22 +183,10 @@ public class TowerPlacer : MonoBehaviour
         iconRT.offsetMax = Vector2.zero;
 
         // Price label at the bottom
-        var priceGO = new GameObject("PriceLabel");
-        priceGO.transform.SetParent(go.transform, false);
+        var priceTxt = UIBuilder.Text("PriceLabel", go.transform, $"${cost}", 20, Color.white, bold: true);
+        UIBuilder.AddOutline(priceTxt.gameObject);
 
-        var priceTxt = priceGO.AddComponent<Text>();
-        priceTxt.text = $"${cost}";
-        priceTxt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        priceTxt.fontSize = 20;
-        priceTxt.color = Color.white;
-        priceTxt.alignment = TextAnchor.MiddleCenter;
-        priceTxt.fontStyle = FontStyle.Bold;
-
-        var outline = priceGO.AddComponent<Outline>();
-        outline.effectColor = Color.black;
-        outline.effectDistance = new Vector2(1, -1);
-
-        var priceRT = priceGO.GetComponent<RectTransform>();
+        var priceRT = priceTxt.GetComponent<RectTransform>();
         priceRT.anchorMin = new Vector2(0, 0);
         priceRT.anchorMax = new Vector2(1, 0.22f);
         priceRT.offsetMin = Vector2.zero;
@@ -281,20 +253,10 @@ public class TowerPlacer : MonoBehaviour
         }
         else
         {
-            var nameGO = new GameObject("NameLabel");
-            nameGO.transform.SetParent(go.transform, false);
-            var nameTxt = nameGO.AddComponent<Text>();
-            nameTxt.text = displayName;
-            nameTxt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            nameTxt.fontSize = 18;
-            nameTxt.color = new Color(0.92f, 0.78f, 0.28f);
-            nameTxt.alignment = TextAnchor.MiddleCenter;
-            nameTxt.fontStyle = FontStyle.Bold;
+            var nameTxt = UIBuilder.Text("NameLabel", go.transform, displayName, 18, new Color(0.92f, 0.78f, 0.28f), bold: true);
             nameTxt.raycastTarget = false;
-            var nameOutline = nameGO.AddComponent<Outline>();
-            nameOutline.effectColor = Color.black;
-            nameOutline.effectDistance = new Vector2(1, -1);
-            var nameRT = nameGO.GetComponent<RectTransform>();
+            UIBuilder.AddOutline(nameTxt.gameObject);
+            var nameRT = nameTxt.GetComponent<RectTransform>();
             nameRT.anchorMin = new Vector2(0f, 0.25f);
             nameRT.anchorMax = new Vector2(1f, 0.95f);
             nameRT.offsetMin = Vector2.zero;
@@ -302,22 +264,11 @@ public class TowerPlacer : MonoBehaviour
         }
 
         // Price label at bottom
-        var priceGO = new GameObject("PriceLabel");
-        priceGO.transform.SetParent(go.transform, false);
-        var priceTxt = priceGO.AddComponent<Text>();
-        priceTxt.text = $"${cost}";
-        priceTxt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        priceTxt.fontSize = 20;
-        priceTxt.color = Color.white;
-        priceTxt.alignment = TextAnchor.MiddleCenter;
-        priceTxt.fontStyle = FontStyle.Bold;
+        var priceTxt = UIBuilder.Text("PriceLabel", go.transform, $"${cost}", 20, Color.white, bold: true);
         priceTxt.raycastTarget = false;
+        UIBuilder.AddOutline(priceTxt.gameObject);
 
-        var outline = priceGO.AddComponent<Outline>();
-        outline.effectColor = Color.black;
-        outline.effectDistance = new Vector2(1, -1);
-
-        var priceRT = priceGO.GetComponent<RectTransform>();
+        var priceRT = priceTxt.GetComponent<RectTransform>();
         priceRT.anchorMin = new Vector2(0f, 0f);
         priceRT.anchorMax = new Vector2(1f, 0.22f);
         priceRT.offsetMin = Vector2.zero;
@@ -326,17 +277,8 @@ public class TowerPlacer : MonoBehaviour
 
     void MakeLabel(string text, Transform parent)
     {
-        var go = new GameObject("Label");
-        go.transform.SetParent(parent, false);
-
-        var txt = go.AddComponent<Text>();
-        txt.text = text;
-        txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        txt.alignment = TextAnchor.MiddleCenter;
-        txt.color = new Color(1f, 1f, 1f, 0.6f);
-        txt.fontSize = 14;
-
-        go.AddComponent<LayoutElement>().preferredHeight = 25;
+        var txt = UIBuilder.Text("Label", parent, text, 14, new Color(1f, 1f, 1f, 0.6f));
+        txt.gameObject.AddComponent<LayoutElement>().preferredHeight = 25;
     }
 
     public void BeginPlacement(string towerType = "tack000")

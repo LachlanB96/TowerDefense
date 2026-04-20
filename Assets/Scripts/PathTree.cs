@@ -5,7 +5,7 @@ public class PathTree : MonoBehaviour
     public int damage = 1;
     public float lifetime = 10f;
     public float hitRadius = 0.4f;
-    public TowerData source;
+    public IDamageCredit source;
     public System.Action onDestroyed;
 
     private float _spawnTime;

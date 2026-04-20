@@ -48,28 +48,7 @@ public class SniperAttack : MonoBehaviour, ITowerAttack
     {
         if (Time.time - lastAttackTime < cooldown / Mathf.Max(0.01f, attackSpeedMultiplier)) return;
 
-        Transform units = Spawn.UnitsParent;
-        if (units == null) return;
-
-        // Find the first enemy on the path (furthest along) within range
-        Transform target = null;
-        float bestProgress = -1f;
-        foreach (Transform unit in units)
-        {
-            float dist = Vector3.Distance(transform.position, unit.position);
-            if (dist > range) continue;
-
-            var movement = unit.GetComponent<Movement>();
-            if (movement == null || !movement.enabled) continue;
-
-            float progress = unit.GetSiblingIndex();
-            if (target == null || progress < bestProgress)
-            {
-                bestProgress = progress;
-                target = unit;
-            }
-        }
-
+        Transform target = UnitScanner.FurthestOnPathInRange(transform.position, range);
         if (target != null)
             Shoot(target);
     }

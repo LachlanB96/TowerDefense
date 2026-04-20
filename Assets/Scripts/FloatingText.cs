@@ -11,29 +11,17 @@ public static class FloatingText
         Canvas canvas = GetOrCreateCanvas();
         if (canvas == null || Camera.main == null) return;
 
-        var go = new GameObject("FloatingText");
-        go.transform.SetParent(canvas.transform, false);
-
-        var txt = go.AddComponent<Text>();
-        txt.text = text;
-        txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        txt.fontSize = fontSize;
-        txt.color = color;
-        txt.alignment = TextAnchor.MiddleCenter;
-        txt.fontStyle = FontStyle.Bold;
+        var txt = UIBuilder.Text("FloatingText", canvas.transform, text, fontSize, color, bold: true);
         txt.raycastTarget = false;
+        var outline = UIBuilder.AddOutline(txt.gameObject, 2f);
 
-        var outline = go.AddComponent<Outline>();
-        outline.effectColor = Color.black;
-        outline.effectDistance = new Vector2(2, -2);
-
-        var rt = go.GetComponent<RectTransform>();
+        var rt = txt.GetComponent<RectTransform>();
         rt.sizeDelta = new Vector2(200, 40);
 
         Vector3 screenPos = Camera.main.WorldToScreenPoint(worldPos);
         rt.position = screenPos;
 
-        var anim = go.AddComponent<FloatingTextAnim>();
+        var anim = txt.gameObject.AddComponent<FloatingTextAnim>();
         anim.Init(rt, txt, outline, color, duration, floatUp, floatDistance);
     }
 
@@ -50,14 +38,9 @@ public static class FloatingText
             }
         }
 
-        var go = new GameObject("FloatingTextCanvas");
+        var go = UIBuilder.Canvas("FloatingTextCanvas", 100);
         Object.DontDestroyOnLoad(go);
-        _canvas = go.AddComponent<Canvas>();
-        _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        _canvas.sortingOrder = 100;
-        var scaler = go.AddComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920, 1080);
+        _canvas = go.GetComponent<Canvas>();
         return _canvas;
     }
 }

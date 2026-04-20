@@ -17,17 +17,8 @@ public class Spawn : MonoBehaviour
 
     void BuildSpawnPanel()
     {
-        var canvasObj = new GameObject("SpawnUI");
-        var canvas = canvasObj.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 10;
+        var canvasObj = UIBuilder.Canvas("SpawnUI", 10);
 
-        var scaler = canvasObj.AddComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920, 1080);
-        canvasObj.AddComponent<GraphicRaycaster>();
-
-        // Panel anchored to bottom center
         var panel = new GameObject("SpawnPanel");
         panel.transform.SetParent(canvasObj.transform, false);
 
@@ -63,11 +54,7 @@ public class Spawn : MonoBehaviour
 
         var btn = btnObj.AddComponent<Button>();
         btn.onClick.AddListener(action);
-        ColorBlock cb = btn.colors;
-        cb.normalColor = Color.white;
-        cb.highlightedColor = new Color(1.2f, 1.2f, 1.2f, 1f);
-        cb.pressedColor = new Color(0.8f, 0.8f, 0.8f, 1f);
-        btn.colors = cb;
+        UIBuilder.ApplyStandardColors(btn);
 
         btnObj.AddComponent<LayoutElement>().preferredWidth = 150;
 
@@ -91,22 +78,11 @@ public class Spawn : MonoBehaviour
         irt.offsetMax = Vector2.zero;
 
         // Label at bottom
-        var txtObj = new GameObject("Text");
-        txtObj.transform.SetParent(btnObj.transform, false);
-        var txt = txtObj.AddComponent<Text>();
-        txt.text = label;
-        txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        txt.alignment = TextAnchor.MiddleCenter;
-        txt.color = Color.white;
-        txt.fontSize = 16;
-        txt.fontStyle = FontStyle.Bold;
+        var txt = UIBuilder.Text("Text", btnObj.transform, label, 16, Color.white, bold: true);
         txt.raycastTarget = false;
+        UIBuilder.AddOutline(txt.gameObject);
 
-        var outline = txtObj.AddComponent<Outline>();
-        outline.effectColor = Color.black;
-        outline.effectDistance = new Vector2(1, -1);
-
-        var trt = txtObj.GetComponent<RectTransform>();
+        var trt = txt.GetComponent<RectTransform>();
         trt.anchorMin = new Vector2(0f, 0f);
         trt.anchorMax = new Vector2(1f, 0.22f);
         trt.offsetMin = Vector2.zero;

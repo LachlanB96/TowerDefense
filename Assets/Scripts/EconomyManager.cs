@@ -65,19 +65,8 @@ public class EconomyManager : MonoBehaviour
 
     void BuildUI()
     {
-        // Find or create a top-bar canvas
-        var canvasGO = new GameObject("EconomyCanvas");
-        var canvas = canvasGO.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 20;
+        var canvasGO = UIBuilder.Canvas("EconomyCanvas", 20);
 
-        var scaler = canvasGO.AddComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920, 1080);
-
-        canvasGO.AddComponent<GraphicRaycaster>();
-
-        // Background panel at top center
         var panel = new GameObject("TopBar");
         panel.transform.SetParent(canvasGO.transform, false);
 
@@ -139,18 +128,8 @@ public class EconomyManager : MonoBehaviour
 
     Text MakeText(string name, Transform parent, int fontSize, Color color)
     {
-        var go = new GameObject(name);
-        go.transform.SetParent(parent, false);
-
-        var txt = go.AddComponent<Text>();
-        txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        txt.fontSize = fontSize;
-        txt.color = color;
-        txt.alignment = TextAnchor.MiddleCenter;
-
-        var le = go.AddComponent<LayoutElement>();
-        le.preferredWidth = 200;
-
+        var txt = UIBuilder.Text(name, parent, "", fontSize, color);
+        txt.gameObject.AddComponent<LayoutElement>().preferredWidth = 200;
         return txt;
     }
 }

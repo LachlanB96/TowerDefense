@@ -148,14 +148,7 @@ public class CameraController : MonoBehaviour
 
     void CreateButtons()
     {
-        var canvasObj = new GameObject("BottomLeftUI");
-        var canvas = canvasObj.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 5;
-        var scaler = canvasObj.AddComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920, 1080);
-        canvasObj.AddComponent<GraphicRaycaster>();
+        var canvasObj = UIBuilder.Canvas("BottomLeftUI", 5);
 
         MakeBottomLeftButton("Reset Camera", new Vector2(10, 10), ResetCamera, canvasObj.transform);
 
@@ -179,26 +172,10 @@ public class CameraController : MonoBehaviour
 
         var btn = btnObj.AddComponent<Button>();
         btn.onClick.AddListener(action);
-        ColorBlock cb = btn.colors;
-        cb.normalColor = Color.white;
-        cb.highlightedColor = new Color(1.2f, 1.2f, 1.2f, 1f);
-        cb.pressedColor = new Color(0.8f, 0.8f, 0.8f, 1f);
-        btn.colors = cb;
+        UIBuilder.ApplyStandardColors(btn);
 
-        var txtObj = new GameObject("Text");
-        txtObj.transform.SetParent(btnObj.transform, false);
-        var txt = txtObj.AddComponent<Text>();
-        txt.text = label;
-        txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        txt.alignment = TextAnchor.MiddleCenter;
-        txt.color = Color.white;
-        txt.fontSize = 14;
-
-        var trt = txtObj.GetComponent<RectTransform>();
-        trt.anchorMin = Vector2.zero;
-        trt.anchorMax = Vector2.one;
-        trt.offsetMin = Vector2.zero;
-        trt.offsetMax = Vector2.zero;
+        var txt = UIBuilder.Text("Text", btnObj.transform, label, 14, Color.white);
+        UIBuilder.Stretch(txt.gameObject);
 
         return btnObj;
     }

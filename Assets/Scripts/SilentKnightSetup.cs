@@ -115,22 +115,11 @@ public static class SilentKnightSetup
 
     static void CrimsonArc(Hero hero)
     {
-        Transform units = Spawn.UnitsParent;
-        if (units != null)
+        UnitScanner.ForEachInRange(hero.transform.position, hero.range, (unit, m) =>
         {
-            var targets = new List<Transform>();
-            foreach (Transform unit in units) targets.Add(unit);
-
-            foreach (var unit in targets)
-            {
-                if (unit == null) continue;
-                var m = unit.GetComponent<Movement>();
-                if (m == null || !m.enabled) continue;
-                if (Vector3.Distance(hero.transform.position, unit.position) > hero.range) continue;
-                var report = m.Hit(CrimsonArcDamage);
-                hero.Credit(report.damageDealt, report.killed);
-            }
-        }
+            var report = m.Hit(CrimsonArcDamage);
+            hero.Credit(report.damageDealt, report.killed);
+        });
 
         hero.StartCoroutine(PlayCrimsonArcVisual(hero));
     }
@@ -210,22 +199,11 @@ public static class SilentKnightSetup
 
     static void ApplyBookTick(Hero hero)
     {
-        Transform units = Spawn.UnitsParent;
-        if (units == null) return;
-
-        var targets = new List<Transform>();
-        foreach (Transform unit in units) targets.Add(unit);
-
-        foreach (var unit in targets)
+        UnitScanner.ForEachInRange(hero.transform.position, BookRange, (unit, m) =>
         {
-            if (unit == null) continue;
-            var m = unit.GetComponent<Movement>();
-            if (m == null || !m.enabled) continue;
-            if (Vector3.Distance(hero.transform.position, unit.position) > BookRange) continue;
-
             var report = m.Hit(BookTickDamage);
             hero.Credit(report.damageDealt, report.killed);
-            if (unit == null) continue;
+            if (unit == null) return;
             var judged = unit.GetComponent<JudgedEffect>();
             if (judged == null)
             {
@@ -236,6 +214,6 @@ public static class SilentKnightSetup
             {
                 judged.Refresh();
             }
-        }
+        });
     }
 }

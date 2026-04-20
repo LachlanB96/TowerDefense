@@ -69,37 +69,20 @@ public class RoundManager : MonoBehaviour
 
     void ShowRoundText(int round)
     {
-        var canvasObj = new GameObject("RoundCanvas");
-        var canvas = canvasObj.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 200;
-        canvasObj.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        canvasObj.GetComponent<CanvasScaler>().referenceResolution = new Vector2(1920, 1080);
+        var canvasObj = UIBuilder.Canvas("RoundCanvas", 200);
 
-        var go = new GameObject("RoundText");
-        go.transform.SetParent(canvasObj.transform, false);
-
-        var txt = go.AddComponent<Text>();
-        txt.text = $"Round {round}";
-        txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        txt.fontSize = 72;
-        txt.color = Color.white;
-        txt.alignment = TextAnchor.MiddleCenter;
-        txt.fontStyle = FontStyle.Bold;
+        var txt = UIBuilder.Text("RoundText", canvasObj.transform, $"Round {round}", 72, Color.white, bold: true);
         txt.raycastTarget = false;
+        var outline = UIBuilder.AddOutline(txt.gameObject, 3f);
 
-        var outline = go.AddComponent<Outline>();
-        outline.effectColor = Color.black;
-        outline.effectDistance = new Vector2(3, -3);
-
-        var rt = go.GetComponent<RectTransform>();
+        var rt = txt.GetComponent<RectTransform>();
         rt.anchorMin = new Vector2(0.5f, 0.5f);
         rt.anchorMax = new Vector2(0.5f, 0.5f);
         rt.pivot = new Vector2(0.5f, 0.5f);
         rt.anchoredPosition = Vector2.zero;
         rt.sizeDelta = new Vector2(600, 100);
 
-        var popup = go.AddComponent<RoundPopup>();
+        var popup = txt.gameObject.AddComponent<RoundPopup>();
         popup.Init(rt, txt, outline, canvasObj);
     }
 }

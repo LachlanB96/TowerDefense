@@ -5,7 +5,7 @@ public class BurnEffect : MonoBehaviour
     public float duration = 6f;
     public float tickInterval = 2f;
     public int tickDamage = 1;
-    public TowerData source;
+    public IDamageCredit source;
 
     private float _startTime;
     private float _lastTickTime;

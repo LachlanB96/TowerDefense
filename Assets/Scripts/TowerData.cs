@@ -1,6 +1,6 @@
 using UnityEngine;
 
-public class TowerData : MonoBehaviour
+public class TowerData : MonoBehaviour, IDamageCredit
 {
     public string towerType = "tack000";
     public int upgradePath1Level = 0;
