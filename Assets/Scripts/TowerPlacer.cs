@@ -7,6 +7,7 @@ public class TowerPlacer : MonoBehaviour
 {
     [SerializeField] private GameObject _towerPrefab;
     [SerializeField] private GameObject _sniperPrefab;
+    [SerializeField] private GameObject _knightPrefab;
     [SerializeField] private LayerMask _groundLayer;
     [SerializeField] private float _overlapRadius = 1.4f;
 
@@ -34,6 +35,7 @@ public class TowerPlacer : MonoBehaviour
     private static readonly bool DEV_AUTO_PLACE = true;
     private static readonly Vector3 DEV_TACK_POS = new Vector3(13.96f, -0.05f, 8.70f);
     private static readonly Vector3 DEV_SNIPER_POS = new Vector3(10f, -0.05f, 6f);
+    private static readonly Vector3 DEV_KNIGHT_POS = new Vector3(15.56f, -0.05f, 8.70f);
     // ─────────────────────────────────────────────────────
 
     void Start()
@@ -44,6 +46,7 @@ public class TowerPlacer : MonoBehaviour
         {
             { "tack000", _towerPrefab },
             { "sniper000", _sniperPrefab },
+            { "knight000", _knightPrefab },
         };
 
         _placementSetup = new Dictionary<string, System.Action<GameObject>>
@@ -64,12 +67,12 @@ public class TowerPlacer : MonoBehaviour
                         tower.AddComponent<SniperAttack>();
                 }
             },
+            { "knight000", hero =>
+                {
+                    SilentKnightSetup.Configure(hero);
+                }
+            },
         };
-
-        // Hide the old scene button
-        var oldBtn = GameObject.Find("PlaceTowerButton");
-        if (oldBtn != null)
-            oldBtn.SetActive(false);
 
         BuildShopPanel();
 
@@ -77,6 +80,7 @@ public class TowerPlacer : MonoBehaviour
         {
             DevPlaceTower("tack000", DEV_TACK_POS);
             DevPlaceTower("sniper000", DEV_SNIPER_POS);
+            DevPlaceTower("knight000", DEV_KNIGHT_POS);
         }
     }
 
@@ -93,9 +97,12 @@ public class TowerPlacer : MonoBehaviour
 
         TowerUtils.EnsureCollider(tower);
 
-        TowerData data = tower.GetComponent<TowerData>() ?? tower.AddComponent<TowerData>();
-        data.towerType = type;
-        data.totalInvested = 0;
+        if (!HeroData.Exists(type))
+        {
+            TowerData data = tower.GetComponent<TowerData>() ?? tower.AddComponent<TowerData>();
+            data.towerType = type;
+            data.totalInvested = 0;
+        }
 
         if (_placementSetup.TryGetValue(type, out var setup))
             setup(tower);
@@ -141,6 +148,10 @@ public class TowerPlacer : MonoBehaviour
         // Tower buttons
         MakeTowerButton("tack000", panel.transform);
         MakeTowerButton("sniper000", panel.transform);
+
+        // Heroes
+        MakeLabel("-- Heroes --", panel.transform);
+        MakeHeroButton("knight000", panel.transform);
     }
 
     void MakeTowerButton(string towerType, Transform parent)
@@ -210,6 +221,109 @@ public class TowerPlacer : MonoBehaviour
         priceRT.offsetMax = Vector2.zero;
     }
 
+    void MakeHeroButton(string heroType, Transform parent)
+    {
+        int cost = HeroData.GetCost(heroType);
+        string iconPath = HeroData.GetIconPath(heroType);
+        Sprite iconSprite = iconPath != null ? Resources.Load<Sprite>(iconPath) : null;
+        string displayName = heroType == "knight000" ? "SILENT KNIGHT" : heroType.ToUpperInvariant();
+
+        var go = new GameObject("HeroBtn_" + heroType);
+        go.transform.SetParent(parent, false);
+        go.AddComponent<LayoutElement>().preferredHeight = 150;
+
+        var btn = go.AddComponent<Button>();
+        string capturedType = heroType;
+        btn.onClick.AddListener(() =>
+        {
+            if (HeroManager.Instance != null && HeroManager.Instance.IsHeroOwned) return;
+            BeginPlacement(capturedType);
+        });
+
+        ColorBlock cb = btn.colors;
+        cb.normalColor = Color.white;
+        cb.highlightedColor = new Color(1.15f, 1.15f, 1.2f, 1f);
+        cb.pressedColor = new Color(0.8f, 0.8f, 0.85f, 1f);
+        cb.disabledColor = new Color(0.5f, 0.5f, 0.5f, 0.5f);
+        btn.colors = cb;
+
+        // Deep navy background (Templar blue)
+        var bg = go.AddComponent<Image>();
+        bg.color = new Color(0.14f, 0.18f, 0.34f);
+
+        // Gold trim strip between icon and price
+        var trimGO = new GameObject("GoldTrim");
+        trimGO.transform.SetParent(go.transform, false);
+        var trimImg = trimGO.AddComponent<Image>();
+        trimImg.color = new Color(0.92f, 0.78f, 0.28f);
+        trimImg.raycastTarget = false;
+        var trimRT = trimGO.GetComponent<RectTransform>();
+        trimRT.anchorMin = new Vector2(0f, 0.22f);
+        trimRT.anchorMax = new Vector2(1f, 0.24f);
+        trimRT.offsetMin = Vector2.zero;
+        trimRT.offsetMax = Vector2.zero;
+
+        // Icon (or stylized name fallback when sprite is missing)
+        if (iconSprite != null)
+        {
+            var iconGO = new GameObject("Icon");
+            iconGO.transform.SetParent(go.transform, false);
+            var iconImg = iconGO.AddComponent<Image>();
+            iconImg.sprite = iconSprite;
+            iconImg.preserveAspect = true;
+            iconImg.color = Color.white;
+            iconImg.raycastTarget = false;
+            var iconRT = iconGO.GetComponent<RectTransform>();
+            iconRT.anchorMin = new Vector2(0.05f, 0.25f);
+            iconRT.anchorMax = new Vector2(0.95f, 0.95f);
+            iconRT.offsetMin = Vector2.zero;
+            iconRT.offsetMax = Vector2.zero;
+        }
+        else
+        {
+            var nameGO = new GameObject("NameLabel");
+            nameGO.transform.SetParent(go.transform, false);
+            var nameTxt = nameGO.AddComponent<Text>();
+            nameTxt.text = displayName;
+            nameTxt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            nameTxt.fontSize = 18;
+            nameTxt.color = new Color(0.92f, 0.78f, 0.28f);
+            nameTxt.alignment = TextAnchor.MiddleCenter;
+            nameTxt.fontStyle = FontStyle.Bold;
+            nameTxt.raycastTarget = false;
+            var nameOutline = nameGO.AddComponent<Outline>();
+            nameOutline.effectColor = Color.black;
+            nameOutline.effectDistance = new Vector2(1, -1);
+            var nameRT = nameGO.GetComponent<RectTransform>();
+            nameRT.anchorMin = new Vector2(0f, 0.25f);
+            nameRT.anchorMax = new Vector2(1f, 0.95f);
+            nameRT.offsetMin = Vector2.zero;
+            nameRT.offsetMax = Vector2.zero;
+        }
+
+        // Price label at bottom
+        var priceGO = new GameObject("PriceLabel");
+        priceGO.transform.SetParent(go.transform, false);
+        var priceTxt = priceGO.AddComponent<Text>();
+        priceTxt.text = $"${cost}";
+        priceTxt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        priceTxt.fontSize = 20;
+        priceTxt.color = Color.white;
+        priceTxt.alignment = TextAnchor.MiddleCenter;
+        priceTxt.fontStyle = FontStyle.Bold;
+        priceTxt.raycastTarget = false;
+
+        var outline = priceGO.AddComponent<Outline>();
+        outline.effectColor = Color.black;
+        outline.effectDistance = new Vector2(1, -1);
+
+        var priceRT = priceGO.GetComponent<RectTransform>();
+        priceRT.anchorMin = new Vector2(0f, 0f);
+        priceRT.anchorMax = new Vector2(1f, 0.22f);
+        priceRT.offsetMin = Vector2.zero;
+        priceRT.offsetMax = Vector2.zero;
+    }
+
     void MakeLabel(string text, Transform parent)
     {
         var go = new GameObject("Label");
@@ -255,7 +369,10 @@ public class TowerPlacer : MonoBehaviour
 
         SetPreviewColor(new Color(1f, 1f, 1f, 0.4f));
 
-        _rangeIndicator = RangeIndicator.Create(TowerCosts.GetRange(_placingType), _preview.transform);
+        float previewRange = HeroData.Exists(_placingType)
+            ? HeroData.GetRange(_placingType)
+            : TowerCosts.GetRange(_placingType);
+        _rangeIndicator = RangeIndicator.Create(previewRange, _preview.transform);
     }
 
     void Update()
@@ -285,7 +402,9 @@ public class TowerPlacer : MonoBehaviour
 
         if (mouse.leftButton.wasPressedThisFrame && _canPlace)
         {
-            int cost = TowerCosts.GetPlacementCost(_placingType);
+            int cost = HeroData.Exists(_placingType)
+                ? HeroData.GetCost(_placingType)
+                : TowerCosts.GetPlacementCost(_placingType);
             if (EconomyManager.Instance == null || !EconomyManager.Instance.TrySpend(cost))
                 return;
 
@@ -337,10 +456,15 @@ public class TowerPlacer : MonoBehaviour
         for (int i = 0; i < _previewRenderers.Length; i++)
             _previewRenderers[i].sharedMaterials = _originalMaterials[i];
 
-        TowerData data = _preview.GetComponent<TowerData>() ?? _preview.AddComponent<TowerData>();
-        data.towerType = _placingType;
-        int cost = TowerCosts.GetPlacementCost(_placingType);
-        data.totalInvested = cost;
+        bool isHero = HeroData.Exists(_placingType);
+        int cost = isHero ? HeroData.GetCost(_placingType) : TowerCosts.GetPlacementCost(_placingType);
+
+        if (!isHero)
+        {
+            TowerData data = _preview.GetComponent<TowerData>() ?? _preview.AddComponent<TowerData>();
+            data.towerType = _placingType;
+            data.totalInvested = cost;
+        }
 
         FloatingText.Spawn(_preview.transform.position, $"-${cost}", new Color(0.9f, 0.15f, 0.1f), 1.2f, 28, false, 80f);
 

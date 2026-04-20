@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 
 public class TackAttack : MonoBehaviour, ITowerAttack
@@ -12,7 +13,10 @@ public class TackAttack : MonoBehaviour, ITowerAttack
     public float diskSmoothness = 0.2f;
     public bool useAirPuff = false;
     public bool useFireball = false;
+    public bool useAreaPulse = false;
+    public bool applyBurn = false;
     public int pierce = 1;
+    public float attackSpeedMultiplier = 1f;
 
     public float Range => range;
 
@@ -56,10 +60,16 @@ public class TackAttack : MonoBehaviour, ITowerAttack
 
     void Update()
     {
-        if (Time.time - lastAttackTime < cooldown) return;
+        if (Time.time - lastAttackTime < cooldown / Mathf.Max(0.01f, attackSpeedMultiplier)) return;
 
         Transform units = Spawn.UnitsParent;
         if (units == null) return;
+
+        if (useAreaPulse)
+        {
+            DoAreaPulse(units);
+            return;
+        }
 
         Transform closest = null;
         float closestDist = range;
@@ -77,6 +87,74 @@ public class TackAttack : MonoBehaviour, ITowerAttack
             Shoot(closest);
     }
 
+    void DoAreaPulse(Transform units)
+    {
+        int hitCount = 0;
+        bool anyHit = false;
+
+        foreach (Transform unit in units)
+        {
+            if (hitCount >= pierce) break;
+            var movement = unit.GetComponent<Movement>();
+            if (movement == null || !movement.enabled) continue;
+            if (Vector3.Distance(transform.position, unit.position) >= range) continue;
+
+            if (!anyHit)
+            {
+                lastAttackTime = Time.time;
+                _squash.Play();
+                SpawnGroundPulse();
+                anyHit = true;
+            }
+
+            var report = movement.Hit(damage);
+            var data = GetComponent<TowerData>();
+            if (data != null)
+                data.Credit(report.damageDealt, report.killed);
+            if (applyBurn && unit.GetComponent<BurnEffect>() == null)
+            {
+                var burn = unit.gameObject.AddComponent<BurnEffect>();
+                burn.source = data;
+            }
+
+            hitCount++;
+        }
+    }
+
+    void SpawnGroundPulse()
+    {
+        var pulse = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        pulse.name = "_AreaPulse";
+        Destroy(pulse.GetComponent<Collider>());
+        pulse.transform.SetParent(SceneContainers.Effects, false);
+        pulse.transform.position = transform.position + Vector3.up * 0.02f;
+        pulse.transform.localScale = new Vector3(0.1f, 0.02f, 0.1f);
+
+        var mat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+        mat.SetColor("_BaseColor", new Color(1f, 0.45f, 0.1f, 0.7f));
+        MaterialUtils.MakeTransparent(mat);
+        pulse.GetComponent<Renderer>().material = mat;
+
+        StartCoroutine(AnimatePulse(pulse, mat, range * 2f, 0.25f));
+    }
+
+    IEnumerator AnimatePulse(GameObject pulse, Material mat, float targetDiameter, float duration)
+    {
+        float t = 0f;
+        while (pulse != null && t < duration)
+        {
+            float k = t / duration;
+            float d = Mathf.Lerp(0.1f, targetDiameter, k);
+            pulse.transform.localScale = new Vector3(d, 0.02f, d);
+            Color c = mat.GetColor("_BaseColor");
+            c.a = Mathf.Lerp(0.7f, 0f, k);
+            mat.SetColor("_BaseColor", c);
+            t += Time.deltaTime;
+            yield return null;
+        }
+        if (pulse != null) Destroy(pulse);
+    }
+
     void Shoot(Transform target)
     {
         lastAttackTime = Time.time;
@@ -90,6 +168,7 @@ public class TackAttack : MonoBehaviour, ITowerAttack
             float angle = startAngle + i * (360f / count);
             Vector3 dir = Quaternion.Euler(0, angle, 0) * Vector3.forward;
             GameObject proj = useFireball ? CreateFireball() : (useAirPuff ? CreatePuff() : CreateDisk());
+            proj.transform.SetParent(SceneContainers.Projectiles, false);
             proj.transform.position = transform.position;
             proj.transform.rotation = Quaternion.LookRotation(dir);
             TowerUtils.SetProjectileLayer(proj);
@@ -101,12 +180,14 @@ public class TackAttack : MonoBehaviour, ITowerAttack
             vel.pierce = pierce;
             vel.maxRange = range + 1f;
             vel.applyBurn = useFireball;
+            vel.source = GetComponent<TowerData>();
         }
     }
 
     GameObject CreateDisk()
     {
         GameObject disk = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        disk.name = "TackDisk";
         disk.transform.localScale = new Vector3(0.3f, 0.05f, 0.3f);
         disk.GetComponent<Renderer>().sharedMaterial = diskMaterial;
         Destroy(disk.GetComponent<Collider>());
@@ -116,6 +197,7 @@ public class TackAttack : MonoBehaviour, ITowerAttack
     GameObject CreatePuff()
     {
         GameObject puff = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        puff.name = "TackPuff";
         puff.transform.localScale = new Vector3(0.35f, 0.25f, 0.35f);
         puff.GetComponent<Renderer>().sharedMaterial = diskMaterial;
         Destroy(puff.GetComponent<Collider>());

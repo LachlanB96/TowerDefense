@@ -49,6 +49,17 @@ public static class TowerCosts
                 { new(350, "tack001"), new(0, ""), new(0, "") },
             }
         },
+        {
+            "tack100", new UpgradeInfo[,]
+            {
+                // Path 1: level 1 -> 2 upgrades to tack200
+                { new(0, ""), new(900, "tack200"), new(0, "") },
+                // Path 2 crosspath: not implemented
+                { new(0, ""), new(0, ""), new(0, "") },
+                // Path 3 crosspath: not implemented
+                { new(0, ""), new(0, ""), new(0, "") },
+            }
+        },
     };
 
     public static int GetPlacementCost(string towerType)

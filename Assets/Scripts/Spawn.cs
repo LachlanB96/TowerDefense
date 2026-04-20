@@ -4,31 +4,14 @@ using UnityEngine.UI;
 
 public class Spawn : MonoBehaviour
 {
-    public static Transform UnitsParent { get; private set; }
+    public static Transform UnitsParent => SceneContainers.Units;
 
     public GameObject unit;
     private List<GameObject> spawnedUnits = new List<GameObject>();
     public GameObject Waypoints;
 
-    void Awake()
-    {
-        UnitsParent = transform;
-    }
-
-    void OnDestroy()
-    {
-        if (UnitsParent == transform)
-            UnitsParent = null;
-    }
-
     void Start()
     {
-        // Hide old scene buttons if they exist
-        var oldBtn = GameObject.Find("SpawnUnitButton");
-        if (oldBtn != null) oldBtn.SetActive(false);
-        var oldBigBtn = GameObject.Find("SpawnBigUnitButton");
-        if (oldBigBtn != null) oldBigBtn.SetActive(false);
-
         BuildSpawnPanel();
     }
 
@@ -134,7 +117,7 @@ public class Spawn : MonoBehaviour
     {
         GameObject newUnit = Instantiate(unit, transform.position, Quaternion.identity);
         newUnit.GetComponent<Movement>().Waypoints = Waypoints;
-        newUnit.transform.parent = transform;
+        newUnit.transform.parent = SceneContainers.Units;
         newUnit.transform.localScale = Vector3.one;
         spawnedUnits.Add(newUnit);
 
@@ -146,7 +129,7 @@ public class Spawn : MonoBehaviour
     {
         GameObject newUnit = Instantiate(unit, transform.position, Quaternion.identity);
         newUnit.GetComponent<Movement>().Waypoints = Waypoints;
-        newUnit.transform.parent = transform;
+        newUnit.transform.parent = SceneContainers.Units;
         newUnit.transform.localScale = Vector3.one * 2f;
         Movement m = newUnit.GetComponent<Movement>();
         m.health = 5;
@@ -161,7 +144,7 @@ public class Spawn : MonoBehaviour
     {
         GameObject newUnit = Instantiate(unit, transform.position, Quaternion.identity);
         newUnit.GetComponent<Movement>().Waypoints = Waypoints;
-        newUnit.transform.parent = transform;
+        newUnit.transform.parent = SceneContainers.Units;
         newUnit.transform.localScale = Vector3.one;
         newUnit.GetComponent<Movement>().insides = 5;
         spawnedUnits.Add(newUnit);

@@ -11,6 +11,8 @@ public class Velocity : MonoBehaviour
     public int pierce = 1;
     public float maxRange = 5f;
     public float hitRadius = 0.7f;
+    public TowerData source;
+    public Hero heroSource;
     internal bool homing;
 
     private HashSet<GameObject> _hitTargets = new HashSet<GameObject>();
@@ -78,10 +80,19 @@ public class Velocity : MonoBehaviour
     {
         var movement = hitObj.GetComponent<Movement>();
         if (movement != null)
-            movement.Hit(damage);
+        {
+            var report = movement.Hit(damage);
+            if (source != null)
+                source.Credit(report.damageDealt, report.killed);
+            if (heroSource != null)
+                heroSource.Credit(report.damageDealt, report.killed);
+        }
 
         if (applyBurn && hitObj.GetComponent<BurnEffect>() == null)
-            hitObj.AddComponent<BurnEffect>();
+        {
+            var burn = hitObj.AddComponent<BurnEffect>();
+            burn.source = source;
+        }
 
         _hitTargets.Add(hitObj);
         pierce--;

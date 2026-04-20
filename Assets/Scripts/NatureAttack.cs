@@ -10,6 +10,7 @@ public class NatureAttack : MonoBehaviour, ITowerAttack
     public float treeLifetime = 10f;
     public float orbitSpeed = 25f;
     public float launchSpeed = 8f;
+    public float attackSpeedMultiplier = 1f;
 
     public float Range => range;
 
@@ -132,7 +133,7 @@ public class NatureAttack : MonoBehaviour, ITowerAttack
         if (_orbitRing != null)
             _orbitRing.Rotate(0f, orbitSpeed * Time.deltaTime, 0f);
 
-        if (Time.time - _lastAttackTime < cooldown) return;
+        if (Time.time - _lastAttackTime < cooldown / Mathf.Max(0.01f, attackSpeedMultiplier)) return;
         if (_waypoints == null || _waypoints.childCount < 2) return;
 
         // Find available tree slot
@@ -239,6 +240,7 @@ public class NatureAttack : MonoBehaviour, ITowerAttack
 
         float scale = 4.5f;
         var root = new GameObject("DeployedTree");
+        root.transform.SetParent(SceneContainers.Projectiles, false);
         root.transform.position = position;
         root.transform.localScale = Vector3.one * scale;
 
@@ -304,6 +306,7 @@ public class NatureAttack : MonoBehaviour, ITowerAttack
         var pt = tree.AddComponent<PathTree>();
         pt.damage = damage;
         pt.lifetime = treeLifetime;
+        pt.source = GetComponent<TowerData>();
         pt.onDestroyed = () => ReturnTree(slotIndex);
     }
 

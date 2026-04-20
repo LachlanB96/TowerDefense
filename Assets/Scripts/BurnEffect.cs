@@ -5,6 +5,7 @@ public class BurnEffect : MonoBehaviour
     public float duration = 6f;
     public float tickInterval = 2f;
     public int tickDamage = 1;
+    public TowerData source;
 
     private float _startTime;
     private float _lastTickTime;
@@ -30,7 +31,11 @@ public class BurnEffect : MonoBehaviour
             _lastTickTime = Time.time;
             var movement = GetComponent<Movement>();
             if (movement != null && movement.enabled)
-                movement.Hit(tickDamage);
+            {
+                var report = movement.Hit(tickDamage);
+                if (source != null)
+                    source.Credit(report.damageDealt, report.killed);
+            }
         }
 
         AnimateFire();

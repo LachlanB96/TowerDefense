@@ -8,5 +8,14 @@ public class TowerData : MonoBehaviour
     public int upgradePath3Level = 0;
     public int totalInvested = 0;
 
+    public int killCount = 0;
+    public int totalDamage = 0;
+
     public int SellValue => Mathf.RoundToInt(totalInvested * 0.75f);
+
+    public void Credit(int damageDealt, bool killed)
+    {
+        totalDamage += damageDealt;
+        if (killed) killCount++;
+    }
 }

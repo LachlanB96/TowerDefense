@@ -32,10 +32,31 @@
       "mcp__obsidian__obsidian_get_file_contents",
       "mcp__obsidian__obsidian_append_content",
       "mcp__ElevenLabs__text_to_sound_effects",
-      "mcp__obsidian__obsidian_batch_get_file_contents"
+      "mcp__obsidian__obsidian_batch_get_file_contents",
+      "mcp__ElevenLabs__play_audio",
+      "Skill(update-config)",
+      "mcp__ElevenLabs__text_to_speech",
+      "Bash(claude mcp *)",
+      "Bash(uvx elevenlabs-mcp *)",
+      "Bash(pip show *)",
+      "Bash(/c/Program Files/VideoLAN/VLC/vlc.exe *)",
+      "mcp__ElevenLabs__search_voice_library",
+      "mcp__AbletonMCP__get_session_info",
+      "mcp__AbletonMCP__start_playback",
+      "mcp__AbletonMCP__get_track_info",
+      "mcp__AbletonMCP__get_browser_items_at_path",
+      "mcp__AbletonMCP__load_instrument_or_effect",
+      "mcp__AbletonMCP__create_clip",
+      "mcp__AbletonMCP__add_notes_to_clip",
+      "mcp__AbletonMCP__create_midi_track",
+      "mcp__AbletonMCP__set_clip_name",
+      "mcp__AbletonMCP__fire_clip",
+      "mcp__ElevenLabs__search_voices",
+      "WebSearch"
     ]
   },
   "enabledPlugins": {
     "superpowers@claude-plugins-official": true
-  }
+  },
+  "outputStyle": "default"
 }

@@ -9,6 +9,7 @@ public class SniperAttack : MonoBehaviour, ITowerAttack
     public float bulletSpeed = 30f;
     public int pierce = 2;
     public Color bulletColor = new Color(0.18f, 0.18f, 0.22f);
+    public float attackSpeedMultiplier = 1f;
 
     public float Range => range;
 
@@ -45,7 +46,7 @@ public class SniperAttack : MonoBehaviour, ITowerAttack
 
     void Update()
     {
-        if (Time.time - lastAttackTime < cooldown) return;
+        if (Time.time - lastAttackTime < cooldown / Mathf.Max(0.01f, attackSpeedMultiplier)) return;
 
         Transform units = Spawn.UnitsParent;
         if (units == null) return;
@@ -87,6 +88,7 @@ public class SniperAttack : MonoBehaviour, ITowerAttack
         dir.Normalize();
 
         GameObject bullet = CreateBullet();
+        bullet.transform.SetParent(SceneContainers.Projectiles, false);
         bullet.transform.position = transform.position + dir * 0.5f + Vector3.up * 1.05f;
         bullet.transform.rotation = Quaternion.LookRotation(dir);
         TowerUtils.SetProjectileLayer(bullet);
@@ -98,6 +100,7 @@ public class SniperAttack : MonoBehaviour, ITowerAttack
         vel.pierce = pierce;
         vel.maxRange = range + 2f;
         vel.hitRadius = 0.4f;
+        vel.source = GetComponent<TowerData>();
     }
 
     GameObject CreateBullet()

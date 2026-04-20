@@ -4,6 +4,8 @@ using UnityEngine.UI;
 
 public class RoundManager : MonoBehaviour
 {
+    public event System.Action<int> OnRoundComplete;
+
     public float roundInterval = 10f;
     public float spawnDelay = 0.4f;
 
@@ -61,6 +63,8 @@ public class RoundManager : MonoBehaviour
             _spawner.SpawnUnit();
             yield return new WaitForSeconds(spawnDelay);
         }
+
+        OnRoundComplete?.Invoke(round);
     }
 
     void ShowRoundText(int round)

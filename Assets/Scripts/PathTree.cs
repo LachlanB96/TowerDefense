@@ -5,6 +5,7 @@ public class PathTree : MonoBehaviour
     public int damage = 1;
     public float lifetime = 10f;
     public float hitRadius = 0.4f;
+    public TowerData source;
     public System.Action onDestroyed;
 
     private float _spawnTime;
@@ -35,7 +36,9 @@ public class PathTree : MonoBehaviour
                 Movement m = unit.GetComponent<Movement>();
                 if (m != null)
                 {
-                    m.Hit(damage);
+                    var report = m.Hit(damage);
+                    if (source != null)
+                        source.Credit(report.damageDealt, report.killed);
                     ReturnAndDestroy();
                     return;
                 }

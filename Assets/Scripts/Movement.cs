@@ -185,7 +185,7 @@ public class Movement : MonoBehaviour
             {
                 GameObject newUnit = Instantiate(gameObject, transform.position, Quaternion.identity);
                 newUnit.transform.position += new Vector3(Random.Range(-1f, 1f), 0f, Random.Range(-1f, 1f));
-                newUnit.transform.parent = transform.parent;
+                newUnit.transform.parent = SceneContainers.Units;
                 newUnit.transform.localScale = Vector3.one;
 
                 Movement m = newUnit.GetComponent<Movement>();
@@ -200,20 +200,42 @@ public class Movement : MonoBehaviour
         if (_healthBarObj != null)
             Destroy(_healthBarObj);
 
-        // Unparent so the dying unit doesn't count as a target
-        transform.SetParent(null);
+        // Move out of UnitsParent so the dying unit doesn't count as a target
+        transform.SetParent(SceneContainers.Effects);
 
         gameObject.AddComponent<DeathAnimation>();
     }
 
-    internal void Hit(int v)
+    internal HitReport Hit(int v)
     {
+        var judged = GetComponent<JudgedEffect>();
+        if (judged != null)
+            v = Mathf.Max(1, Mathf.RoundToInt(v * judged.damageMultiplier));
+
+        int dealt = Mathf.Max(0, Mathf.Min(v, health));
+        bool wasAlive = deaths == 0 && health > 0;
+
         FloatingText.Spawn(transform.position + _healthBarWorldOffset, v.ToString(), Color.red, 0.9f, 24, true, 60f);
         health -= v;
         UpdateHealthBar();
+
+        bool killed = false;
         if (health <= 0)
         {
+            killed = wasAlive;
             Death();
         }
+        return new HitReport(dealt, killed);
+    }
+}
+
+public readonly struct HitReport
+{
+    public readonly int damageDealt;
+    public readonly bool killed;
+    public HitReport(int damageDealt, bool killed)
+    {
+        this.damageDealt = damageDealt;
+        this.killed = killed;
     }
 }
