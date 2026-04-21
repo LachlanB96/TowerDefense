@@ -762,28 +762,55 @@ extras += make_railing_segment("Rail_R_Fore", x_side=+0.40, z_start=0.15, z_end=
 extras += make_railing_segment("Rail_L_Aft",  x_side=-0.40, z_start=-0.50, z_end=-0.15)
 extras += make_railing_segment("Rail_R_Aft",  x_side=+0.40, z_start=-0.50, z_end=-0.15)
 
-# --- Hull damage: stripped / peeling planks ---------------------------------
-# Thin boards that sit a little outside the hull surface and are tilted on Z so
-# one end juts out — reads as "wood stripping off". Paler wood material makes
-# the torn edge pop against the near-black hull.
-def make_damage_plank(name, x_side, z_pos, y, detach_amount=0.04):
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(x_side, y, z_pos))
-    p = bpy.context.active_object
-    p.name = name
-    p.scale = (0.018, 0.025, 0.18)
-    bpy.ops.object.transform_apply(scale=True)
-    side_sign = 1.0 if x_side > 0 else -1.0
-    bake_rotation_on_mesh(p, (0, 0, math.radians(8) * side_sign))
-    p.location = (x_side + detach_amount * side_sign, y, z_pos)
-    p.data.materials.append(mat_wood_pale)
-    bpy.ops.object.shade_smooth()
-    return p
+# --- Hull damage: missing planks (boolean-cut holes with dark backing) -------
+# Each damage position becomes a real plank-shaped HOLE in the hull mesh via a
+# boolean DIFFERENCE modifier against a hidden cutter cube. A slightly smaller,
+# very-dark backing plate sits just inside the hull surface behind each hole so
+# the viewer sees "weathered recess" rather than "empty transparency".
+mat_wood_dark = make_material("BoatWoodDark", (0.04, 0.025, 0.02, 1.0), 0.0, 0.05)
 
+def cut_damage_hole(name, x_side, y_center, z_center, size_y, size_z):
+    """Cut a plank-shaped hole through the hull at the given hull-side position
+    and return the dark backing plate that fills the recess behind it."""
+    side_sign = 1.0 if x_side > 0 else -1.0
+
+    # 1. Cutter: axis-aligned box punching through the hull. X-thickness 0.14 is
+    # larger than the hull wall so the cut goes all the way through.
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(x_side, y_center, z_center))
+    cutter = bpy.context.active_object
+    cutter.name = f"_Cutter_{name}"
+    cutter.scale = (0.14, size_y, size_z)
+    bpy.ops.object.transform_apply(scale=True)
+
+    # 2. Attach boolean modifier to the hull and apply immediately. EXACT solver
+    # is slower than FAST but handles the hull's subdivided-quad topology cleanly.
+    mod = hull.modifiers.new(name=f"Cut_{name}", type='BOOLEAN')
+    mod.operation = 'DIFFERENCE'
+    mod.object = cutter
+    mod.solver = 'EXACT'
+    select_only(hull)
+    bpy.ops.object.modifier_apply(modifier=f"Cut_{name}")
+
+    # 3. Remove the cutter itself — it's not a visible part of the boat.
+    bpy.data.objects.remove(cutter, do_unlink=True)
+
+    # 4. Backing plate: slightly smaller than the hole so its edges don't poke
+    # through the hull, set back 0.025 from the hull surface to read as a recess.
+    bx = x_side - 0.025 * side_sign
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(bx, y_center, z_center))
+    back = bpy.context.active_object
+    back.name = f"Damage_Recess_{name}"
+    back.scale = (0.015, size_y * 0.92, size_z * 0.92)
+    bpy.ops.object.transform_apply(scale=True)
+    back.data.materials.append(mat_wood_dark)
+    return back
+
+# 4 missing-plank holes at varied positions + sizes for a weathered look.
 extras += [
-    make_damage_plank("Damage_L1", -0.42, z_pos=-0.35, y=0.20),
-    make_damage_plank("Damage_L2", -0.42, z_pos=+0.15, y=0.12),
-    make_damage_plank("Damage_R1", +0.42, z_pos=-0.20, y=0.22),
-    make_damage_plank("Damage_R2", +0.42, z_pos=+0.60, y=0.18),
+    cut_damage_hole("L1", -0.42, y_center=0.22, z_center=-0.35, size_y=0.09, size_z=0.26),
+    cut_damage_hole("L2", -0.42, y_center=0.12, z_center=+0.15, size_y=0.06, size_z=0.18),
+    cut_damage_hole("R1", +0.42, y_center=0.24, z_center=-0.20, size_y=0.07, size_z=0.22),
+    cut_damage_hole("R2", +0.42, y_center=0.18, z_center=+0.60, size_y=0.05, size_z=0.16),
 ]
 
 # --- Figurehead (skull at the prow) ------------------------------------------
