@@ -69,6 +69,8 @@ bpy.ops.export_scene.fbx(
     axis_forward='-Z',
     axis_up='Y',
     global_scale=1.0,
+    bake_space_transform=True,
+    apply_scale_options='FBX_SCALE_ALL',
 )
 print(f"Exported lake: {FBX_PATH}")
 print("Done!")
