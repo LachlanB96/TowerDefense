@@ -47,7 +47,11 @@ public class BoatAnimator : MonoBehaviour
     private float _placeT;
     private const float PlaceDuration = 0.6f;
     private Vector3 _placeStart, _placeEnd;
-    private Vector3 _placeScaleStart = new Vector3(1.1f, 1.1f, 1.1f);
+    // The authored rest scale of the prefab root — captured in Start so the placement
+    // animation lerps relative to whatever scale the prefab ships with (e.g. a 2× boat
+    // ends up settling at 2×, not Vector3.one). The drop begins 10% larger for parallax.
+    private Vector3 _restScale = Vector3.one;
+    private Vector3 _placeScaleStart = Vector3.one;
     private bool _splashFired;
 
     // Shoot recoil clock. Initialised to a large value in Start so the recoil curve
@@ -57,6 +61,16 @@ public class BoatAnimator : MonoBehaviour
 
     // Decaying angular impulses added to mast sway on fire. MoveTowards(0) in Update bleeds them off.
     private float _mastForeImpulse, _mastMainImpulse;
+
+    void Awake()
+    {
+        // Capture the prefab's authored scale HERE (not in Start) because PlayPlacement
+        // may be called from TowerPlacer._placementSetup between Awake and Start, and it
+        // overwrites transform.localScale. Awake runs synchronously inside Instantiate, so
+        // by the time PlayPlacement fires we've already snapshotted the real rest scale.
+        _restScale = transform.localScale;
+        _placeScaleStart = _restScale * 1.1f;
+    }
 
     void Start()
     {
@@ -151,7 +165,7 @@ public class BoatAnimator : MonoBehaviour
             _placeT += dt;
             float u = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(_placeT / PlaceDuration));
             transform.position = Vector3.Lerp(_placeStart, _placeEnd, u);
-            transform.localScale = Vector3.Lerp(_placeScaleStart, Vector3.one, u);
+            transform.localScale = Vector3.Lerp(_placeScaleStart, _restScale, u);
 
             // Fire the splash + SFX slightly before the literal bottom (u=0.95) so
             // audio and visual leading edges align with the user's perception of impact.
