@@ -83,18 +83,25 @@ def add_dummy_armature(name, mesh_obj):
     return arm
 
 # -- Hull (shaped galleon) -----------------------------------------------------
-# The hull is built by lofting between cross-section ribs along the +X (bow) axis.
-# Each rib has 5 vertices forming a shallow U: keel (bottom centre), chine port +
-# starboard (widest point under water), rail port + starboard (top edge of hull).
+# Coordinate convention used by this script — matches Unity (because our FBX
+# export with bake_space_transform=True passes Blender axes through 1:1):
+#    +X = starboard (ship's right)      -X = port (ship's left)
+#    +Y = up                             -Y = down
+#    +Z = bow (ship's forward)           -Z = stern
 #
-# Shaping rules embedded in the section table:
+# The hull is built by lofting between cross-section ribs along the Z (fore-aft)
+# axis. Each rib has 5 vertices forming a shallow U: keel (bottom centre), chine
+# port + starboard (widest point under water), rail port + starboard (top of hull).
+#
+# Shaping rules encoded in the section table:
 #   * Sheer   — deck_y rises at bow and stern (hull is taller at the ends).
-#   * Bow     — final rib collapses to a point at Z=0, producing a vertical cutwater.
+#   * Bow     — final rib collapses to a point at X=0, producing a vertical cutwater.
 #   * Stern   — first rib has finite width; a pentagon cap closes the transom.
 #   * Keel    — chine_width narrows toward the ends so the underwater body tapers
 #               in as well as the deck line.
 #
-# Row format: (x, keel_y, deck_y, half_width_keel, half_width_deck)
+# Row format: (z, keel_y, deck_y, half_width_keel, half_width_deck)
+# z is the fore-aft position of the rib (stern at -1.10, bow at +1.10).
 _SECTIONS = [
     (-1.10,  0.05,  0.70,  0.12,  0.32),   # stern transom (flat back face)
     (-0.95, -0.02,  0.62,  0.25,  0.40),
@@ -114,15 +121,17 @@ def build_hull():
     bpy.context.collection.objects.link(obj)
     bm = bmesh.new()
 
-    # Build one rib of 5 verts per section. Rib layout (left-to-right when viewed
-    # from above, +Z starboard): keel, chine_port, rail_port, rail_stbd, chine_stbd.
+    # Build one rib of 5 verts per section.
+    # Rib layout (looking from above, bow toward +Z):
+    #   keel (0, ky, z), chine_port (-hw_k, ky, z), rail_port (-hw_d, dy, z),
+    #   rail_stbd (+hw_d, dy, z), chine_stbd (+hw_k, ky, z).
     ribs = []
-    for (x, ky, dy, hw_k, hw_d) in _SECTIONS:
-        keel = bm.verts.new((x, ky, 0.0))
-        cp   = bm.verts.new((x, ky, -hw_k))
-        rp   = bm.verts.new((x, dy, -hw_d))
-        rs   = bm.verts.new((x, dy,  hw_d))
-        cs   = bm.verts.new((x, ky,  hw_k))
+    for (z, ky, dy, hw_k, hw_d) in _SECTIONS:
+        keel = bm.verts.new(( 0.0,  ky, z))
+        cp   = bm.verts.new((-hw_k, ky, z))
+        rp   = bm.verts.new((-hw_d, dy, z))
+        rs   = bm.verts.new(( hw_d, dy, z))
+        cs   = bm.verts.new(( hw_k, ky, z))
         ribs.append((keel, cp, rp, rs, cs))
 
     # Bridge adjacent ribs with 5 quads: 2 side panels per flank, plus the deck top.
@@ -164,12 +173,15 @@ hull.data.materials.append(mat_wood)
 # heavier "wale" just below deck. Implemented as thin tapered boxes rather than
 # true hull-conforming strips; at the TD camera distance they read as planking.
 def make_strake(name, y, half_width, length_half, thickness=0.020, height=0.035):
+    # Port/starboard is along X; the strake runs fore-aft along Z. Each strake is
+    # a thin box placed on each side of the hull at height y.
     out = []
-    for side, z in (("L", -half_width), ("R", +half_width)):
-        bpy.ops.mesh.primitive_cube_add(size=1, location=(0.0, y, z))
+    for side, x in (("L", -half_width), ("R", +half_width)):
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(x, y, 0.0))
         s = bpy.context.active_object
         s.name = f"{name}_{side}"
-        s.scale = (length_half, height, thickness)
+        # scale: X=thickness (perpendicular to hull side), Y=height, Z=plank length.
+        s.scale = (thickness, height, length_half)
         bpy.ops.object.transform_apply(scale=True)
         # Light bevel so the plank edge catches light, but skip subsurf — we want
         # the silhouette of a distinct plank, not a rounded cushion.
@@ -192,15 +204,16 @@ strakes += make_strake("MainWale",  y=0.34, half_width=0.435, length_half=1.00)
 
 # -- Gunport frames (iron trim around the cannon openings in the hull) --------
 # Small iron-material squares bolted to the hull side, framing each cannon as it
-# passes through. They sit a hair outside the hull (Z=+/-0.44 vs hull 0.42) so
+# passes through. They sit a hair outside the hull (X=+/-0.44 vs hull 0.42) so
 # they visibly frame the opening rather than clipping inside the planks.
-def make_gunport(name, z_side):
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(0.0, 0.44, 0.44 * z_side))
+def make_gunport(name, x_side):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(0.44 * x_side, 0.44, 0.0))
     g = bpy.context.active_object
     g.name = name
-    # Wider and taller than the cannon barrel (0.12 dia) so the frame is visible
-    # around the cannon; thin along Z (into the hull) so it reads as surface trim.
-    g.scale = (0.18, 0.18, 0.025)
+    # Scale: thin along X (perpendicular to hull side — surface trim thickness),
+    # 0.18 along Y (tall enough to frame the cannon vertically), 0.18 along Z
+    # (wide enough fore-aft to frame the cannon barrel).
+    g.scale = (0.025, 0.18, 0.18)
     bpy.ops.object.transform_apply(scale=True)
     bevel_subsurf(g, bevel_offset=0.012, bevel_segs=1, subsurf_levels=1)
     g.data.materials.append(mat_iron)
@@ -210,51 +223,69 @@ gunport_l = make_gunport("GunportFrame_L", -1)
 gunport_r = make_gunport("GunportFrame_R", +1)
 
 # -- Masts ---------------------------------------------------------------------
-def make_mast(name, x, height):
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.05, depth=height, location=(x, 0.5 + height/2, 0))
+# Blender's primitive_cylinder_add creates a cylinder aligned with its local Z
+# axis. In our Unity-aligned convention Z is FORE-AFT, so we rotate the cylinder
+# -90° about X to bring its long axis onto +Y (up) before applying the transform.
+def make_mast(name, z, height):
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.05, depth=height,
+                                        location=(0, 0.5 + height/2, z))
     m = bpy.context.active_object
     m.name = name
+    m.rotation_euler = (-math.pi/2, 0, 0)
+    bpy.ops.object.transform_apply(rotation=True)
     bevel_subsurf(m, bevel_offset=0.01, bevel_segs=1, subsurf_levels=1)
     m.data.materials.append(mat_wood)
     return m
 
-mast_fore = make_mast("MastFore", 0.45, 1.4)
+# MastFore at Z=+0.45 (toward bow), MastMain at Z=-0.25 (toward stern — main
+# mast is traditionally slightly aft of amidships on a small galleon).
+mast_fore = make_mast("MastFore",  0.45, 1.4)
 mast_main = make_mast("MastMain", -0.25, 1.7)
 
 # -- Sails (skinned mesh + Ripple shape key) ----------------------------------
 def make_sail(name, mast_obj, width, height, y_offset, amplitude=0.10, wavelength=0.7):
-    # Build flat in XY plane at origin; normal is +Z
+    # Build flat in XY plane at origin; plane normal is +Z.
     bpy.ops.mesh.primitive_plane_add(size=1, location=(0, 0, 0))
     sail = bpy.context.active_object
     sail.name = name
+    # width becomes the fore-aft sail dimension (along Z after rotation),
+    # height becomes vertical (Y).
     sail.scale = (width, height, 1.0)
     bpy.ops.object.transform_apply(scale=True)
-    # Subdivide for shape-key resolution
+    # Subdivide for shape-key resolution.
     select_only(sail)
     bpy.ops.object.mode_set(mode='EDIT')
     for _ in range(3):
         bpy.ops.mesh.subdivide()
     bpy.ops.object.mode_set(mode='OBJECT')
-    # Shape keys BEFORE rotation (so wave is in plane-normal direction)
+    # Shape keys BEFORE rotation — the ripple displacement is baked along the
+    # plane's initial +Z normal and rides the rotation with the geometry.
     add_ripple_shapekeys(sail, amplitude=amplitude, wavelength=wavelength)
-    # Rotate so the plane is vertical (normal becomes -Y, billowing toward viewer)
-    sail.rotation_euler = (math.pi/2, 0, 0)
+    # Rotate +90° around Y so the plane ends up in the YZ-plane with normal +X.
+    # Previous rotation was about X, which put the sail in the XZ-plane (horizontal).
+    sail.rotation_euler = (0, math.pi/2, 0)
     bpy.ops.object.transform_apply(rotation=True)
-    # Position on mast
-    sail.location = (mast_obj.location.x, mast_obj.location.y + y_offset, 0)
+    # Position on mast: same Z as the mast (fore-aft), Y shifted by y_offset.
+    sail.location = (0, mast_obj.location.y + y_offset, mast_obj.location.z)
     sail.data.materials.append(mat_sail)
     bpy.ops.object.shade_smooth()
-    # Dummy armature so Unity imports as SkinnedMeshRenderer
+    # Dummy armature so Unity imports as SkinnedMeshRenderer.
     add_dummy_armature(name + "_Armature", sail)
     return sail
 
-# Amplitude bumped from 0.04 to 0.10: at the old value the sail ripple was ~4cm on a
-# 60-100cm sail, which read as "static" in play. 10cm is visibly billowing without
-# looking like the sail is deflating.
-sail_fore = make_sail("SailFore", mast_fore, width=0.6, height=1.0, y_offset=0.0, amplitude=0.10, wavelength=0.7)
+# Amplitude 0.10: at the old value (0.04) the sail ripple was ~4cm on a 60-100cm
+# sail and read as static in play. 10cm is visibly billowing without deflating
+# the sail shape.
+sail_fore = make_sail("SailFore", mast_fore, width=0.6,  height=1.0, y_offset=0.0, amplitude=0.10, wavelength=0.7)
 sail_main = make_sail("SailMain", mast_main, width=0.75, height=1.2, y_offset=0.1, amplitude=0.10, wavelength=0.7)
 
-# -- Flag (skinned mesh + Ripple shape key, anchored at -X edge) --------------
+# -- Flag (skinned mesh + Ripple shape keys, anchored at mast edge) -----------
+# Flag is authored flat in XY (just like sails), then rotated around Y so it
+# stands vertical in the YZ-plane with normal along +X. The `weight_along_local_x`
+# anchor applied BEFORE rotation pins the original -X edge (pre-rotation) — which
+# after R_y(+90°) ends up as the +Z edge — so the flag's "mast" edge in the
+# rotated frame sits at local +Z. We offset the flag's origin -0.13 along Z from
+# the mast so that anchor edge lands right at the mast.
 bpy.ops.mesh.primitive_plane_add(size=1, location=(0, 0, 0))
 flag = bpy.context.active_object
 flag.name = "Flag"
@@ -266,23 +297,29 @@ for _ in range(2):
     bpy.ops.mesh.subdivide()
 bpy.ops.object.mode_set(mode='OBJECT')
 add_ripple_shapekeys(flag, amplitude=0.18, wavelength=0.4, weight_along_local_x=True)
-flag.rotation_euler = (math.pi/2, 0, 0)
+flag.rotation_euler = (0, math.pi/2, 0)
 bpy.ops.object.transform_apply(rotation=True)
-# Place at top of MastMain, offset so the -X edge is at the mast
-flag.location = (mast_main.location.x + 0.13, mast_main.location.y + 0.85, 0)
+flag.location = (0, mast_main.location.y + 0.85, mast_main.location.z - 0.13)
 flag.data.materials.append(mat_sail)
 bpy.ops.object.shade_smooth()
 add_dummy_armature("Flag_Armature", flag)
 
 # -- Cannons (rigid, fixed angles) --------------------------------------------
-# Default cylinder has its long axis along +Z. The boat's lateral axis is also +Z
-# (cube hull was scaled along X/Y/Z = length/height/width). So no rotation needed --
-# cannons are placed at z = +/-0.42 with their barrels naturally pointing +/-Z.
+# In the Unity-aligned frame, the boat's port-starboard direction is X, so the
+# cannon barrels must lie along X. Blender's cylinder primitive is created along
+# local Z, so we rotate +90° about Y to re-align the barrel along +X, then apply.
+#
+# Cannon centre sits at (+/-0.42, 0.45, 0): midway along the hull's length (Z=0),
+# at amidships deck height (Y=0.45), on the hull edge (X=+/-0.42). With barrel
+# depth 0.35, half of the barrel pokes out of the gunport and half sits inside.
 def make_cannon(name, port_side):
-    """port_side: -1 for port (negative Z), +1 for starboard"""
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.06, depth=0.35, location=(0.0, 0.45, 0.42 * port_side))
+    """port_side: -1 for port (-X), +1 for starboard (+X)."""
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.06, depth=0.35,
+                                        location=(0.42 * port_side, 0.45, 0.0))
     c = bpy.context.active_object
     c.name = name
+    c.rotation_euler = (0, math.pi/2, 0)
+    bpy.ops.object.transform_apply(rotation=True)
     bevel_subsurf(c, bevel_offset=0.015, bevel_segs=1, subsurf_levels=1)
     c.data.materials.append(mat_iron)
     return c
