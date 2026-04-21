@@ -37,6 +37,9 @@ public static class TowerCosts
     {
         { "tack000", new TowerInfo(300, "UI/tack_icon", 3f) },
         { "sniper000", new TowerInfo(500, "UI/sniper_icon", 7f) },
+        // Water-only: TowerPlacer reads SurfaceType.Water to swap the placement raycast
+        // layer mask and reject placements over ground.
+        { "boat000", new TowerInfo(450, "UI/boat_icon", 5.5f, SurfaceType.Water) },
     };
 
     // [towerType][path index][upgrade level] = UpgradeInfo

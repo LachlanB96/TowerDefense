@@ -8,6 +8,11 @@ public class TowerPlacer : MonoBehaviour
     [SerializeField] private GameObject _towerPrefab;
     [SerializeField] private GameObject _sniperPrefab;
     [SerializeField] private GameObject _knightPrefab;
+    // Boat 000 root prefab (carries BoatAnimator + rigged FBX hierarchy).
+    // BoatAttack is added at runtime via _placementSetup, mirroring tack000's pattern.
+    [SerializeField] private GameObject _boatPrefab;
+    // Cannonball projectile prefab passed to each placed boat so BoatAttack can spawn it.
+    [SerializeField] private GameObject _boatBallPrefab;
     [SerializeField] private LayerMask _groundLayer;
     [SerializeField] private LayerMask _waterLayer;
     [SerializeField] private float _overlapRadius = 1.4f;
@@ -37,6 +42,8 @@ public class TowerPlacer : MonoBehaviour
     private static readonly Vector3 DEV_TACK_POS = new Vector3(13.96f, -0.05f, 8.70f);
     private static readonly Vector3 DEV_SNIPER_POS = new Vector3(10f, -0.05f, 6f);
     private static readonly Vector3 DEV_KNIGHT_POS = new Vector3(15.56f, -0.05f, 8.70f);
+    // Temporary dev auto-place for iteration on boat animation/combat; reverted in Task 10.
+    private static readonly Vector3 DEV_BOAT_POS = new Vector3(5f, 0.05f, 3f);
     // ─────────────────────────────────────────────────────
 
     void Start()
@@ -48,6 +55,7 @@ public class TowerPlacer : MonoBehaviour
             { "tack000", _towerPrefab },
             { "sniper000", _sniperPrefab },
             { "knight000", _knightPrefab },
+            { "boat000", _boatPrefab },
         };
 
         _placementSetup = new Dictionary<string, System.Action<GameObject>>
@@ -73,6 +81,23 @@ public class TowerPlacer : MonoBehaviour
                     SilentKnightSetup.Configure(hero);
                 }
             },
+            { "boat000", boat =>
+                {
+                    // BoatAttack is added at runtime (not baked into the prefab) so
+                    // tuning knobs stay alongside other towers' setup actions here.
+                    var atk = boat.AddComponent<BoatAttack>();
+                    atk.damage = 2;
+                    atk.pierce = 1;
+                    atk.cooldown = 1.3f;
+                    atk.range = 5.5f;
+                    atk.projectileSpeed = 18f;
+                    atk.projectilePrefab = _boatBallPrefab;
+
+                    // Kick off the placement drop+splash animation the frame the boat spawns.
+                    var anim = boat.GetComponent<BoatAnimator>();
+                    if (anim != null) anim.PlayPlacement();
+                }
+            },
         };
 
         BuildShopPanel();
@@ -82,6 +107,7 @@ public class TowerPlacer : MonoBehaviour
             DevPlaceTower("tack000", DEV_TACK_POS);
             DevPlaceTower("sniper000", DEV_SNIPER_POS);
             DevPlaceTower("knight000", DEV_KNIGHT_POS);
+            DevPlaceTower("boat000", DEV_BOAT_POS);
         }
     }
 
