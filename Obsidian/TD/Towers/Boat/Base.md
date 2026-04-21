@@ -76,9 +76,9 @@ Every fixed update the boat picks the closest enemy in `Spawn.UnitsParent` withi
 - Crosspath restrictions: *TBD.*
 
 ## Upgrade Paths
-- [[Path1]] — *Theme: artillery (TBD details).*
-- [[Path2]] — *Theme: support (TBD details).*
-- [[Path3]] — *Theme: income (TBD details).*
+- [[Path1]] — *Theme: artillery (heavier cannons, AOE shells; details TBD in future sub-project).*
+- [[Path2]] — *Theme: support (details TBD in future sub-project).*
+- [[Path3]] — *Theme: income (details TBD in future sub-project).*
 
 ## Crosspath Synergies
 See [[Crosspaths]].

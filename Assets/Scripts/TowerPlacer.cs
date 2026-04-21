@@ -42,8 +42,6 @@ public class TowerPlacer : MonoBehaviour
     private static readonly Vector3 DEV_TACK_POS = new Vector3(13.96f, -0.05f, 8.70f);
     private static readonly Vector3 DEV_SNIPER_POS = new Vector3(10f, -0.05f, 6f);
     private static readonly Vector3 DEV_KNIGHT_POS = new Vector3(15.56f, -0.05f, 8.70f);
-    // Temporary dev auto-place for iteration on boat animation/combat; reverted in Task 10.
-    private static readonly Vector3 DEV_BOAT_POS = new Vector3(5f, 0.05f, 3f);
     // ─────────────────────────────────────────────────────
 
     void Start()
@@ -107,7 +105,6 @@ public class TowerPlacer : MonoBehaviour
             DevPlaceTower("tack000", DEV_TACK_POS);
             DevPlaceTower("sniper000", DEV_SNIPER_POS);
             DevPlaceTower("knight000", DEV_KNIGHT_POS);
-            DevPlaceTower("boat000", DEV_BOAT_POS);
         }
     }
 
