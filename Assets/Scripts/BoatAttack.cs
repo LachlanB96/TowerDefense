@@ -53,6 +53,9 @@ public class BoatAttack : MonoBehaviour, ITowerAttack
 
     private SquashStretch _squash;
     private BoatAnimator _animator;
+    // TowerData carries the kill / damage tallies. Every projectile this tower spawns
+    // is credited back here via IDamageCredit so the game UI and sell-value math stay correct.
+    private TowerData _towerData;
 
     void Start()
     {
@@ -61,6 +64,7 @@ public class BoatAttack : MonoBehaviour, ITowerAttack
         _cannonL = _turret.Find("CannonPort_L");
         _cannonR = _turret.Find("CannonPort_R");
         _animator = GetComponent<BoatAnimator>();
+        _towerData = GetComponent<TowerData>();
 
         // Per-tower SquashStretch registration pattern (mirrors TackAttack.Start):
         // we add the component if missing, then enumerate direct children of the turret
@@ -147,6 +151,9 @@ public class BoatAttack : MonoBehaviour, ITowerAttack
         // +1f beyond tower range gives a small grace margin so balls flying near the edge
         // don't despawn mid-flight before reaching an enemy at the boundary.
         v.maxRange = range + 1f;
+        // Credit back to TowerData so kill/damage tallies show up — same pattern as
+        // SniperAttack / TackStrategies. Without this, boat stats stay at zero.
+        v.source = _towerData;
     }
 
     /// <summary>
