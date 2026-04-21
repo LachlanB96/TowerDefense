@@ -185,16 +185,14 @@ public class BoatAnimator : MonoBehaviour
         if (_mastMain != null)
             _mastMain.localRotation = _mastMainRest * Quaternion.Euler(0f, 0f, Mathf.Sin(t * 1.2f + 1.7f) * 1.5f + _mastMainImpulse);
 
-        // Sail/flag cloth: blendshape weight cycles 0–100 over a sine. The flag runs
-        // faster (3.0 Hz vs 2.0 Hz) because smaller cloth flutters at a higher
-        // frequency in reality, and the +0.5 rad offset on SailMain keeps the two
-        // sails from pumping in lockstep.
-        if (_sailFore != null && _sailFore.sharedMesh.blendShapeCount > 0)
-            _sailFore.SetBlendShapeWeight(0, (Mathf.Sin(t * 2.0f) * 0.5f + 0.5f) * 100f);
-        if (_sailMain != null && _sailMain.sharedMesh.blendShapeCount > 0)
-            _sailMain.SetBlendShapeWeight(0, (Mathf.Sin(t * 2.0f + 0.5f) * 0.5f + 0.5f) * 100f);
-        if (_flag != null && _flag.sharedMesh.blendShapeCount > 0)
-            _flag.SetBlendShapeWeight(0, (Mathf.Sin(t * 3.0f) * 0.5f + 0.5f) * 100f);
+        // Sail/flag cloth: two blendshapes per mesh ("Ripple" = sin(x), "Ripple_Q" = cos(x))
+        // driven by sin(t)/cos(t) so their sum is sin(x+t) — a wave that TRAVELS along the sail.
+        // A single shape key would just pulse in place, which reads as static in play.
+        // The flag runs faster (3 Hz vs 2 Hz) because smaller cloth flutters at a higher
+        // frequency; +0.7 rad offset on SailMain keeps the two sails out of phase.
+        DriveRippleWave(_sailFore, t * 2.0f);
+        DriveRippleWave(_sailMain, t * 2.0f + 0.7f);
+        DriveRippleWave(_flag,     t * 3.0f);
 
         // ── Cannon recoil ────────────────────────────────────────────────────────
         // Advances the recoil clock regardless of fire state — RecoilCurve returns 0
@@ -202,6 +200,27 @@ public class BoatAnimator : MonoBehaviour
         _shootT += dt;
         if (_cannonL != null) _cannonL.localPosition = _cannonLRest + RecoilOffset(_cannonL) * RecoilCurve(_shootT);
         if (_cannonR != null) _cannonR.localPosition = _cannonRRest + RecoilOffset(_cannonR) * RecoilCurve(_shootT);
+    }
+
+    /// <summary>
+    /// Drives the two quadrature-phase blendshapes on a cloth mesh so their sum produces
+    /// a traveling wave. Uses signed weights (−100..+100), which Unity's SkinnedMeshRenderer
+    /// accepts even though the inspector clamps 0..100; this is deliberate — the blendshape
+    /// deltas are multiplied by weight/100 linearly, so a negative weight just flips the
+    /// displacement sign. Using 0..100 + DC-shift would leave a permanent bulge at rest.
+    /// When the mesh has fewer than 2 blendshapes this safely falls back to a pulsing
+    /// single key, preserving compatibility with older assets.
+    /// </summary>
+    private static void DriveRippleWave(SkinnedMeshRenderer smr, float phase)
+    {
+        if (smr == null || smr.sharedMesh == null) return;
+        int bs = smr.sharedMesh.blendShapeCount;
+        if (bs == 0) return;
+
+        // Ripple (sin(x)) × cos(t)  +  Ripple_Q (cos(x)) × sin(t)  =  sin(x + t)   traveling wave
+        smr.SetBlendShapeWeight(0, Mathf.Cos(phase) * 100f);
+        if (bs >= 2)
+            smr.SetBlendShapeWeight(1, Mathf.Sin(phase) * 100f);
     }
 
     /// <summary>

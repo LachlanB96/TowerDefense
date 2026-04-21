@@ -42,24 +42,29 @@ def bevel_subsurf(obj, bevel_offset=0.08, bevel_segs=2, subsurf_levels=2):
     bpy.ops.object.modifier_apply(modifier="Subsurf")
     bpy.ops.object.shade_smooth()
 
-def add_ripple_shapekey(obj, amplitude, wavelength, weight_along_local_x=False):
-    """Bake a sine wave into a shape key 'Ripple'.
+def add_ripple_shapekeys(obj, amplitude, wavelength, weight_along_local_x=False):
+    """Bake TWO quadrature-phase sine wave shape keys: 'Ripple' (phase 0) and 'Ripple_Q' (phase pi/2).
+    At runtime the animator drives these with cos(t) and sin(t) so their sum is a traveling wave
+    sin(x+t) instead of a static-shape pulse.
+
     Wave phase travels along local Y; displacement is along local Z (the plane normal).
-    If weight_along_local_x: weight = (x_norm) so the +X edge is anchored."""
+    If weight_along_local_x: weight = x_norm so the -X edge is anchored (flag pole side)."""
     if not obj.data.shape_keys:
         obj.shape_key_add(name='Basis')
-    sk = obj.shape_key_add(name='Ripple')
+    sk0 = obj.shape_key_add(name='Ripple')
+    sk1 = obj.shape_key_add(name='Ripple_Q')
     xs = [v.co.x for v in obj.data.vertices]
     x_min, x_max = min(xs), max(xs)
     x_range = max(0.001, x_max - x_min)
     for i, v in enumerate(obj.data.vertices):
         phase = (v.co.y / wavelength) * 2.0 * math.pi
-        disp = amplitude * math.sin(phase)
-        if weight_along_local_x:
-            # Anchor at -X edge (mast side); free at +X edge
-            w = (v.co.x - x_min) / x_range
-            disp *= w
-        sk.data[i].co = v.co + Vector((0.0, 0.0, disp))
+        w = (v.co.x - x_min) / x_range if weight_along_local_x else 1.0
+        # sk0 = sin(phase) * w, sk1 = cos(phase) * w. Paired with sin(t)/cos(t) weights these
+        # sum to sin(phase + t) * w — a wave that travels along local Y.
+        disp0 = amplitude * math.sin(phase) * w
+        disp1 = amplitude * math.cos(phase) * w
+        sk0.data[i].co = v.co + Vector((0.0, 0.0, disp0))
+        sk1.data[i].co = v.co + Vector((0.0, 0.0, disp1))
 
 def add_dummy_armature(name, mesh_obj):
     """Add a single-bone armature, parent the mesh to it, weight all verts to the bone.
@@ -107,7 +112,7 @@ mast_fore = make_mast("MastFore", 0.45, 1.4)
 mast_main = make_mast("MastMain", -0.25, 1.7)
 
 # -- Sails (skinned mesh + Ripple shape key) ----------------------------------
-def make_sail(name, mast_obj, width, height, y_offset, amplitude=0.04, wavelength=0.7):
+def make_sail(name, mast_obj, width, height, y_offset, amplitude=0.10, wavelength=0.7):
     # Build flat in XY plane at origin; normal is +Z
     bpy.ops.mesh.primitive_plane_add(size=1, location=(0, 0, 0))
     sail = bpy.context.active_object
@@ -120,8 +125,8 @@ def make_sail(name, mast_obj, width, height, y_offset, amplitude=0.04, wavelengt
     for _ in range(3):
         bpy.ops.mesh.subdivide()
     bpy.ops.object.mode_set(mode='OBJECT')
-    # Shape key BEFORE rotation (so wave is in plane-normal direction)
-    add_ripple_shapekey(sail, amplitude=amplitude, wavelength=wavelength)
+    # Shape keys BEFORE rotation (so wave is in plane-normal direction)
+    add_ripple_shapekeys(sail, amplitude=amplitude, wavelength=wavelength)
     # Rotate so the plane is vertical (normal becomes -Y, billowing toward viewer)
     sail.rotation_euler = (math.pi/2, 0, 0)
     bpy.ops.object.transform_apply(rotation=True)
@@ -133,8 +138,11 @@ def make_sail(name, mast_obj, width, height, y_offset, amplitude=0.04, wavelengt
     add_dummy_armature(name + "_Armature", sail)
     return sail
 
-sail_fore = make_sail("SailFore", mast_fore, width=0.6, height=1.0, y_offset=0.0, amplitude=0.04, wavelength=0.7)
-sail_main = make_sail("SailMain", mast_main, width=0.75, height=1.2, y_offset=0.1, amplitude=0.04, wavelength=0.7)
+# Amplitude bumped from 0.04 to 0.10: at the old value the sail ripple was ~4cm on a
+# 60-100cm sail, which read as "static" in play. 10cm is visibly billowing without
+# looking like the sail is deflating.
+sail_fore = make_sail("SailFore", mast_fore, width=0.6, height=1.0, y_offset=0.0, amplitude=0.10, wavelength=0.7)
+sail_main = make_sail("SailMain", mast_main, width=0.75, height=1.2, y_offset=0.1, amplitude=0.10, wavelength=0.7)
 
 # -- Flag (skinned mesh + Ripple shape key, anchored at -X edge) --------------
 bpy.ops.mesh.primitive_plane_add(size=1, location=(0, 0, 0))
@@ -147,7 +155,7 @@ bpy.ops.object.mode_set(mode='EDIT')
 for _ in range(2):
     bpy.ops.mesh.subdivide()
 bpy.ops.object.mode_set(mode='OBJECT')
-add_ripple_shapekey(flag, amplitude=0.10, wavelength=0.4, weight_along_local_x=True)
+add_ripple_shapekeys(flag, amplitude=0.18, wavelength=0.4, weight_along_local_x=True)
 flag.rotation_euler = (math.pi/2, 0, 0)
 bpy.ops.object.transform_apply(rotation=True)
 # Place at top of MastMain, offset so the -X edge is at the mast
