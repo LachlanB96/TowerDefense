@@ -2,7 +2,7 @@ using UnityEngine;
 
 public static class SfxPlayer
 {
-    public static void PlayOneShot(string resourcePath, Vector3 worldPos, float volume = 1f)
+    public static void PlayOneShot(string resourcePath, Vector3 worldPos, float volume = 1f, float pitchJitter = 0f)
     {
         var clip = Resources.Load<AudioClip>(resourcePath);
         if (clip == null)
@@ -16,6 +16,7 @@ public static class SfxPlayer
         var src = go.AddComponent<AudioSource>();
         src.clip = clip;
         src.volume = volume;
+        if (pitchJitter > 0f) src.pitch = 1f + Random.Range(-pitchJitter, pitchJitter);
         src.spatialBlend = 0f;
         src.playOnAwake = false;
         src.Play();
