@@ -1,4 +1,5 @@
 import bpy
+import bmesh
 import math
 from mathutils import Vector
 
@@ -81,23 +82,132 @@ def add_dummy_armature(name, mesh_obj):
     mod.object = arm
     return arm
 
-# -- Hull ----------------------------------------------------------------------
-bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0.2, 0))
-hull = bpy.context.active_object
-hull.name = "Hull"
-hull.scale = (1.1, 0.5, 0.45)
-bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-bevel_subsurf(hull, bevel_offset=0.18, bevel_segs=3, subsurf_levels=2)
+# -- Hull (shaped galleon) -----------------------------------------------------
+# The hull is built by lofting between cross-section ribs along the +X (bow) axis.
+# Each rib has 5 vertices forming a shallow U: keel (bottom centre), chine port +
+# starboard (widest point under water), rail port + starboard (top edge of hull).
+#
+# Shaping rules embedded in the section table:
+#   * Sheer   — deck_y rises at bow and stern (hull is taller at the ends).
+#   * Bow     — final rib collapses to a point at Z=0, producing a vertical cutwater.
+#   * Stern   — first rib has finite width; a pentagon cap closes the transom.
+#   * Keel    — chine_width narrows toward the ends so the underwater body tapers
+#               in as well as the deck line.
+#
+# Row format: (x, keel_y, deck_y, half_width_keel, half_width_deck)
+_SECTIONS = [
+    (-1.10,  0.05,  0.70,  0.12,  0.32),   # stern transom (flat back face)
+    (-0.95, -0.02,  0.62,  0.25,  0.40),
+    (-0.60, -0.10,  0.55,  0.30,  0.42),
+    (-0.20, -0.12,  0.52,  0.32,  0.42),
+    ( 0.00, -0.12,  0.50,  0.32,  0.42),   # midship — widest beam
+    ( 0.20, -0.12,  0.52,  0.32,  0.42),
+    ( 0.60, -0.10,  0.55,  0.25,  0.38),
+    ( 0.90, -0.05,  0.60,  0.10,  0.20),
+    ( 1.10,  0.10,  0.68,  0.00,  0.00),   # bow cutwater (collapsed to a point)
+]
+
+def build_hull():
+    """Construct the shaped hull mesh using bmesh. Returns the created Object."""
+    mesh = bpy.data.meshes.new("HullMesh")
+    obj = bpy.data.objects.new("Hull", mesh)
+    bpy.context.collection.objects.link(obj)
+    bm = bmesh.new()
+
+    # Build one rib of 5 verts per section. Rib layout (left-to-right when viewed
+    # from above, +Z starboard): keel, chine_port, rail_port, rail_stbd, chine_stbd.
+    ribs = []
+    for (x, ky, dy, hw_k, hw_d) in _SECTIONS:
+        keel = bm.verts.new((x, ky, 0.0))
+        cp   = bm.verts.new((x, ky, -hw_k))
+        rp   = bm.verts.new((x, dy, -hw_d))
+        rs   = bm.verts.new((x, dy,  hw_d))
+        cs   = bm.verts.new((x, ky,  hw_k))
+        ribs.append((keel, cp, rp, rs, cs))
+
+    # Bridge adjacent ribs with 5 quads: 2 side panels per flank, plus the deck top.
+    # Winding chosen so normals point outward; a final recalc_face_normals pass cleans up.
+    for i in range(len(ribs) - 1):
+        ak, acp, arp, ars, acs = ribs[i]
+        bk, bcp, brp, brs, bcs = ribs[i + 1]
+        bm.faces.new([ak,  acp, bcp, bk])     # bottom port    (keel → chine_p)
+        bm.faces.new([acp, arp, brp, bcp])    # side port      (chine_p → rail_p)
+        bm.faces.new([arp, ars, brs, brp])    # deck top       (rail_p → rail_s)
+        bm.faces.new([ars, acs, bcs, brs])    # side starboard (rail_s → chine_s)
+        bm.faces.new([acs, ak,  bk,  bcs])    # bottom stbd    (chine_s → keel)
+
+    # Stern transom: fill the first rib with a pentagon. The last (bow) rib is a
+    # degenerate 0-width line, so bridging handles it naturally — no cap needed.
+    sk, scp, srp, srs, scs = ribs[0]
+    bm.faces.new([sk, scs, srs, srp, scp])
+
+    bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.update()
+
+    # Select so subsequent edit-mode ops target this hull.
+    for o in bpy.context.scene.objects:
+        o.select_set(False)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    return obj
+
+hull = build_hull()
+# Light bevel + one subdivision smooths the faceted rib geometry into flowing
+# planks without losing the stern transom's corners.
+bevel_subsurf(hull, bevel_offset=0.02, bevel_segs=1, subsurf_levels=1)
 hull.data.materials.append(mat_wood)
 
-# -- DeckRail (thin band on top of hull) --------------------------------------
-bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0.5, 0))
-rail = bpy.context.active_object
-rail.name = "DeckRail"
-rail.scale = (1.05, 0.06, 0.42)
-bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-bevel_subsurf(rail, bevel_offset=0.03, bevel_segs=2, subsurf_levels=1)
-rail.data.materials.append(mat_wood)
+# -- Strakes (horizontal planks running the length of the hull) ---------------
+# Two reinforcing planks per side — a waterline strake low on the hull and a
+# heavier "wale" just below deck. Implemented as thin tapered boxes rather than
+# true hull-conforming strips; at the TD camera distance they read as planking.
+def make_strake(name, y, half_width, length_half, thickness=0.020, height=0.035):
+    out = []
+    for side, z in (("L", -half_width), ("R", +half_width)):
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0.0, y, z))
+        s = bpy.context.active_object
+        s.name = f"{name}_{side}"
+        s.scale = (length_half, height, thickness)
+        bpy.ops.object.transform_apply(scale=True)
+        # Light bevel so the plank edge catches light, but skip subsurf — we want
+        # the silhouette of a distinct plank, not a rounded cushion.
+        select_only(s)
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='SELECT')
+        bpy.ops.mesh.bevel(offset=0.006, segments=1)
+        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.shade_smooth()
+        s.data.materials.append(mat_wood)
+        out.append(s)
+    return out
+
+# Waterline strake sits just above the waterline at y=0.05. Main wale rides
+# higher at y=0.34, just under deck level. Both are 0.43 out from centerline so
+# they sit flush with the midship hull edge (hw_deck=0.42) and pop a tiny bit
+# proud of the hull everywhere else — reads as a proud plank edge.
+strakes  = make_strake("Waterline", y=0.05, half_width=0.43, length_half=0.92)
+strakes += make_strake("MainWale",  y=0.34, half_width=0.435, length_half=1.00)
+
+# -- Gunport frames (iron trim around the cannon openings in the hull) --------
+# Small iron-material squares bolted to the hull side, framing each cannon as it
+# passes through. They sit a hair outside the hull (Z=+/-0.44 vs hull 0.42) so
+# they visibly frame the opening rather than clipping inside the planks.
+def make_gunport(name, z_side):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(0.0, 0.44, 0.44 * z_side))
+    g = bpy.context.active_object
+    g.name = name
+    # Wider and taller than the cannon barrel (0.12 dia) so the frame is visible
+    # around the cannon; thin along Z (into the hull) so it reads as surface trim.
+    g.scale = (0.18, 0.18, 0.025)
+    bpy.ops.object.transform_apply(scale=True)
+    bevel_subsurf(g, bevel_offset=0.012, bevel_segs=1, subsurf_levels=1)
+    g.data.materials.append(mat_iron)
+    return g
+
+gunport_l = make_gunport("GunportFrame_L", -1)
+gunport_r = make_gunport("GunportFrame_R", +1)
 
 # -- Masts ---------------------------------------------------------------------
 def make_mast(name, x, height):
@@ -190,8 +300,11 @@ bpy.ops.object.empty_add(type='PLAIN_AXES', location=(0, 0, 0))
 boat_root = bpy.context.active_object
 boat_root.name = "Boat"
 
-# Parent every visible part under Turret (which sits under Boat)
-for child in [hull, rail, mast_fore, mast_main, sail_fore, sail_main, flag, cannon_l, cannon_r]:
+# Parent every visible part under Turret (which sits under Boat). Strakes are a
+# list of 4 thin boxes (Waterline_L/R + MainWale_L/R) — flattened into the loop.
+hull_parts = [hull] + strakes + [gunport_l, gunport_r, mast_fore, mast_main,
+                                 sail_fore, sail_main, flag, cannon_l, cannon_r]
+for child in hull_parts:
     child.parent = turret
 turret.parent = boat_root
 
