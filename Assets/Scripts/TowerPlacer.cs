@@ -9,6 +9,7 @@ public class TowerPlacer : MonoBehaviour
     [SerializeField] private GameObject _sniperPrefab;
     [SerializeField] private GameObject _knightPrefab;
     [SerializeField] private LayerMask _groundLayer;
+    [SerializeField] private LayerMask _waterLayer;
     [SerializeField] private float _overlapRadius = 1.4f;
 
     [Header("Projectile Appearance")]
@@ -331,7 +332,10 @@ public class TowerPlacer : MonoBehaviour
         }
 
         Ray ray = Camera.main.ScreenPointToRay(mouse.position.ReadValue());
-        if (Physics.Raycast(ray, out RaycastHit hit, 500f, _groundLayer))
+        LayerMask mask = TowerCosts.GetSurface(_placingType) == TowerCosts.SurfaceType.Water
+            ? _waterLayer
+            : _groundLayer;
+        if (Physics.Raycast(ray, out RaycastHit hit, 500f, mask))
         {
             _preview.transform.position = hit.point;
             _canPlace = !CheckOverlap(hit.point);
