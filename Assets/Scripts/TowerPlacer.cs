@@ -161,6 +161,7 @@ public class TowerPlacer : MonoBehaviour
         // Tower buttons
         MakeTowerButton("tack000", panel.transform);
         MakeTowerButton("sniper000", panel.transform);
+        MakeTowerButton("boat000", panel.transform);
 
         // Heroes
         MakeLabel("-- Heroes --", panel.transform);
