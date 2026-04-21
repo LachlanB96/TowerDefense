@@ -2,17 +2,21 @@ using System.Collections.Generic;
 
 public static class TowerCosts
 {
+    public enum SurfaceType { Land, Water }
+
     public struct TowerInfo
     {
         public int cost;
         public string iconPath;
         public float range;
+        public SurfaceType surface;
 
-        public TowerInfo(int cost, string iconPath, float range)
+        public TowerInfo(int cost, string iconPath, float range, SurfaceType surface = SurfaceType.Land)
         {
             this.cost = cost;
             this.iconPath = iconPath;
             this.range = range;
+            this.surface = surface;
         }
     }
 
@@ -75,6 +79,11 @@ public static class TowerCosts
     public static float GetRange(string towerType)
     {
         return _towerInfo.TryGetValue(towerType, out var info) ? info.range : 0f;
+    }
+
+    public static SurfaceType GetSurface(string towerType)
+    {
+        return _towerInfo.TryGetValue(towerType, out var info) ? info.surface : SurfaceType.Land;
     }
 
     public static bool TryGetUpgrade(string towerType, int path, int currentLevel, out UpgradeInfo info)
