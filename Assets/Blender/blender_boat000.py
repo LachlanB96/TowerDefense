@@ -317,24 +317,103 @@ bpy.ops.object.shade_smooth()
 add_dummy_armature("Flag_Armature", flag)
 
 # -- Cannons (rigid, fixed angles) --------------------------------------------
-# In the Unity-aligned frame, the boat's port-starboard direction is X, so the
-# cannon barrels must lie along X. Blender's cylinder primitive is created along
-# local Z, so we rotate +90° about Y to re-align the barrel along +X, then apply.
+# Each cannon is a single mesh made of 6 joined primitives so the silhouette
+# reads as a cast-bronze gun rather than a pipe:
+#   * tapered barrel (thicker at the breech, thinner at the muzzle)
+#   * muzzle lip (torus at the outer end)
+#   * 2 reinforcement rings (toruses along the barrel)
+#   * breech hemisphere (rounded back end, partly buried in the barrel)
+#   * cascabel (small ball knob behind the breech)
 #
-# Cannon centre sits at (+/-0.42, 0.45, 0): midway along the hull's length (Z=0),
-# at amidships deck height (Y=0.45), on the hull edge (X=+/-0.42). With barrel
-# depth 0.35, half of the barrel pokes out of the gunport and half sits inside.
+# Geometry lives in the boat's local frame where +X is starboard, Y is up and Z
+# is fore-aft. The barrel axis runs along ±X so the breech sits inside the hull
+# and the muzzle pokes out through the gunport.
+#
+# For port (-X) the barrel is mirrored via a -90° Y-rotation instead of +90°, so
+# the breech ends up on the inner (centerline) side for both sides symmetrically.
 def make_cannon(name, port_side):
-    """port_side: -1 for port (-X), +1 for starboard (+X)."""
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.06, depth=0.35,
-                                        location=(0.42 * port_side, 0.45, 0.0))
+    """Build a detailed cannon and return the joined mesh object.
+
+    port_side: -1 for port (-X hull side), +1 for starboard (+X).
+    """
+    sign = 1.0 if port_side > 0 else -1.0
+    base_x = 0.42 * sign          # cannon centre at the hull edge
+    inner_x = base_x - 0.175 * sign   # breech end of barrel (toward centerline)
+    outer_x = base_x + 0.175 * sign   # muzzle end of barrel
+    cy = 0.45                     # shared Y height for every part
+
+    parts = []
+
+    # Barrel — frustum with radius1 at -Z (→ inner end after rotation) and
+    # radius2 at +Z (→ outer end). For port we flip the Y-rotation sign so the
+    # larger radius (breech) still lands on the inner side.
+    bpy.ops.mesh.primitive_cone_add(radius1=0.070, radius2=0.055, depth=0.35,
+                                     vertices=24, location=(base_x, cy, 0.0))
+    barrel = bpy.context.active_object
+    bake_rotation_on_mesh(barrel, (0, (math.pi / 2) * sign, 0))
+    parts.append(barrel)
+
+    # Muzzle lip — a thin torus around the outer end of the barrel.
+    bpy.ops.mesh.primitive_torus_add(major_radius=0.062, minor_radius=0.012,
+                                     major_segments=20, minor_segments=8,
+                                     location=(outer_x, cy, 0.0))
+    muzzle = bpy.context.active_object
+    # Default torus lies in XY-plane (normal +Z); rotate so its normal aligns
+    # with the barrel axis (±X). Sign doesn't matter for a symmetric torus.
+    bake_rotation_on_mesh(muzzle, (0, math.pi / 2, 0))
+    parts.append(muzzle)
+
+    # Reinforcement rings — at 35% and 70% of barrel length measured from breech.
+    for ring_t in (0.35, 0.70):
+        rx = inner_x + (outer_x - inner_x) * ring_t
+        # Barrel radius at this t lerps from breech (0.070) to muzzle (0.055);
+        # the ring sits a little proud (≈0.010) so it casts a clear shadow line.
+        barrel_r = 0.070 + (0.055 - 0.070) * ring_t
+        bpy.ops.mesh.primitive_torus_add(major_radius=barrel_r + 0.010,
+                                         minor_radius=0.008,
+                                         major_segments=18, minor_segments=6,
+                                         location=(rx, cy, 0.0))
+        ring = bpy.context.active_object
+        bake_rotation_on_mesh(ring, (0, math.pi / 2, 0))
+        parts.append(ring)
+
+    # Breech hemisphere — full UV sphere centred at the inner barrel face; half
+    # lives inside the barrel, half sticks out as the rounded breech.
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.070, segments=16, ring_count=8,
+                                          location=(inner_x, cy, 0.0))
+    parts.append(bpy.context.active_object)
+
+    # Cascabel — small decorative knob sticking out further inward past the breech.
+    # Offset has to clear the breech sphere (radius 0.070) plus the cascabel radius
+    # (0.030), so 0.105 from inner_x ensures the knob pokes out behind the breech
+    # dome instead of hiding inside it.
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.030, segments=14, ring_count=7,
+                                          location=(inner_x - 0.105 * sign, cy, 0.0))
+    parts.append(bpy.context.active_object)
+
+    # Cascabel neck — short cylinder connecting the cascabel to the breech so the
+    # knob doesn't look like it's floating. Cylinder default is along Z; rotate to
+    # align with the barrel (±X) the same way the barrel is rotated.
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.012, depth=0.06, vertices=10,
+                                         location=(inner_x - 0.065 * sign, cy, 0.0))
+    neck = bpy.context.active_object
+    bake_rotation_on_mesh(neck, (0, (math.pi / 2) * sign, 0))
+    parts.append(neck)
+
+    # Join all parts into one mesh so Unity sees a single CannonPort_L/R object.
+    bpy.ops.object.select_all(action='DESELECT')
+    for p in parts:
+        p.select_set(True)
+    bpy.context.view_layer.objects.active = parts[0]
+    bpy.ops.object.join()
     c = bpy.context.active_object
     c.name = name
-    # Rotate vertices so the cylinder's long axis goes from Blender +Z to +X
-    # (port-starboard direction). Preserves the cannon's offset location.
-    bake_rotation_on_mesh(c, (0, math.pi/2, 0))
-    bevel_subsurf(c, bevel_offset=0.015, bevel_segs=1, subsurf_levels=1)
+
+    # One shared iron material; the join concatenates slots from each primitive
+    # so clear them all first to avoid ending up with 5 duplicate iron slots.
+    c.data.materials.clear()
     c.data.materials.append(mat_iron)
+    bpy.ops.object.shade_smooth()
     return c
 
 cannon_l = make_cannon("CannonPort_L", port_side=-1)  # port
