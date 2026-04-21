@@ -1,7 +1,19 @@
 import bpy
 import bmesh
 import math
-from mathutils import Vector
+from mathutils import Vector, Matrix
+
+def bake_rotation_on_mesh(obj, rotation_euler):
+    """Apply a rotation to an object's mesh data directly, leaving its location and
+    rotation transform untouched. Works around Blender 4.5's transform_apply
+    clobbering the object location even when only rotation=True is requested.
+
+    shape_keys=True ensures any attached blendshape data is rotated along with
+    the basis mesh — otherwise the shape key deltas stay in the un-rotated frame
+    and the blendshape morphs toward nonsense positions."""
+    rx, ry, rz = rotation_euler
+    mat = Matrix.Rotation(rz, 4, 'Z') @ Matrix.Rotation(ry, 4, 'Y') @ Matrix.Rotation(rx, 4, 'X')
+    obj.data.transform(mat, shape_keys=True)
 
 # -- Paths ---------------------------------------------------------------------
 BLEND_DST = r"C:\Users\LachlanB\TD\Assets\Blender\boat000.blend"
@@ -231,8 +243,9 @@ def make_mast(name, z, height):
                                         location=(0, 0.5 + height/2, z))
     m = bpy.context.active_object
     m.name = name
-    m.rotation_euler = (-math.pi/2, 0, 0)
-    bpy.ops.object.transform_apply(rotation=True)
+    # Rotate vertices directly so the cylinder's long axis goes from Blender +Z
+    # (default) to +Y (up). Preserves the object's location; transform_apply would not.
+    bake_rotation_on_mesh(m, (-math.pi/2, 0, 0))
     bevel_subsurf(m, bevel_offset=0.01, bevel_segs=1, subsurf_levels=1)
     m.data.materials.append(mat_wood)
     return m
@@ -261,10 +274,10 @@ def make_sail(name, mast_obj, width, height, y_offset, amplitude=0.10, wavelengt
     # Shape keys BEFORE rotation — the ripple displacement is baked along the
     # plane's initial +Z normal and rides the rotation with the geometry.
     add_ripple_shapekeys(sail, amplitude=amplitude, wavelength=wavelength)
-    # Rotate +90° around Y so the plane ends up in the YZ-plane with normal +X.
-    # Previous rotation was about X, which put the sail in the XZ-plane (horizontal).
-    sail.rotation_euler = (0, math.pi/2, 0)
-    bpy.ops.object.transform_apply(rotation=True)
+    # Rotate the mesh +90° around Y so the plane ends up in the YZ-plane with
+    # normal +X (facing port/starboard). Direct mesh.transform preserves the
+    # object's location assignment below.
+    bake_rotation_on_mesh(sail, (0, math.pi/2, 0))
     # Position on mast: same Z as the mast (fore-aft), Y shifted by y_offset.
     sail.location = (0, mast_obj.location.y + y_offset, mast_obj.location.z)
     sail.data.materials.append(mat_sail)
@@ -297,8 +310,7 @@ for _ in range(2):
     bpy.ops.mesh.subdivide()
 bpy.ops.object.mode_set(mode='OBJECT')
 add_ripple_shapekeys(flag, amplitude=0.18, wavelength=0.4, weight_along_local_x=True)
-flag.rotation_euler = (0, math.pi/2, 0)
-bpy.ops.object.transform_apply(rotation=True)
+bake_rotation_on_mesh(flag, (0, math.pi/2, 0))
 flag.location = (0, mast_main.location.y + 0.85, mast_main.location.z - 0.13)
 flag.data.materials.append(mat_sail)
 bpy.ops.object.shade_smooth()
@@ -318,8 +330,9 @@ def make_cannon(name, port_side):
                                         location=(0.42 * port_side, 0.45, 0.0))
     c = bpy.context.active_object
     c.name = name
-    c.rotation_euler = (0, math.pi/2, 0)
-    bpy.ops.object.transform_apply(rotation=True)
+    # Rotate vertices so the cylinder's long axis goes from Blender +Z to +X
+    # (port-starboard direction). Preserves the cannon's offset location.
+    bake_rotation_on_mesh(c, (0, math.pi/2, 0))
     bevel_subsurf(c, bevel_offset=0.015, bevel_segs=1, subsurf_levels=1)
     c.data.materials.append(mat_iron)
     return c
