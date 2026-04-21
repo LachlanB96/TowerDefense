@@ -66,6 +66,7 @@ public class DiskBurstStrategy : ProjectileBurstStrategy
         disk.transform.localScale = new Vector3(0.3f, 0.05f, 0.3f);
         disk.GetComponent<Renderer>().sharedMaterial = _projectileMaterial;
         Object.Destroy(disk.GetComponent<Collider>());
+        OutlineUtils.AddInvertedHull(disk.transform, Color.black);
         return disk;
     }
 }
@@ -125,6 +126,7 @@ public class AirPuffBurstStrategy : ProjectileBurstStrategy
         puff.transform.localScale = new Vector3(0.35f, 0.25f, 0.35f);
         puff.GetComponent<Renderer>().sharedMaterial = _projectileMaterial;
         Object.Destroy(puff.GetComponent<Collider>());
+        OutlineUtils.AddInvertedHull(puff.transform, new Color(0.05f, 0.15f, 0.3f));
         return puff;
     }
 }

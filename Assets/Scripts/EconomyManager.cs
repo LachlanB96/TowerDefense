@@ -15,6 +15,7 @@ public class EconomyManager : MonoBehaviour
     private Text _moneyText;
     private Text _economyText;
     private Text _livesText;
+    private Text _enemyText;
     private Image _incomeBarFill;
 
     void Awake()
@@ -39,6 +40,7 @@ public class EconomyManager : MonoBehaviour
         _moneyText.text = $"${money}";
         _economyText.text = $"Economy: {economy}";
         _livesText.text = $"\u2764 {lives}";
+        _enemyText.text = $"Enemies: {SceneContainers.Units.childCount}";
 
         float ratio = Mathf.Clamp01(_incomeTimer / INCOME_INTERVAL);
         _incomeBarFill.rectTransform.anchorMax = new Vector2(ratio, 1);
@@ -98,6 +100,10 @@ public class EconomyManager : MonoBehaviour
         // Economy text
         _economyText = MakeText("EconomyText", panel.transform, 18, new Color(0.6f, 0.9f, 0.6f));
         _economyText.text = $"Economy: {economy}";
+
+        // Live enemy count
+        _enemyText = MakeText("EnemyText", panel.transform, 18, new Color(1f, 0.8f, 0.4f));
+        _enemyText.text = "Enemies: 0";
 
         // Income progress bar
         var barContainer = new GameObject("IncomeBar");

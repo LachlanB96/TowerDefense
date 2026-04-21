@@ -56,6 +56,8 @@ public static class SilentKnightSetup
 
         if (HeroManager.Instance != null)
             HeroManager.Instance.RegisterHero(hero);
+
+        SfxPlayer.PlayOneShot("SFX/knight_placed", heroObj.transform.position);
     }
 
     public static float GetZealBonus(int level)

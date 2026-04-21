@@ -27,6 +27,18 @@ public class Movement : MonoBehaviour
         maxHealth = health;
         currentWaypoint = Waypoints.transform.GetChild(waypointIndex);
         CreateHealthBar();
+        ApplyOutlines();
+    }
+
+    void ApplyOutlines()
+    {
+        var filters = GetComponentsInChildren<MeshFilter>(true);
+        foreach (var mf in filters)
+        {
+            if (mf.transform.name.StartsWith("_outline")) continue;
+            if (mf.transform.Find("_outline") != null) continue;
+            OutlineUtils.AddInvertedHull(mf.transform, Color.black, 1.1f);
+        }
     }
 
     void Update()
