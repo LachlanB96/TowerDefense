@@ -332,13 +332,15 @@ public class TowerPlacer : MonoBehaviour
         }
 
         Ray ray = Camera.main.ScreenPointToRay(mouse.position.ReadValue());
-        LayerMask mask = TowerCosts.GetSurface(_placingType) == TowerCosts.SurfaceType.Water
+        LayerMask requiredMask = TowerCosts.GetSurface(_placingType) == TowerCosts.SurfaceType.Water
             ? _waterLayer
             : _groundLayer;
-        if (Physics.Raycast(ray, out RaycastHit hit, 500f, mask))
+        int combinedMask = _groundLayer | _waterLayer;
+        if (Physics.Raycast(ray, out RaycastHit hit, 500f, combinedMask))
         {
             _preview.transform.position = hit.point;
-            _canPlace = !CheckOverlap(hit.point);
+            bool surfaceMatch = ((1 << hit.collider.gameObject.layer) & requiredMask.value) != 0;
+            _canPlace = surfaceMatch && !CheckOverlap(hit.point);
             SetPreviewColor(_canPlace ? new Color(1f, 1f, 1f, 0.4f) : new Color(1f, 0.15f, 0.15f, 0.5f));
         }
         else
@@ -373,6 +375,7 @@ public class TowerPlacer : MonoBehaviour
         {
             if (col.transform.IsChildOf(_preview.transform)) continue;
             if (col.gameObject.layer == 8) continue; // Ground layer
+            if (col.gameObject.layer == 4) continue; // Water layer
             return true;
         }
 
