@@ -207,46 +207,87 @@ hull = build_hull()
 bevel_subsurf(hull, bevel_offset=0.02, bevel_segs=1, subsurf_levels=1)
 hull.data.materials.append(mat_wood)
 
+def hull_half_width_at(y, z):
+    """Sample the hull's half-width at (y, z) using the _SECTIONS table. Used by
+    surface-hugging features (strakes, chain trim, damage backings) so they sit
+    flush against the tapered hull instead of floating where the hull narrows.
+
+    Returns the pre-bevel hull half-width; callers typically add a small outward
+    offset to avoid z-fighting with the hull surface."""
+    for i in range(len(_SECTIONS) - 1):
+        za, zb = _SECTIONS[i][0], _SECTIONS[i + 1][0]
+        if za <= z <= zb:
+            t = (z - za) / (zb - za) if zb != za else 0.0
+            ky   = _SECTIONS[i][1] + t * (_SECTIONS[i + 1][1] - _SECTIONS[i][1])
+            dy   = _SECTIONS[i][2] + t * (_SECTIONS[i + 1][2] - _SECTIONS[i][2])
+            hw_k = _SECTIONS[i][3] + t * (_SECTIONS[i + 1][3] - _SECTIONS[i][3])
+            hw_d = _SECTIONS[i][4] + t * (_SECTIONS[i + 1][4] - _SECTIONS[i][4])
+            if dy > ky:
+                u = max(0.0, min(1.0, (y - ky) / (dy - ky)))
+                return hw_k + u * (hw_d - hw_k)
+            return hw_k
+    return 0.0
+
 # -- Strakes (horizontal planks running the length of the hull) ---------------
 # Two reinforcing planks per side — a waterline strake low on the hull and a
 # heavier "wale" just below deck. Implemented as thin tapered boxes rather than
 # true hull-conforming strips; at the TD camera distance they read as planking.
-def make_strake(name, y, half_width, length_half, thickness=0.020, height=0.035):
-    # Port/starboard is along X; the strake runs fore-aft along Z. Each strake is
-    # a thin box placed on each side of the hull at height y.
-    out = []
-    for side, x in (("L", -half_width), ("R", +half_width)):
-        bpy.ops.mesh.primitive_cube_add(size=1, location=(x, y, 0.0))
-        s = bpy.context.active_object
-        s.name = f"{name}_{side}"
-        # scale: X=thickness (perpendicular to hull side), Y=height, Z=plank length.
-        s.scale = (thickness, height, length_half)
-        bpy.ops.object.transform_apply(scale=True)
-        # Light bevel so the plank edge catches light, but skip subsurf — we want
-        # the silhouette of a distinct plank, not a rounded cushion.
-        select_only(s)
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.mesh.select_all(action='SELECT')
-        bpy.ops.mesh.bevel(offset=0.006, segments=1)
-        bpy.ops.object.mode_set(mode='OBJECT')
+def make_contour_strake(name, y, length_half, thickness=0.014, height=0.028,
+                         offset=0.002, z_samples=56):
+    """Build a strake that follows the hull's curved contour. Sample the hull
+    half-width at regular Z steps; emit a small box segment at each hull X.
+    Without this the strake sits at a fixed X and floats off the hull where the
+    hull tapers toward the bow/stern."""
+    out_parts = {"L": [], "R": []}
+    # March along Z in small steps. Each segment is a narrow box placed at the
+    # local hull X, oriented along Z. Segments are joined per side at the end.
+    step = (2.0 * length_half) / z_samples
+    for i in range(z_samples):
+        z_mid = -length_half + (i + 0.5) * step
+        hw = hull_half_width_at(y, z_mid)
+        if hw < 0.02:   # skip where the hull has effectively collapsed to a line
+            continue
+        for side_tag, side_sign in (("L", -1.0), ("R", +1.0)):
+            x_mid = (hw + offset) * side_sign
+            bpy.ops.mesh.primitive_cube_add(size=1, location=(x_mid, y, z_mid))
+            s = bpy.context.active_object
+            s.name = f"{name}_{side_tag}_Seg{i}"
+            s.scale = (thickness, height, step * 1.05)   # 1.05 overlap avoids visible gaps
+            bpy.ops.object.transform_apply(scale=True)
+            s.data.materials.append(mat_wood)
+            out_parts[side_tag].append(s)
+    # Join each side into a single mesh so the hierarchy stays tidy.
+    joined = []
+    for side_tag in ("L", "R"):
+        parts = out_parts[side_tag]
+        if not parts:
+            continue
+        bpy.ops.object.select_all(action='DESELECT')
+        for p in parts:
+            p.select_set(True)
+        bpy.context.view_layer.objects.active = parts[0]
+        bpy.ops.object.join()
+        j = bpy.context.active_object
+        j.name = f"{name}_{side_tag}"
         bpy.ops.object.shade_smooth()
-        s.data.materials.append(mat_wood)
-        out.append(s)
-    return out
+        joined.append(j)
+    return joined
 
-# Waterline strake sits just above the waterline at y=0.05. Main wale rides
-# higher at y=0.34, just under deck level. Both are 0.43 out from centerline so
-# they sit flush with the midship hull edge (hw_deck=0.42) and pop a tiny bit
-# proud of the hull everywhere else — reads as a proud plank edge.
-strakes  = make_strake("Waterline", y=0.05, half_width=0.43, length_half=0.92)
-strakes += make_strake("MainWale",  y=0.34, half_width=0.435, length_half=1.00)
+# Waterline strake just above the waterline. Main wale higher up under deck.
+# Both now follow the hull curvature instead of sitting on a fixed X.
+strakes  = make_contour_strake("Waterline", y=0.05, length_half=0.92)
+strakes += make_contour_strake("MainWale",  y=0.34, length_half=1.00)
 
 # -- Gunport frames (iron trim around the cannon openings in the hull) --------
 # Small iron-material squares bolted to the hull side, framing each cannon as it
 # passes through. They sit a hair outside the hull (X=+/-0.44 vs hull 0.42) so
 # they visibly frame the opening rather than clipping inside the planks.
 def make_gunport(name, x_side):
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(0.44 * x_side, 0.44, 0.0))
+    # Sample the hull's X at the gunport's (y=0.44, z=0) so the frame sits flush
+    # on the hull's deck-level edge — 0.410 at midship after hull taper.
+    hw_here = hull_half_width_at(0.44, 0.0)
+    bpy.ops.mesh.primitive_cube_add(size=1,
+                                     location=((hw_here + 0.012) * x_side, 0.44, 0.0))
     g = bpy.context.active_object
     g.name = name
     # Scale: thin along X (perpendicular to hull side — surface trim thickness),
@@ -769,14 +810,21 @@ extras += make_railing_segment("Rail_R_Aft",  x_side=+0.40, z_start=-0.50, z_end
 # the viewer sees "weathered recess" rather than "empty transparency".
 mat_wood_dark = make_material("BoatWoodDark", (0.04, 0.025, 0.02, 1.0), 0.0, 0.05)
 
-def cut_damage_hole(name, x_side, y_center, z_center, size_y, size_z):
+def cut_damage_hole(name, side_sign, y_center, z_center, size_y, size_z):
     """Cut a plank-shaped hole through the hull at the given hull-side position
-    and return the dark backing plate that fills the recess behind it."""
-    side_sign = 1.0 if x_side > 0 else -1.0
+    and return the dark backing plate that fills the recess behind it.
+
+    side_sign: -1 for port, +1 for starboard. The actual hull X at (y_center,
+    z_center) is sampled so the cutter and backing sit at the correct depth even
+    where the hull tapers (bow/stern)."""
+    hw = hull_half_width_at(y_center, z_center)
+    # Cutter sits straddling the hull surface so it punches cleanly through both
+    # inner and outer hull faces. Centre it ON the hull surface.
+    cutter_x = hw * side_sign
 
     # 1. Cutter: axis-aligned box punching through the hull. X-thickness 0.14 is
     # larger than the hull wall so the cut goes all the way through.
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(x_side, y_center, z_center))
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(cutter_x, y_center, z_center))
     cutter = bpy.context.active_object
     cutter.name = f"_Cutter_{name}"
     cutter.scale = (0.14, size_y, size_z)
@@ -795,9 +843,10 @@ def cut_damage_hole(name, x_side, y_center, z_center, size_y, size_z):
     bpy.data.objects.remove(cutter, do_unlink=True)
 
     # 4. Backing plate: slightly smaller than the hole so its edges don't poke
-    # through the hull, set back 0.025 from the hull surface to read as a recess.
-    bx = x_side - 0.025 * side_sign
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(bx, y_center, z_center))
+    # through the hull, set back 0.025 from the hull surface (INWARD) to read
+    # as a proper recess rather than a protruding rectangle.
+    backing_x = (hw - 0.025) * side_sign
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(backing_x, y_center, z_center))
     back = bpy.context.active_object
     back.name = f"Damage_Recess_{name}"
     back.scale = (0.015, size_y * 0.92, size_z * 0.92)
@@ -806,11 +855,13 @@ def cut_damage_hole(name, x_side, y_center, z_center, size_y, size_z):
     return back
 
 # 4 missing-plank holes at varied positions + sizes for a weathered look.
+# side_sign picks port (-1) / starboard (+1); the X position is sampled from the
+# actual hull contour so holes sit flush even near the tapered bow/stern.
 extras += [
-    cut_damage_hole("L1", -0.42, y_center=0.22, z_center=-0.35, size_y=0.09, size_z=0.26),
-    cut_damage_hole("L2", -0.42, y_center=0.12, z_center=+0.15, size_y=0.06, size_z=0.18),
-    cut_damage_hole("R1", +0.42, y_center=0.24, z_center=-0.20, size_y=0.07, size_z=0.22),
-    cut_damage_hole("R2", +0.42, y_center=0.18, z_center=+0.60, size_y=0.05, size_z=0.16),
+    cut_damage_hole("L1", -1, y_center=0.22, z_center=-0.35, size_y=0.09, size_z=0.26),
+    cut_damage_hole("L2", -1, y_center=0.12, z_center=+0.15, size_y=0.06, size_z=0.18),
+    cut_damage_hole("R1", +1, y_center=0.24, z_center=-0.20, size_y=0.07, size_z=0.22),
+    cut_damage_hole("R2", +1, y_center=0.18, z_center=+0.60, size_y=0.05, size_z=0.16),
 ]
 
 # --- Figurehead (skull at the prow) ------------------------------------------
@@ -900,22 +951,42 @@ def make_stern_lantern():
 extras += make_stern_lantern()
 
 # --- Iron chain trim at the waterline ---------------------------------------
-def make_chain_trim(x_side, length_half=1.00):
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(x_side, 0.00, 0.0))
-    c = bpy.context.active_object
-    c.name = f"ChainTrim_{'L' if x_side < 0 else 'R'}"
-    c.scale = (0.018, 0.015, length_half)
-    bpy.ops.object.transform_apply(scale=True)
-    select_only(c)
-    bpy.ops.object.mode_set(mode='EDIT')
-    bpy.ops.mesh.select_all(action='SELECT')
-    bpy.ops.mesh.bevel(offset=0.004, segments=1)
-    bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.ops.object.shade_smooth()
-    c.data.materials.append(mat_iron)
-    return c
+# Follows the hull contour at y≈0 (waterline) — not a straight box. Same segment
+# sampling as the strakes so the trim hugs the hull all the way fore and aft.
+def make_contour_chain_trim(length_half=0.95, y=0.0, z_samples=48):
+    out_parts = {"L": [], "R": []}
+    step = (2.0 * length_half) / z_samples
+    for i in range(z_samples):
+        z_mid = -length_half + (i + 0.5) * step
+        hw = hull_half_width_at(y, z_mid)
+        if hw < 0.02:
+            continue
+        for side_tag, side_sign in (("L", -1.0), ("R", +1.0)):
+            x_mid = (hw + 0.001) * side_sign
+            bpy.ops.mesh.primitive_cube_add(size=1, location=(x_mid, y, z_mid))
+            c = bpy.context.active_object
+            c.name = f"ChainTrim_{side_tag}_Seg{i}"
+            c.scale = (0.012, 0.012, step * 1.02)
+            bpy.ops.object.transform_apply(scale=True)
+            c.data.materials.append(mat_iron)
+            out_parts[side_tag].append(c)
+    joined = []
+    for side_tag in ("L", "R"):
+        parts = out_parts[side_tag]
+        if not parts:
+            continue
+        bpy.ops.object.select_all(action='DESELECT')
+        for p in parts:
+            p.select_set(True)
+        bpy.context.view_layer.objects.active = parts[0]
+        bpy.ops.object.join()
+        j = bpy.context.active_object
+        j.name = f"ChainTrim_{side_tag}"
+        bpy.ops.object.shade_smooth()
+        joined.append(j)
+    return joined
 
-extras += [make_chain_trim(-0.44), make_chain_trim(+0.44)]
+extras += make_contour_chain_trim()
 
 # -- Turret empty + parenting -------------------------------------------------
 bpy.ops.object.empty_add(type='PLAIN_AXES', location=(0, 0, 0))
