@@ -79,19 +79,19 @@ public static class SilentKnightSetup
         var currentAffected = new HashSet<MonoBehaviour>();
         Vector3 heroPos = hero.transform.position;
 
-        foreach (var tack in Object.FindObjectsByType<TackAttack>(FindObjectsSortMode.None))
+        foreach (var tack in Object.FindObjectsByType<TackAttack>(FindObjectsInactive.Exclude))
         {
             if (Vector3.Distance(heroPos, tack.transform.position) > ZealAuraRadius) continue;
             tack.attackSpeedMultiplier = multiplier;
             currentAffected.Add(tack);
         }
-        foreach (var sniper in Object.FindObjectsByType<SniperAttack>(FindObjectsSortMode.None))
+        foreach (var sniper in Object.FindObjectsByType<SniperAttack>(FindObjectsInactive.Exclude))
         {
             if (Vector3.Distance(heroPos, sniper.transform.position) > ZealAuraRadius) continue;
             sniper.attackSpeedMultiplier = multiplier;
             currentAffected.Add(sniper);
         }
-        foreach (var nature in Object.FindObjectsByType<NatureAttack>(FindObjectsSortMode.None))
+        foreach (var nature in Object.FindObjectsByType<NatureAttack>(FindObjectsInactive.Exclude))
         {
             if (Vector3.Distance(heroPos, nature.transform.position) > ZealAuraRadius) continue;
             nature.attackSpeedMultiplier = multiplier;

@@ -7,9 +7,6 @@ public class GroundGenerator : MonoBehaviour
     [SerializeField] private int _zSegments = 60;
     [SerializeField] private float _width = 20f;
     [SerializeField] private float _depth = 15f;
-    [SerializeField] private float _noiseScale = 0.3f;
-    [SerializeField] private float _noiseHeight = 0.15f;
-    [SerializeField] private float _seed = 42f;
 
     void Awake()
     {

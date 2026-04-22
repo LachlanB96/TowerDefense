@@ -536,36 +536,390 @@ poop_front_wall = make_cabin_wall("PoopFrontWall", x_size=0.56, z_pos=-0.50)
 forecastle_rear_wall = make_cabin_wall("ForecastleRearWall", x_size=0.40, z_pos=+0.50)
 extras += [poop_front_wall, forecastle_rear_wall]
 
-# --- Stern gallery windows (emissive, on the outside of the transom) ---------
-# Three small panes giving the captain's quarters a warm amber glow visible from
-# behind the boat. Positioned at y between main deck (0.50) and poop deck (0.80).
-def make_stern_window(x, y=0.62, z=-1.11, size_x=0.09, size_y=0.10):
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(x, y, z))
-    w = bpy.context.active_object
-    tag = 'M' if abs(x) < 0.01 else ('L' if x < 0 else 'R')
-    w.name = f"SternWindow_{tag}"
-    # Thin along Z — reads as a pane sitting flush against the transom.
-    w.scale = (size_x, size_y, 0.012)
+# --- Stern gallery (captain's cabin aft face, galleon-style multi-pane bay) --
+# Replaces the original three flush emissive panes with a proper projecting
+# gallery box: roof / floor / side walls extending aft of the transom, plus a
+# 2x5 grid of smaller emissive panes framed by wooden mullions (vertical) and
+# muntins (horizontal). The projection gives the ship its galleon silhouette.
+_GALLERY_PROJECTION = 0.045        # how far the gallery sticks aft of the transom
+_GALLERY_FACE_Z    = -1.10 - _GALLERY_PROJECTION  # outer (most-aft) face
+_GALLERY_Y_BOT     = 0.54
+_GALLERY_Y_TOP     = 0.76
+_GALLERY_X_HALF    = 0.27
+
+def make_stern_gallery():
+    """Build the projecting stern-gallery box + its window lattice. Returns a
+    flat list of all the pieces (frame/panes) so they can be parented under
+    Turret with the rest of the boat extras."""
+    parts = []
+    z_transom = -1.10
+    z_face    = _GALLERY_FACE_Z
+    y_bot     = _GALLERY_Y_BOT
+    y_top     = _GALLERY_Y_TOP
+    x_half    = _GALLERY_X_HALF
+
+    # Roof overhang. Runs from just past the gallery face all the way inboard to
+    # the aft edge of the poop deck (z=-1.05) so there's no visible gap between
+    # the gallery and the deck above.
+    roof_z_min, roof_z_max = z_face - 0.011, -1.050
+    bpy.ops.mesh.primitive_cube_add(
+        size=1, location=(0, y_top + 0.018, (roof_z_min + roof_z_max) / 2))
+    roof = bpy.context.active_object; roof.name = "_GalleryRoof"
+    roof.scale = (2 * x_half + 0.08, 0.022, roof_z_max - roof_z_min)
+    bpy.ops.object.transform_apply(scale=True)
+    roof.data.materials.append(mat_wood); parts.append(roof)
+
+    # Floor slab below windows (seats the gallery on its corbels).
+    floor_z_min, floor_z_max = z_face - 0.010, -1.090
+    bpy.ops.mesh.primitive_cube_add(
+        size=1, location=(0, y_bot - 0.015, (floor_z_min + floor_z_max) / 2))
+    floor = bpy.context.active_object; floor.name = "_GalleryFloor"
+    floor.scale = (2 * x_half + 0.06, 0.020, floor_z_max - floor_z_min)
+    bpy.ops.object.transform_apply(scale=True)
+    floor.data.materials.append(mat_wood); parts.append(floor)
+
+    # Side walls closing the gallery box. Extend inboard to meet the poop deck
+    # so the side view doesn't show a gap above the transom.
+    side_z_min, side_z_max = z_face - 0.002, -1.050
+    for side_sign, tag in ((-1, "L"), (+1, "R")):
+        bpy.ops.mesh.primitive_cube_add(
+            size=1, location=(side_sign * x_half,
+                              (y_bot + y_top) / 2,
+                              (side_z_min + side_z_max) / 2))
+        w = bpy.context.active_object; w.name = f"_GallerySide{tag}"
+        w.scale = (0.014, y_top - y_bot, side_z_max - side_z_min)
+        bpy.ops.object.transform_apply(scale=True)
+        w.data.materials.append(mat_wood); parts.append(w)
+
+    # Window lattice: 2 rows x 5 cols of small emissive panes, recessed into the
+    # face, with wooden mullions/muntins laid slightly proud so the viewer sees
+    # glass "behind" the lattice grid.
+    n_cols, n_rows = 5, 2
+    inset = 0.014
+    field_x = 2 * x_half - 2 * inset
+    field_y = (y_top - y_bot) - 2 * inset
+    pane_w  = field_x / n_cols
+    pane_h  = field_y / n_rows
+    x0      = -field_x / 2
+    y0      = y_bot + inset
+
+    z_glass   = z_face + 0.006   # pane set just INSIDE the gallery face
+    z_lattice = z_face - 0.004   # mullions/muntins just PROUD of the face
+
+    # Individual panes
+    for r in range(n_rows):
+        for c in range(n_cols):
+            cx = x0 + (c + 0.5) * pane_w
+            cy = y0 + (r + 0.5) * pane_h
+            bpy.ops.mesh.primitive_cube_add(size=1, location=(cx, cy, z_glass))
+            g = bpy.context.active_object
+            g.name = f"_GalleryGlass_r{r}c{c}"
+            # Slightly smaller than the pane cell so a sliver of wood shows
+            # between adjacent panes even before the mullions are drawn.
+            g.scale = (pane_w * 0.82, pane_h * 0.78, 0.008)
+            bpy.ops.object.transform_apply(scale=True)
+            g.data.materials.append(mat_glow); parts.append(g)
+
+    # Vertical mullions (column boundaries; n_cols + 1 bars, including edges)
+    for c in range(n_cols + 1):
+        cx = x0 + c * pane_w
+        bpy.ops.mesh.primitive_cube_add(
+            size=1, location=(cx, (y_bot + y_top) / 2, z_lattice))
+        m = bpy.context.active_object; m.name = f"_GalleryMullion_{c}"
+        m.scale = (0.010, (y_top - y_bot) - 0.006, 0.010)
+        bpy.ops.object.transform_apply(scale=True)
+        m.data.materials.append(mat_wood); parts.append(m)
+
+    # Horizontal muntins (row boundaries; n_rows + 1 bars, including edges)
+    for r in range(n_rows + 1):
+        cy = y0 + r * pane_h
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0, cy, z_lattice))
+        m = bpy.context.active_object; m.name = f"_GalleryMuntin_{r}"
+        m.scale = (2 * x_half - 0.006, 0.010, 0.010)
+        bpy.ops.object.transform_apply(scale=True)
+        m.data.materials.append(mat_wood); parts.append(m)
+
+    return parts
+
+extras += make_stern_gallery()
+
+
+# --- Corbels / brackets under the gallery overhang ---------------------------
+# A row of small wooden brackets attached under the gallery floor, filling the
+# visual gap between the transom and the overhanging gallery. Prevents the
+# gallery from reading as "floating".
+def make_gallery_corbels():
+    parts = []
+    z_transom = -1.10
+    z_face    = _GALLERY_FACE_Z
+    z_mid     = (z_transom + z_face) / 2
+    # Five brackets spaced across the gallery width.
+    for x in (-0.22, -0.11, 0.0, +0.11, +0.22):
+        bpy.ops.mesh.primitive_cube_add(
+            size=1, location=(x, _GALLERY_Y_BOT - 0.055, z_mid))
+        c = bpy.context.active_object
+        tag = 'C' if x == 0 else ('L' if x < 0 else 'R')
+        c.name = f"_GalleryCorbel_{tag}{abs(int(round(x * 100))):02d}"
+        c.scale = (0.025, 0.050, _GALLERY_PROJECTION)
+        bpy.ops.object.transform_apply(scale=True)
+        # Soft bevel so the bracket reads as carved rather than boxy.
+        select_only(c)
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='SELECT')
+        bpy.ops.mesh.bevel(offset=0.006, segments=1)
+        bpy.ops.object.mode_set(mode='OBJECT')
+        c.data.materials.append(mat_wood); parts.append(c)
+    return parts
+
+extras += make_gallery_corbels()
+
+
+# --- Quarter galleries (bay-window boxes jutting off each aft corner) --------
+# A hallmark of the galleon silhouette: small wooden cabinets with their own
+# emissive windows, capped by a roof and seated on a floor slab. Inner edge
+# sits flush against the hull (sampled from the hull contour) and the outer
+# edge juts outboard by `project`.
+def make_quarter_gallery(side_sign):
+    parts = []
+    tag = 'L' if side_sign < 0 else 'R'
+    z_fore, z_aft = -0.82, -1.05
+    y_bot, y_top  = 0.40, 0.66
+    project       = 0.11   # distance the gallery sticks out past the hull
+    z_mid         = (z_fore + z_aft) / 2
+    y_mid         = (y_bot + y_top) / 2
+
+    # Sample the hull half-width at the gallery midpoint so the inner face
+    # sits flush against the tapered aft hull.
+    hw = hull_half_width_at(y_mid, z_mid)
+    x_inner = side_sign * hw
+    x_outer = side_sign * (hw + project)
+
+    # Main body (solid wooden box filling the gallery volume).
+    bpy.ops.mesh.primitive_cube_add(
+        size=1, location=((x_inner + x_outer) / 2, y_mid, z_mid))
+    body = bpy.context.active_object; body.name = f"_QGBody_{tag}"
+    body.scale = (abs(x_outer - x_inner), y_top - y_bot, abs(z_fore - z_aft))
+    bpy.ops.object.transform_apply(scale=True)
+    body.data.materials.append(mat_wood); parts.append(body)
+
+    # Outward-facing emissive panes: three small windows along the length.
+    for i, z_off in enumerate((-0.075, 0.0, +0.075)):
+        bpy.ops.mesh.primitive_cube_add(
+            size=1, location=(x_outer + side_sign * 0.003,
+                              y_mid + 0.02, z_mid + z_off))
+        g = bpy.context.active_object; g.name = f"_QGGlass_{tag}_{i}"
+        g.scale = (0.008, 0.11, 0.055)
+        bpy.ops.object.transform_apply(scale=True)
+        g.data.materials.append(mat_glow); parts.append(g)
+
+    # Roof cap (slightly wider, heavier slab on top).
+    bpy.ops.mesh.primitive_cube_add(
+        size=1, location=((x_inner + x_outer) / 2, y_top + 0.015, z_mid))
+    roof = bpy.context.active_object; roof.name = f"_QGRoof_{tag}"
+    roof.scale = (abs(x_outer - x_inner) + 0.03, 0.020,
+                  abs(z_fore - z_aft) + 0.025)
+    bpy.ops.object.transform_apply(scale=True)
+    roof.data.materials.append(mat_wood); parts.append(roof)
+
+    # Floor slab (matching cap, on the bottom).
+    bpy.ops.mesh.primitive_cube_add(
+        size=1, location=((x_inner + x_outer) / 2, y_bot - 0.015, z_mid))
+    fl = bpy.context.active_object; fl.name = f"_QGFloor_{tag}"
+    fl.scale = (abs(x_outer - x_inner) + 0.02, 0.018,
+                abs(z_fore - z_aft) + 0.02)
+    bpy.ops.object.transform_apply(scale=True)
+    fl.data.materials.append(mat_wood); parts.append(fl)
+
+    return parts
+
+extras += make_quarter_gallery(-1)
+extras += make_quarter_gallery(+1)
+
+
+# --- Roundhouse (small cabin structure on top of the poop deck) --------------
+# Sits between the ship's wheel (at z=-0.55) and the stern lantern (at z=-1.02)
+# without intersecting either. Door faces forward toward the wheel; an emissive
+# window on each side wall gives the cabin interior a lit look.
+def make_roundhouse():
+    parts = []
+    z_fore, z_aft = -0.65, -0.95
+    x_half      = 0.22
+    y_floor     = 0.80
+    y_eaves     = 0.99
+    wall_thick  = 0.020
+    h           = y_eaves - y_floor
+    y_mid       = (y_floor + y_eaves) / 2
+
+    # Aft wall
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(0, y_mid, z_aft))
+    w = bpy.context.active_object; w.name = "_RHWallAft"
+    w.scale = (2 * x_half, h, wall_thick)
+    bpy.ops.object.transform_apply(scale=True)
+    w.data.materials.append(mat_wood); parts.append(w)
+
+    # Fore wall (door will sit on this)
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(0, y_mid, z_fore))
+    w = bpy.context.active_object; w.name = "_RHWallFore"
+    w.scale = (2 * x_half, h, wall_thick)
+    bpy.ops.object.transform_apply(scale=True)
+    w.data.materials.append(mat_wood); parts.append(w)
+
+    # Port/starboard walls + side windows
+    for side_sign, tag in ((-1, "L"), (+1, "R")):
+        bpy.ops.mesh.primitive_cube_add(
+            size=1, location=(side_sign * x_half, y_mid,
+                              (z_fore + z_aft) / 2))
+        w = bpy.context.active_object; w.name = f"_RHWall{tag}"
+        w.scale = (wall_thick, h, abs(z_fore - z_aft))
+        bpy.ops.object.transform_apply(scale=True)
+        w.data.materials.append(mat_wood); parts.append(w)
+        # Emissive window panel, slightly proud of the wall face.
+        bpy.ops.mesh.primitive_cube_add(
+            size=1, location=(side_sign * (x_half + 0.004),
+                              y_mid + 0.015, (z_fore + z_aft) / 2))
+        g = bpy.context.active_object; g.name = f"_RHWindow{tag}"
+        g.scale = (0.008, 0.09, 0.16)
+        bpy.ops.object.transform_apply(scale=True)
+        g.data.materials.append(mat_glow); parts.append(g)
+
+    # Flat roof with overhang on all sides.
+    bpy.ops.mesh.primitive_cube_add(
+        size=1, location=(0, y_eaves + 0.014, (z_fore + z_aft) / 2))
+    roof = bpy.context.active_object; roof.name = "_RHRoof"
+    roof.scale = (2 * x_half + 0.05, 0.028, abs(z_fore - z_aft) + 0.06)
+    bpy.ops.object.transform_apply(scale=True)
+    roof.data.materials.append(mat_wood); parts.append(roof)
+
+    return parts
+
+extras += make_roundhouse()
+
+
+# --- Paneled door helper (reused on multiple bulkheads) ----------------------
+# Builds: door slab + surround frame (left/right posts + top lintel) + a cross-
+# rail (two-panel door feel) + iron handle + a sill step. `facing_sign=+1`
+# means the door is visible from +Z side of the wall; -1 for the -Z side.
+def make_paneled_door(z_face, x_pos=0.0, y_bottom=0.50, height=0.22, width=0.14,
+                      facing_sign=+1, name_prefix="Door"):
+    parts = []
+    z_slab   = z_face + facing_sign * 0.010
+    z_frame  = z_face + facing_sign * 0.018
+    z_cross  = z_slab + facing_sign * 0.004
+    z_step   = z_face + facing_sign * 0.032
+    y_top    = y_bottom + height
+    fw, ft   = 0.014, 0.008   # frame bar width/thickness
+
+    # Door slab
+    bpy.ops.mesh.primitive_cube_add(
+        size=1, location=(x_pos, (y_bottom + y_top) / 2, z_slab))
+    d = bpy.context.active_object; d.name = f"_{name_prefix}Slab"
+    d.scale = (width, height, 0.010)
+    bpy.ops.object.transform_apply(scale=True)
+    d.data.materials.append(mat_wood); parts.append(d)
+
+    # Frame posts + top lintel
+    for sx, tag in ((-1, "L"), (+1, "R")):
+        bpy.ops.mesh.primitive_cube_add(
+            size=1, location=(x_pos + sx * (width / 2 + fw / 2),
+                              (y_bottom + y_top) / 2, z_frame))
+        b = bpy.context.active_object; b.name = f"_{name_prefix}Frame{tag}"
+        b.scale = (fw, height + fw * 2, ft)
+        bpy.ops.object.transform_apply(scale=True)
+        b.data.materials.append(mat_wood); parts.append(b)
+    # Top lintel spans from outer edge of left post to outer edge of right post.
+    bpy.ops.mesh.primitive_cube_add(
+        size=1, location=(x_pos, y_top + fw / 2, z_frame))
+    b = bpy.context.active_object; b.name = f"_{name_prefix}FrameT"
+    b.scale = (width + fw * 2, fw, ft)
+    bpy.ops.object.transform_apply(scale=True)
+    b.data.materials.append(mat_wood); parts.append(b)
+
+    # Cross-rail across the middle of the slab → reads as upper+lower panels.
+    bpy.ops.mesh.primitive_cube_add(
+        size=1, location=(x_pos, (y_bottom + y_top) / 2, z_cross))
+    cr = bpy.context.active_object; cr.name = f"_{name_prefix}CrossRail"
+    cr.scale = (width - 0.010, 0.012, 0.006)
+    bpy.ops.object.transform_apply(scale=True)
+    cr.data.materials.append(mat_wood); parts.append(cr)
+
+    # Iron handle (off-centre, typical pirate-ship door latch position).
+    bpy.ops.mesh.primitive_cube_add(
+        size=1, location=(x_pos + width * 0.32,
+                          (y_bottom + y_top) / 2 - 0.015,
+                          z_slab + facing_sign * 0.008))
+    h = bpy.context.active_object; h.name = f"_{name_prefix}Handle"
+    h.scale = (0.014, 0.014, 0.006)
+    bpy.ops.object.transform_apply(scale=True)
+    h.data.materials.append(mat_iron); parts.append(h)
+
+    # Sill / step at the base of the door.
+    bpy.ops.mesh.primitive_cube_add(
+        size=1, location=(x_pos, y_bottom - 0.010, z_step))
+    s = bpy.context.active_object; s.name = f"_{name_prefix}Step"
+    s.scale = (width + 0.06, 0.014, 0.04)
+    bpy.ops.object.transform_apply(scale=True)
+    s.data.materials.append(mat_wood); parts.append(s)
+
+    return parts
+
+# Captain's cabin (poop front wall) — door faces forward into the main deck.
+extras += make_paneled_door(z_face=-0.50, x_pos=0.0,
+                             facing_sign=+1, name_prefix="PoopDoor")
+# Forecastle — door on rear wall faces aft into the main deck.
+extras += make_paneled_door(z_face=+0.50, x_pos=0.0, width=0.12,
+                             facing_sign=-1, name_prefix="ForecastleDoor")
+# Roundhouse — smaller door on the forward wall, sits on the poop deck.
+extras += make_paneled_door(z_face=-0.65, x_pos=0.0, y_bottom=0.80,
+                             height=0.15, width=0.10,
+                             facing_sign=+1, name_prefix="RoundhouseDoor")
+
+
+# --- Flanking emissive windows on the cabin bulkheads ------------------------
+# Replace the old standalone stern/forecastle window helpers. These sit beside
+# each paneled door so the bulkhead reads as "cabin with a lit interior".
+def make_bulkhead_window(x, z_face, facing_sign, name,
+                         y=0.62, size_x=0.055, size_y=0.09):
+    bpy.ops.mesh.primitive_cube_add(
+        size=1, location=(x, y, z_face + facing_sign * 0.010))
+    w = bpy.context.active_object; w.name = name
+    w.scale = (size_x, size_y, 0.010)
     bpy.ops.object.transform_apply(scale=True)
     w.data.materials.append(mat_glow)
     return w
 
-stern_windows = [make_stern_window(x) for x in (-0.18, 0.0, +0.18)]
-extras += stern_windows
+# Poop bulkhead windows flanking the captain's-cabin door (door width 0.14).
+extras.append(make_bulkhead_window(-0.19, -0.50, +1, "PoopWindow_L"))
+extras.append(make_bulkhead_window(+0.19, -0.50, +1, "PoopWindow_R"))
+# Forecastle bulkhead windows (narrower wall, tighter spacing).
+extras.append(make_bulkhead_window(-0.14, +0.50, -1, "ForecastleWindow_L"))
+extras.append(make_bulkhead_window(+0.14, +0.50, -1, "ForecastleWindow_R"))
 
-# Small side-cabin windows on the forecastle front wall, also emissive. Gives the
-# bow-cabin a matching lit look so the boat reads as inhabited end-to-end.
-def make_side_window(x, y=0.62, z=0.51, size_x=0.06, size_y=0.08):
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(x, y, z))
-    w = bpy.context.active_object
-    w.name = f"ForecastleWindow_{'L' if x < 0 else 'R'}"
-    w.scale = (size_x, size_y, 0.012)
+
+# --- Cabin-bulkhead horizontal trim (cap rail top, sill rail bottom) ---------
+# Thin wooden planks running the width of each bulkhead, breaking up the
+# otherwise-flat wall and matching the trim-plank language used elsewhere.
+def make_cabin_trim(name_prefix, z_pos, x_half, facing_sign,
+                     y_bottom=0.50, y_top=0.76):
+    parts = []
+    z_trim = z_pos + facing_sign * 0.018
+    # Cap rail (top of wall)
+    bpy.ops.mesh.primitive_cube_add(
+        size=1, location=(0, y_top - 0.008, z_trim))
+    c = bpy.context.active_object; c.name = f"_{name_prefix}CapRail"
+    c.scale = (2 * x_half + 0.03, 0.014, 0.018)
     bpy.ops.object.transform_apply(scale=True)
-    w.data.materials.append(mat_glow)
-    return w
+    c.data.materials.append(mat_wood); parts.append(c)
+    # Sill rail (bottom of wall)
+    bpy.ops.mesh.primitive_cube_add(
+        size=1, location=(0, y_bottom + 0.008, z_trim))
+    s = bpy.context.active_object; s.name = f"_{name_prefix}SillRail"
+    s.scale = (2 * x_half + 0.02, 0.014, 0.018)
+    bpy.ops.object.transform_apply(scale=True)
+    s.data.materials.append(mat_wood); parts.append(s)
+    return parts
 
-fore_windows = [make_side_window(-0.10), make_side_window(+0.10)]
-extras += fore_windows
+extras += make_cabin_trim("PoopBulkhead",       -0.50, 0.28, +1)
+extras += make_cabin_trim("ForecastleBulkhead", +0.50, 0.20, -1)
 
 # --- Stairs (main deck up to each raised deck) -------------------------------
 def make_stairs(name, z_base, z_step, y_top=0.80, step_count=3, width=0.18):
@@ -592,42 +946,47 @@ extras += make_stairs("ForecastleStairs", z_base=+0.48, z_step=+0.22)
 # --- Ship's wheel (spoked wheel on a post, mounted on the poop deck) ---------
 def make_ships_wheel():
     """Rim torus + hub sphere + 6 spokes + 6 handles + vertical mounting post.
-    Axle along X so the helmsman faces forward. All joined into one mesh."""
+    Axle runs fore-aft (along Z) — matches real tall-ship wheels, where the
+    helmsman stands aft of the wheel looking forward and sees the spoked face
+    full-on. All parts are joined into a single mesh at the end."""
     parts = []
     wheel_x, wheel_y, wheel_z = 0.0, 0.95, -0.55
     rim_r = 0.09
-    # Rim (torus in XY-plane by default → rotate so normal is +X).
+    # Rim: a torus's default orientation has its axle along +Z and its ring in
+    # the XY plane — exactly the wheel orientation we want, so no rotation.
     bpy.ops.mesh.primitive_torus_add(major_radius=rim_r, minor_radius=0.010,
                                      major_segments=24, minor_segments=6,
                                      location=(wheel_x, wheel_y, wheel_z))
     rim = bpy.context.active_object; rim.name = "_WheelRim"
-    bake_rotation_on_mesh(rim, (0, math.pi / 2, 0))
     parts.append(rim)
     # Hub
     bpy.ops.mesh.primitive_uv_sphere_add(radius=0.018, segments=12, ring_count=6,
                                          location=(wheel_x, wheel_y, wheel_z))
     hub = bpy.context.active_object; hub.name = "_WheelHub"
     parts.append(hub)
-    # 6 spokes radiating outward in the YZ-plane + handle on each spoke end.
+    # 6 spokes radiating outward in the XY-plane (wheel plane) + handle on each
+    # spoke's outer end that juts out along ±Z (fore-aft) past the rim.
     for i in range(6):
         a = i * math.pi / 3
-        dy, dz = math.cos(a) * rim_r * 0.5, math.sin(a) * rim_r * 0.5
+        dx, dy = math.cos(a) * rim_r * 0.5, math.sin(a) * rim_r * 0.5
         bpy.ops.mesh.primitive_cylinder_add(radius=0.006, depth=rim_r * 0.95,
                                             vertices=8,
-                                            location=(wheel_x, wheel_y + dy, wheel_z + dz))
+                                            location=(wheel_x + dx, wheel_y + dy, wheel_z))
         sp = bpy.context.active_object; sp.name = f"_WheelSpoke{i}"
-        # Default cylinder along Z; rotate so its long axis points radially
-        # outward in the wheel plane (YZ-plane, at angle a).
-        bake_rotation_on_mesh(sp, (math.pi / 2 - a, 0, 0))
+        # Default cylinder long axis is +Z. Tip it 90° about +Y (so axis moves
+        # +Z → +X), then rotate about +Z by `a` to aim it radially in the
+        # wheel plane.
+        bake_rotation_on_mesh(sp, (0, math.pi / 2, a))
         parts.append(sp)
-        # Handle sticks out along ±X at the outer rim.
-        hx = wheel_x
-        hy = wheel_y + math.cos(a) * rim_r
-        hz = wheel_z + math.sin(a) * rim_r
+        # Handle: a short grip that sticks out FORE-AFT at the outer rim (so
+        # the helmsman standing aft can grab the handles). Default cylinder is
+        # already +Z-aligned, which is fore-aft here, so no rotation needed.
+        hx = wheel_x + math.cos(a) * rim_r
+        hy = wheel_y + math.sin(a) * rim_r
+        hz = wheel_z
         bpy.ops.mesh.primitive_cylinder_add(radius=0.012, depth=0.05, vertices=10,
                                             location=(hx, hy, hz))
         handle = bpy.context.active_object; handle.name = f"_WheelHandle{i}"
-        bake_rotation_on_mesh(handle, (0, math.pi / 2, 0))
         parts.append(handle)
     # Mounting post down to the poop deck.
     post_h = (wheel_y - rim_r - 0.01) - 0.80

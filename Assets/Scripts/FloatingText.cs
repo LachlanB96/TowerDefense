@@ -29,7 +29,7 @@ public static class FloatingText
     {
         if (_canvas != null) return _canvas;
 
-        foreach (var c in Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None))
+        foreach (var c in Object.FindObjectsByType<Canvas>(FindObjectsInactive.Exclude))
         {
             if (c.renderMode == RenderMode.ScreenSpaceOverlay && c.sortingOrder >= 100)
             {

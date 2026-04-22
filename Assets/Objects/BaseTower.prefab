@@ -12,7 +12,6 @@ GameObject:
   - component: {fileID: 5765200706055784670}
   - component: {fileID: 3389091643317121988}
   - component: {fileID: 8588469755056940605}
-  - component: {fileID: 9113442632418363538}
   m_Layer: 0
   m_Name: BaseTower
   m_TagString: Untagged
@@ -63,6 +62,8 @@ MeshRenderer:
   m_RayTracingAccelStructBuildFlagsOverride: 0
   m_RayTracingAccelStructBuildFlags: 1
   m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
@@ -84,9 +85,11 @@ MeshRenderer:
   m_AutoUVMaxDistance: 0.5
   m_AutoUVMaxAngle: 89
   m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!135 &8588469755056940605
 SphereCollider:
@@ -109,24 +112,3 @@ SphereCollider:
   serializedVersion: 3
   m_Radius: 0.5
   m_Center: {x: 0, y: 0, z: 0}
---- !u!114 &9113442632418363538
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7265315533700865372}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7f524cf51027a5640b661b9d2a3bee93, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  rest: {fileID: 2100000, guid: 7417c1d6052743644a1c54751b2716e5, type: 2}
-  attack: {fileID: 2100000, guid: 8c451e3b89fb4bc4ca0edca52cb2132d, type: 2}
-  build: {fileID: 2100000, guid: f6617170a346c8b45a6fa0359eba7b37, type: 2}
-  units: {fileID: 0}
-  projectile: {fileID: 7354518995342741682, guid: c62e5202adc3feb419f1aa1277e41f7a, type: 3}
-  range: 10000
-  pierce: 1
-  damage: 1
-  speed: 0.3

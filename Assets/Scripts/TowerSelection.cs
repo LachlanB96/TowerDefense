@@ -151,7 +151,7 @@ public class TowerSelection : MonoBehaviour
         {
             Camera cam = Camera.main;
             float closestScreenDist = 50f;
-            foreach (var td in FindObjectsByType<TowerData>(FindObjectsSortMode.None))
+            foreach (var td in FindObjectsByType<TowerData>(FindObjectsInactive.Exclude))
             {
                 Vector3 screenPt = cam.WorldToScreenPoint(td.transform.position);
                 if (screenPt.z < 0) continue;
@@ -162,7 +162,7 @@ public class TowerSelection : MonoBehaviour
                     foundTower = td;
                 }
             }
-            foreach (var h in FindObjectsByType<Hero>(FindObjectsSortMode.None))
+            foreach (var h in FindObjectsByType<Hero>(FindObjectsInactive.Exclude))
             {
                 Vector3 screenPt = cam.WorldToScreenPoint(h.transform.position);
                 if (screenPt.z < 0) continue;

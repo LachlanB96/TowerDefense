@@ -126,7 +126,7 @@ public class Movement : MonoBehaviour
     {
         Canvas canvas = GetOrCreateSharedCanvas();
 
-        _healthBarObj = new GameObject("HealthBar_" + gameObject.GetInstanceID());
+        _healthBarObj = new GameObject("HealthBar_" + gameObject.GetEntityId());
         _healthBarObj.transform.SetParent(canvas.transform, false);
         _healthBarRect = _healthBarObj.AddComponent<RectTransform>();
         _healthBarRect.sizeDelta = new Vector2(60f, 8f);
