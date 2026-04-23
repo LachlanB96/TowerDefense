@@ -572,11 +572,14 @@ def make_raised_deck(name, z_center, length_z, width_x, y_top=0.80, thickness=0.
 
 # Poop: from z = -1.05 (stern) to z = -0.50 — covers the aft third. Sits above
 # the new transom apex (y=0.95) so the roundhouse on top still clears the
-# gallery. Forecastle: shorter because the bow tapers in sharply; its y_top
-# matches the new fore-shoulder deck_y so it reads as a deck raised from the
-# waist rather than a separate block.
-poop_deck = make_raised_deck("PoopDeck", z_center=-0.775, length_z=0.55, width_x=0.56, y_top=1.00)
-forecastle = make_raised_deck("Forecastle", z_center=+0.725, length_z=0.45, width_x=0.40, y_top=0.98)
+# gallery. Forecastle: shorter because the bow tapers in sharply.
+# Deck widths are sized to match the enclosed-cabin walls underneath at their
+# widest (hull-flush) end: poop 0.68 matches the fore end (x=±0.34); fore-
+# castle 0.65 matches the aft end (x=±0.325). The narrower opposite ends —
+# poop aft (walls at ±0.24) and forecastle fore (walls at ±0.18) — get a
+# period-correct overhang where the deck projects past the walls.
+poop_deck = make_raised_deck("PoopDeck", z_center=-0.775, length_z=0.55, width_x=0.68, y_top=1.00)
+forecastle = make_raised_deck("Forecastle", z_center=+0.725, length_z=0.45, width_x=0.65, y_top=0.98)
 extras += [poop_deck, forecastle]
 
 # --- Cabin bulkhead walls (facing main deck, under each raised deck) ---------
@@ -595,9 +598,12 @@ def make_cabin_wall(name, x_size, z_pos, y_bottom=0.50, y_top=0.76, thickness=0.
 # raised decks above (1.00 / 0.98). Using y_bottom=0.64 for both keeps the wall
 # foot anchored at the waist deck; the small sheer variation is hidden behind
 # the stairs and railings.
-poop_front_wall = make_cabin_wall("PoopFrontWall", x_size=0.56, z_pos=-0.50,
+# Widths match the hull's deck half-width at each z (0.34 at z=-0.50, 0.325 at
+# z=+0.50) so the bulkhead meets the new enclosed-cabin side walls cleanly at
+# the corners — no gaps where a gamer could peek into the cabin from outside.
+poop_front_wall = make_cabin_wall("PoopFrontWall", x_size=0.68, z_pos=-0.50,
                                    y_bottom=0.64, y_top=1.00)
-forecastle_rear_wall = make_cabin_wall("ForecastleRearWall", x_size=0.40, z_pos=+0.50,
+forecastle_rear_wall = make_cabin_wall("ForecastleRearWall", x_size=0.65, z_pos=+0.50,
                                          y_bottom=0.64, y_top=0.98)
 extras += [poop_front_wall, forecastle_rear_wall]
 
@@ -997,18 +1003,114 @@ def make_cabin_trim(name_prefix, z_pos, x_half, facing_sign,
 extras += make_cabin_trim("PoopBulkhead",       -0.50, 0.28, +1, y_bottom=0.64, y_top=1.00)
 extras += make_cabin_trim("ForecastleBulkhead", +0.50, 0.20, -1, y_bottom=0.64, y_top=0.98)
 
+# --- Enclosed-cabin side walls ----------------------------------------------
+# Fill the gap between the hull's rail (at sheer-varying deck_y) and the
+# raised-deck top on each side. Without these, you can look straight through
+# the port/starboard sides into the captain's cabin under the poop (or the
+# boatswain's quarters under the forecastle). The wall's bottom edge rides
+# the hull's deck_y + deck_w contour so it's flush with the hull planking;
+# the top edge is flat at the raised-deck's y_top.
+def make_enclosed_cabin_sides(name_prefix, z_fore, z_aft, y_top,
+                               x_half_fore=None, x_half_aft=None, thick=0.03):
+    """Port + starboard side walls for a raised-deck cabin.
+
+    z_fore / z_aft: the forward and aft z positions of the cabin. The fore
+    end sits at z_fore with y_bottom = hull_deck_y(z_fore); aft end likewise.
+    x_half_fore / x_half_aft: override the hull-flush x at either end —
+    needed when the wall must tie into an explicit neighbour (e.g., the
+    aft end of the poop side wall meeting the stern-gallery side wall's
+    outboard edge at x=_GALLERY_X_HALF). Default is hull-flush at both ends.
+    thick: wall thickness, extruded inboard so the outer face stays on the
+    hull edge."""
+    def sample_deck(z):
+        """Lerp deck_y (index 4) and deck_w (index 7) out of _SECTIONS."""
+        for i in range(len(_SECTIONS) - 1):
+            za, zb = _SECTIONS[i][0], _SECTIONS[i + 1][0]
+            if za <= z <= zb:
+                t = (z - za) / (zb - za) if zb != za else 0.0
+                dy = _SECTIONS[i][4] + t * (_SECTIONS[i + 1][4] - _SECTIONS[i][4])
+                dw = _SECTIONS[i][7] + t * (_SECTIONS[i + 1][7] - _SECTIONS[i][7])
+                return dw, dy
+        return 0.0, 0.0
+    fw, fy = sample_deck(z_fore)
+    aw, ay = sample_deck(z_aft)
+    if x_half_fore is not None: fw = x_half_fore
+    if x_half_aft  is not None: aw = x_half_aft
+
+    parts = []
+    for side_sign, tag in ((-1, "L"), (+1, "R")):
+        mesh = bpy.data.meshes.new(f"{name_prefix}Side{tag}Mesh")
+        obj = bpy.data.objects.new(f"{name_prefix}Side{tag}", mesh)
+        bpy.context.collection.objects.link(obj)
+        bm = bmesh.new()
+        # 4 verts forming a trapezoid: bottom rides hull sheer, top is flat.
+        bf = bm.verts.new((side_sign * fw, fy,    z_fore))
+        tf = bm.verts.new((side_sign * fw, y_top, z_fore))
+        ta = bm.verts.new((side_sign * aw, y_top, z_aft))
+        ba = bm.verts.new((side_sign * aw, ay,    z_aft))
+        # Outward-normal winding: CCW when viewed from that side's outside.
+        if side_sign < 0:
+            bm.faces.new([bf, tf, ta, ba])
+        else:
+            bm.faces.new([ba, ta, tf, bf])
+        bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+        bm.to_mesh(mesh); bm.free()
+        # Solidify inboard so the outer face stays exactly on the hull edge.
+        select_only(obj)
+        mod = obj.modifiers.new(name="Solidify", type='SOLIDIFY')
+        mod.thickness = thick
+        mod.offset = -1.0   # extrude in -normal direction (inboard)
+        bpy.ops.object.modifier_apply(modifier="Solidify")
+        obj.data.materials.append(mat_wood)
+        bpy.ops.object.shade_smooth()
+        parts.append(obj)
+    return parts
+
+# Poop cabin sides: aft end tied to the stern-gallery side-wall x position so
+# the corner meets cleanly; fore end sits hull-flush at the PoopFrontWall.
+extras += make_enclosed_cabin_sides(
+    "PoopCabin", z_fore=-0.50, z_aft=-1.05, y_top=1.00,
+    x_half_aft=_GALLERY_X_HALF,
+)
+# Forecastle cabin sides: both ends hull-flush. Aft end meets the widened
+# ForecastleRearWall at x=±0.325; fore end tapers to the narrower bow at
+# x=±0.18 where the new fore wall closes the cabin.
+extras += make_enclosed_cabin_sides(
+    "ForecastleCabin", z_fore=+0.95, z_aft=+0.50, y_top=0.98,
+)
+
+# --- Forecastle fore wall ---------------------------------------------------
+# Closes the forward end of the forecastle cabin. Small wall because the hull
+# is already narrow at z=+0.95 (deck_w ≈ 0.18, deck_y ≈ 0.86).
+def make_forecastle_fore_wall():
+    z_face = +0.95
+    x_half = 0.18    # hull deck_w at z=+0.95 (from _SECTIONS)
+    y_bottom = 0.86  # hull deck_y at z=+0.95
+    y_top = 0.98
+    bpy.ops.mesh.primitive_cube_add(
+        size=1, location=(0.0, (y_bottom + y_top) / 2, z_face))
+    w = bpy.context.active_object; w.name = "ForecastleForeWall"
+    w.scale = (2 * x_half, y_top - y_bottom, 0.03)
+    bpy.ops.object.transform_apply(scale=True)
+    w.data.materials.append(mat_wood)
+    return w
+extras += [make_forecastle_fore_wall()]
+
 # --- Stairs (main deck up to each raised deck) -------------------------------
-def make_stairs(name, z_base, z_step, y_top=1.00, y_main=0.64, step_count=4, width=0.18):
+def make_stairs(name, z_base, z_step, y_top=1.00, y_main=0.64, step_count=4, width=0.18, x_pos=0.0):
     """Series of rising cuboid steps from y_main (main deck) to y_top (raised
     deck top). step_count bumped from 3 to 4 because the new rise (0.36) is
-    larger than the old (0.30) — keeps the per-step rise comfortable."""
+    larger than the old (0.30) — keeps the per-step rise comfortable.
+
+    x_pos shifts the whole flight port/starboard so the stairs don't block the
+    cabin door at x=0 on the bulkhead wall they climb to."""
     parts = []
     rise_per = (y_top - y_main) / step_count
     run_per = z_step / step_count
     for i in range(step_count):
         step_y = y_main + rise_per * (i + 0.5)
         step_z = z_base + run_per * (i + 0.5)
-        bpy.ops.mesh.primitive_cube_add(size=1, location=(0.0, step_y, step_z))
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(x_pos, step_y, step_z))
         s = bpy.context.active_object
         s.name = f"{name}_Step{i}"
         s.scale = (width, rise_per + 0.02, abs(run_per) + 0.02)
@@ -1017,8 +1119,12 @@ def make_stairs(name, z_base, z_step, y_top=1.00, y_main=0.64, step_count=4, wid
         parts.append(s)
     return parts
 
-extras += make_stairs("PoopStairs", z_base=-0.48, z_step=-0.22, y_top=1.00)
-extras += make_stairs("ForecastleStairs", z_base=+0.48, z_step=+0.22, y_top=0.98)
+# Stairs sit on the MAIN DECK, fore of the bulkhead they climb to — not
+# inside the cabin behind it (where they were until now). Offset off-centre
+# so they don't block the cabin doors at x=0. Poop stairs to starboard, fore-
+# castle stairs to port, so they don't line up when viewed from the side.
+extras += make_stairs("PoopStairs",       z_base=-0.26, z_step=-0.20, y_top=1.00, x_pos=+0.20)
+extras += make_stairs("ForecastleStairs", z_base=+0.26, z_step=+0.20, y_top=0.98, x_pos=-0.20)
 
 # --- Ship's wheel (spoked wheel on a post, mounted on the poop deck) ---------
 def make_ships_wheel():
