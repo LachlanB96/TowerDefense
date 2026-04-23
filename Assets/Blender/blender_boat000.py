@@ -129,28 +129,42 @@ def add_dummy_armature(name, mesh_obj):
 #    +Z = bow (ship's forward)           -Z = stern
 #
 # The hull is built by lofting between cross-section ribs along the Z (fore-aft)
-# axis. Each rib has 5 vertices forming a shallow U: keel (bottom centre), chine
-# port + starboard (widest point under water), rail port + starboard (top of hull).
+# axis. Each rib has 7 vertices forming a 4-band vertical profile: keel (bottom
+# centre), bilge_p/s (lower chine — turn-of-the-bilge), beam_p/s (maximum beam
+# just above waterline), rail_p/s (deck edge — narrower than max beam, giving
+# tumblehome). Per flank: 3 side panels (keel→bilge, bilge→beam, beam→rail) plus
+# the deck-top bridging face.
 #
 # Shaping rules encoded in the section table:
-#   * Sheer   — deck_y rises at bow and stern (hull is taller at the ends).
-#   * Bow     — final rib collapses to a point at X=0, producing a vertical cutwater.
-#   * Stern   — first rib has finite width; a pentagon cap closes the transom.
-#   * Keel    — chine_width narrows toward the ends so the underwater body tapers
-#               in as well as the deck line.
+#   * Tumblehome — deck_w < beam_w midship; the upper topsides curve inward.
+#   * Sheer      — deck_y rises sharply at bow and stern.
+#   * Bow        — final rib collapses (all widths = 0); the stem has a curved
+#                  forward rake via z moving to +1.20 and keel_y rising there.
+#   * Stern      — a counter sweeps up aft of z≈-0.6, pushing the transom high
+#                  and aft so the gallery hangs off an overhang rather than a
+#                  flat wall.
 #
-# Row format: (z, keel_y, deck_y, half_width_keel, half_width_deck)
-# z is the fore-aft position of the rib (stern at -1.10, bow at +1.10).
+# Row format:
+#   (z, keel_y, bilge_y, beam_y, deck_y, bilge_w, beam_w, deck_w)
+#   z         — fore/aft rib position (stern at -1.10, stem at +1.20).
+#   keel_y    — bottom-centerline height.
+#   bilge_y   — lower-chine height (above keel).
+#   beam_y    — max-beam height (just above waterline).
+#   deck_y    — deck-edge height (gives sheer curve).
+#   bilge_w   — half-width at bilge.
+#   beam_w    — half-width at max beam (the widest part of the hull).
+#   deck_w    — half-width at deck edge. For tumblehome, deck_w < beam_w.
 _SECTIONS = [
-    (-1.10,  0.05,  0.70,  0.12,  0.32),   # stern transom (flat back face)
-    (-0.95, -0.02,  0.62,  0.25,  0.40),
-    (-0.60, -0.10,  0.55,  0.30,  0.42),
-    (-0.20, -0.12,  0.52,  0.32,  0.42),
-    ( 0.00, -0.12,  0.50,  0.32,  0.42),   # midship — widest beam
-    ( 0.20, -0.12,  0.52,  0.32,  0.42),
-    ( 0.60, -0.10,  0.55,  0.25,  0.38),
-    ( 0.90, -0.05,  0.60,  0.10,  0.20),
-    ( 1.10,  0.10,  0.68,  0.00,  0.00),   # bow cutwater (collapsed to a point)
+    # z,     keel_y, bilge_y, beam_y, deck_y,  bilge_w, beam_w, deck_w
+    (-1.10,   0.40,   0.55,   0.75,   0.95,    0.08,   0.18,   0.14),   # transom apex (aft + high)
+    (-0.90,   0.15,   0.30,   0.55,   0.85,    0.22,   0.38,   0.30),   # counter shoulder
+    (-0.60,  -0.05,   0.08,   0.35,   0.72,    0.30,   0.42,   0.34),   # aft quarter
+    (-0.20,  -0.12,   0.05,   0.28,   0.66,    0.32,   0.42,   0.34),   # mid-aft
+    ( 0.00,  -0.12,   0.05,   0.26,   0.64,    0.32,   0.42,   0.34),   # midship (widest)
+    ( 0.20,  -0.12,   0.05,   0.28,   0.66,    0.32,   0.42,   0.34),   # mid-fore
+    ( 0.60,  -0.08,   0.10,   0.38,   0.74,    0.28,   0.40,   0.32),   # fore quarter
+    ( 0.95,  -0.02,   0.25,   0.58,   0.86,    0.14,   0.22,   0.18),   # fore shoulder
+    ( 1.20,   0.18,   0.40,   0.72,   0.94,    0.00,   0.00,   0.00),   # stem point (raked forward)
 ]
 
 def build_hull():
@@ -160,34 +174,47 @@ def build_hull():
     bpy.context.collection.objects.link(obj)
     bm = bmesh.new()
 
-    # Build one rib of 5 verts per section.
-    # Rib layout (looking from above, bow toward +Z):
-    #   keel (0, ky, z), chine_port (-hw_k, ky, z), rail_port (-hw_d, dy, z),
-    #   rail_stbd (+hw_d, dy, z), chine_stbd (+hw_k, ky, z).
+    # Build one rib of 7 verts per section.
+    # Rib layout (looking from aft toward bow, +X = starboard):
+    #        rail_p  ──── rail_s          ← deck edge (narrower: tumblehome)
+    #       /                   \
+    #    beam_p                 beam_s    ← max beam (just above waterline)
+    #       |                    |
+    #    bilge_p               bilge_s    ← lower-hull chine
+    #        \                  /
+    #         keel (x = 0)                ← keel centerline
     ribs = []
-    for (z, ky, dy, hw_k, hw_d) in _SECTIONS:
-        keel = bm.verts.new(( 0.0,  ky, z))
-        cp   = bm.verts.new((-hw_k, ky, z))
-        rp   = bm.verts.new((-hw_d, dy, z))
-        rs   = bm.verts.new(( hw_d, dy, z))
-        cs   = bm.verts.new(( hw_k, ky, z))
-        ribs.append((keel, cp, rp, rs, cs))
+    for (z, ky, biy, bmy, dy, biw, bmw, dw) in _SECTIONS:
+        keel  = bm.verts.new(( 0.0,  ky,  z))
+        bip   = bm.verts.new((-biw, biy, z))
+        bmp   = bm.verts.new((-bmw, bmy, z))
+        rp    = bm.verts.new((-dw,  dy,  z))
+        rs    = bm.verts.new(( dw,  dy,  z))
+        bms   = bm.verts.new(( bmw, bmy, z))
+        bis   = bm.verts.new(( biw, biy, z))
+        ribs.append((keel, bip, bmp, rp, rs, bms, bis))
 
-    # Bridge adjacent ribs with 5 quads: 2 side panels per flank, plus the deck top.
-    # Winding chosen so normals point outward; a final recalc_face_normals pass cleans up.
+    # Bridge adjacent ribs with 7 quads: 3 side panels per flank + deck top.
+    # Winding chosen so normals point outward; final recalc_face_normals cleans up.
     for i in range(len(ribs) - 1):
-        ak, acp, arp, ars, acs = ribs[i]
-        bk, bcp, brp, brs, bcs = ribs[i + 1]
-        bm.faces.new([ak,  acp, bcp, bk])     # bottom port    (keel → chine_p)
-        bm.faces.new([acp, arp, brp, bcp])    # side port      (chine_p → rail_p)
-        bm.faces.new([arp, ars, brs, brp])    # deck top       (rail_p → rail_s)
-        bm.faces.new([ars, acs, bcs, brs])    # side starboard (rail_s → chine_s)
-        bm.faces.new([acs, ak,  bk,  bcs])    # bottom stbd    (chine_s → keel)
+        ak, abip, abmp, arp, ars, abms, abis = ribs[i]
+        bk, bbip, bbmp, brp, brs, bbms, bbis = ribs[i + 1]
+        bm.faces.new([ak,   abip, bbip, bk  ])   # bottom port     (keel → bilge_p)
+        bm.faces.new([abip, abmp, bbmp, bbip])   # lower topside p (bilge_p → beam_p)
+        bm.faces.new([abmp, arp,  brp,  bbmp])   # upper topside p (beam_p → rail_p) — tumblehome lives here
+        bm.faces.new([arp,  ars,  brs,  brp ])   # deck top        (rail_p → rail_s)
+        bm.faces.new([ars,  abms, bbms, brs ])   # upper topside s (rail_s → beam_s)
+        bm.faces.new([abms, abis, bbis, bbms])   # lower topside s (beam_s → bilge_s)
+        bm.faces.new([abis, ak,   bk,   bbis])   # bottom stbd     (bilge_s → keel)
 
-    # Stern transom: fill the first rib with a pentagon. The last (bow) rib is a
-    # degenerate 0-width line, so bridging handles it naturally — no cap needed.
-    sk, scp, srp, srs, scs = ribs[0]
-    bm.faces.new([sk, scs, srs, srp, scp])
+    # Stern transom: heptagon cap filling the first (aft) rib. Winding goes
+    # counter-clockwise when viewed from -Z (outward normal faces aft).
+    sk, sbip, sbmp, srp, srs, sbms, sbis = ribs[0]
+    bm.faces.new([sk, sbis, sbms, srs, srp, sbmp, sbip])
+
+    # Bow rib is fully collapsed (all widths = 0) — all 7 verts sit on the x=0
+    # centerline at varying y. Bridging produces degenerate side panels that
+    # collapse to edges, which Blender handles cleanly. No bow cap needed.
 
     bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
     bm.to_mesh(mesh)
@@ -209,23 +236,44 @@ hull.data.materials.append(mat_wood)
 
 def hull_half_width_at(y, z):
     """Sample the hull's half-width at (y, z) using the _SECTIONS table. Used by
-    surface-hugging features (strakes, chain trim, damage backings) so they sit
-    flush against the tapered hull instead of floating where the hull narrows.
+    surface-hugging features (strakes, chain trim, damage backings, gunports,
+    quarter galleries) so they sit flush against the curved hull instead of
+    floating where the hull narrows or tumbles home.
 
-    Returns the pre-bevel hull half-width; callers typically add a small outward
-    offset to avoid z-fighting with the hull surface."""
+    The hull profile has three bands per flank:
+        * bilge band: y in [keel_y, bilge_y], width lerps 0 → bilge_w
+        * lower topside: y in [bilge_y, beam_y], width lerps bilge_w → beam_w
+        * tumblehome band: y in [beam_y, deck_y], width lerps beam_w → deck_w
+
+    Below keel or above deck returns 0. Returns the pre-bevel hull half-width;
+    callers typically add a small outward offset to avoid z-fighting."""
     for i in range(len(_SECTIONS) - 1):
         za, zb = _SECTIONS[i][0], _SECTIONS[i + 1][0]
         if za <= z <= zb:
             t = (z - za) / (zb - za) if zb != za else 0.0
-            ky   = _SECTIONS[i][1] + t * (_SECTIONS[i + 1][1] - _SECTIONS[i][1])
-            dy   = _SECTIONS[i][2] + t * (_SECTIONS[i + 1][2] - _SECTIONS[i][2])
-            hw_k = _SECTIONS[i][3] + t * (_SECTIONS[i + 1][3] - _SECTIONS[i][3])
-            hw_d = _SECTIONS[i][4] + t * (_SECTIONS[i + 1][4] - _SECTIONS[i][4])
-            if dy > ky:
-                u = max(0.0, min(1.0, (y - ky) / (dy - ky)))
-                return hw_k + u * (hw_d - hw_k)
-            return hw_k
+            a = _SECTIONS[i]
+            b = _SECTIONS[i + 1]
+            ky  = a[1] + t * (b[1] - a[1])
+            biy = a[2] + t * (b[2] - a[2])
+            bmy = a[3] + t * (b[3] - a[3])
+            dy  = a[4] + t * (b[4] - a[4])
+            biw = a[5] + t * (b[5] - a[5])
+            bmw = a[6] + t * (b[6] - a[6])
+            dw  = a[7] + t * (b[7] - a[7])
+            # Band-dispatch on y. Order matters — use monotonically increasing
+            # thresholds (keel_y ≤ bilge_y ≤ beam_y ≤ deck_y by construction).
+            if y < ky or y > dy:
+                return 0.0
+            if y < biy and biy > ky:
+                u = (y - ky) / (biy - ky)
+                return u * biw
+            if y < bmy and bmy > biy:
+                u = (y - biy) / (bmy - biy)
+                return biw + u * (bmw - biw)
+            if dy > bmy:
+                u = (y - bmy) / (dy - bmy)
+                return bmw + u * (dw - bmw)
+            return dw
     return 0.0
 
 # -- Strakes (horizontal planks running the length of the hull) ---------------
@@ -273,21 +321,26 @@ def make_contour_strake(name, y, length_half, thickness=0.014, height=0.028,
         joined.append(j)
     return joined
 
-# Waterline strake just above the waterline. Main wale higher up under deck.
-# Both now follow the hull curvature instead of sitting on a fixed X.
-strakes  = make_contour_strake("Waterline", y=0.05, length_half=0.92)
-strakes += make_contour_strake("MainWale",  y=0.34, length_half=1.00)
+# Waterline strake just above the waterline (in the bilge→beam band of the new
+# hull). Main wale sits mid-tumblehome, clearly below the new deck edge so it
+# reads as a heavy structural band wrapping the upper hull. Both follow the hull
+# curvature.
+strakes  = make_contour_strake("Waterline", y=0.10, length_half=0.92)
+strakes += make_contour_strake("MainWale",  y=0.48, length_half=1.00)
 
 # -- Gunport frames (iron trim around the cannon openings in the hull) --------
 # Small iron-material squares bolted to the hull side, framing each cannon as it
 # passes through. They sit a hair outside the hull (X=+/-0.44 vs hull 0.42) so
 # they visibly frame the opening rather than clipping inside the planks.
 def make_gunport(name, x_side):
-    # Sample the hull's X at the gunport's (y=0.44, z=0) so the frame sits flush
-    # on the hull's deck-level edge — 0.410 at midship after hull taper.
-    hw_here = hull_half_width_at(0.44, 0.0)
+    # Sample the hull's X at the gunport's (y=0.42, z=0) — mid-tumblehome on the
+    # new hull, so the frame sits flush on the curving upper topside rather than
+    # on a flat side. y=0.42 is well below the new midship deck (0.64) and above
+    # the MainWale (0.48), leaving room for both.
+    gunport_y = 0.42
+    hw_here = hull_half_width_at(gunport_y, 0.0)
     bpy.ops.mesh.primitive_cube_add(size=1,
-                                     location=((hw_here + 0.012) * x_side, 0.44, 0.0))
+                                     location=((hw_here + 0.012) * x_side, gunport_y, 0.0))
     g = bpy.context.active_object
     g.name = name
     # Scale: thin along X (perpendicular to hull side — surface trim thickness),
@@ -405,10 +458,13 @@ def make_cannon(name, port_side):
     port_side: -1 for port (-X hull side), +1 for starboard (+X).
     """
     sign = 1.0 if port_side > 0 else -1.0
-    base_x = 0.42 * sign          # cannon centre at the hull edge
+    cy = 0.42                     # shared Y height for every part — matches gunport
+    # Sample the hull width at the cannon height so base_x sits exactly at the
+    # hull surface on the new tumblehome cross-section (old hardcoded 0.42 stuck
+    # out past the tumblehome edge).
+    base_x = hull_half_width_at(cy, 0.0) * sign
     inner_x = base_x - 0.175 * sign   # breech end of barrel (toward centerline)
     outer_x = base_x + 0.175 * sign   # muzzle end of barrel
-    cy = 0.45                     # shared Y height for every part
 
     parts = []
 
@@ -514,10 +570,13 @@ def make_raised_deck(name, z_center, length_z, width_x, y_top=0.80, thickness=0.
     d.data.materials.append(mat_wood)
     return d
 
-# Poop: from z = -1.05 (stern) to z = -0.50 — covers the aft third.
-poop_deck = make_raised_deck("PoopDeck", z_center=-0.775, length_z=0.55, width_x=0.56)
-# Forecastle: shorter because the bow tapers in sharply.
-forecastle = make_raised_deck("Forecastle", z_center=+0.725, length_z=0.45, width_x=0.40)
+# Poop: from z = -1.05 (stern) to z = -0.50 — covers the aft third. Sits above
+# the new transom apex (y=0.95) so the roundhouse on top still clears the
+# gallery. Forecastle: shorter because the bow tapers in sharply; its y_top
+# matches the new fore-shoulder deck_y so it reads as a deck raised from the
+# waist rather than a separate block.
+poop_deck = make_raised_deck("PoopDeck", z_center=-0.775, length_z=0.55, width_x=0.56, y_top=1.00)
+forecastle = make_raised_deck("Forecastle", z_center=+0.725, length_z=0.45, width_x=0.40, y_top=0.98)
 extras += [poop_deck, forecastle]
 
 # --- Cabin bulkhead walls (facing main deck, under each raised deck) ---------
@@ -532,8 +591,14 @@ def make_cabin_wall(name, x_size, z_pos, y_bottom=0.50, y_top=0.76, thickness=0.
     w.data.materials.append(mat_wood)
     return w
 
-poop_front_wall = make_cabin_wall("PoopFrontWall", x_size=0.56, z_pos=-0.50)
-forecastle_rear_wall = make_cabin_wall("ForecastleRearWall", x_size=0.40, z_pos=+0.50)
+# Walls span from the new main deck (y≈0.64–0.70 depending on sheer) up to the
+# raised decks above (1.00 / 0.98). Using y_bottom=0.64 for both keeps the wall
+# foot anchored at the waist deck; the small sheer variation is hidden behind
+# the stairs and railings.
+poop_front_wall = make_cabin_wall("PoopFrontWall", x_size=0.56, z_pos=-0.50,
+                                   y_bottom=0.64, y_top=1.00)
+forecastle_rear_wall = make_cabin_wall("ForecastleRearWall", x_size=0.40, z_pos=+0.50,
+                                         y_bottom=0.64, y_top=0.98)
 extras += [poop_front_wall, forecastle_rear_wall]
 
 # --- Stern gallery (captain's cabin aft face, galleon-style multi-pane bay) --
@@ -543,9 +608,14 @@ extras += [poop_front_wall, forecastle_rear_wall]
 # muntins (horizontal). The projection gives the ship its galleon silhouette.
 _GALLERY_PROJECTION = 0.045        # how far the gallery sticks aft of the transom
 _GALLERY_FACE_Z    = -1.10 - _GALLERY_PROJECTION  # outer (most-aft) face
-_GALLERY_Y_BOT     = 0.54
-_GALLERY_Y_TOP     = 0.76
-_GALLERY_X_HALF    = 0.27
+# Gallery sits on the new stern counter: its bottom (0.75) lines up with the
+# transom's beam-level (0.75 in _SECTIONS) and its top (0.95) with the transom
+# deck edge. The gallery is wider (X_HALF 0.24) than the transom's deck_w (0.14)
+# so it projects outboard as well as aft — period-correct galleon silhouette
+# where the gallery "wings" jut past the hull on each side.
+_GALLERY_Y_BOT     = 0.75
+_GALLERY_Y_TOP     = 0.95
+_GALLERY_X_HALF    = 0.24
 
 def make_stern_gallery():
     """Build the projecting stern-gallery box + its window lattice. Returns a
@@ -682,9 +752,12 @@ extras += make_gallery_corbels()
 def make_quarter_gallery(side_sign):
     parts = []
     tag = 'L' if side_sign < 0 else 'R'
-    z_fore, z_aft = -0.82, -1.05
-    y_bot, y_top  = 0.40, 0.66
-    project       = 0.11   # distance the gallery sticks out past the hull
+    # Position the QG at the stern-gallery height band so it reads as a wing
+    # wrapping around the counter corner. z_fore pulled forward so the QG
+    # bridges from the aft quarter (tumblehome band) up to the counter.
+    z_fore, z_aft = -0.70, -1.00
+    y_bot, y_top  = 0.75, 0.95
+    project       = 0.09   # less pronounced than the central gallery
     z_mid         = (z_fore + z_aft) / 2
     y_mid         = (y_bot + y_top) / 2
 
@@ -744,8 +817,8 @@ def make_roundhouse():
     parts = []
     z_fore, z_aft = -0.65, -0.95
     x_half      = 0.22
-    y_floor     = 0.80
-    y_eaves     = 0.99
+    y_floor     = 1.00   # new poop-deck top
+    y_eaves     = 1.19   # unchanged cabin height (0.19)
     wall_thick  = 0.020
     h           = y_eaves - y_floor
     y_mid       = (y_floor + y_eaves) / 2
@@ -863,13 +936,16 @@ def make_paneled_door(z_face, x_pos=0.0, y_bottom=0.50, height=0.22, width=0.14,
     return parts
 
 # Captain's cabin (poop front wall) — door faces forward into the main deck.
-extras += make_paneled_door(z_face=-0.50, x_pos=0.0,
+# y_bottom = 0.64 matches new main-deck height; height 0.32 reaches close to the
+# new poop-deck y=1.00, leaving ~0.04 above the door for the lintel.
+extras += make_paneled_door(z_face=-0.50, x_pos=0.0, y_bottom=0.64, height=0.32,
                              facing_sign=+1, name_prefix="PoopDoor")
 # Forecastle — door on rear wall faces aft into the main deck.
 extras += make_paneled_door(z_face=+0.50, x_pos=0.0, width=0.12,
+                             y_bottom=0.64, height=0.30,
                              facing_sign=-1, name_prefix="ForecastleDoor")
-# Roundhouse — smaller door on the forward wall, sits on the poop deck.
-extras += make_paneled_door(z_face=-0.65, x_pos=0.0, y_bottom=0.80,
+# Roundhouse — smaller door on the forward wall, sits on the new poop deck.
+extras += make_paneled_door(z_face=-0.65, x_pos=0.0, y_bottom=1.00,
                              height=0.15, width=0.10,
                              facing_sign=+1, name_prefix="RoundhouseDoor")
 
@@ -878,7 +954,7 @@ extras += make_paneled_door(z_face=-0.65, x_pos=0.0, y_bottom=0.80,
 # Replace the old standalone stern/forecastle window helpers. These sit beside
 # each paneled door so the bulkhead reads as "cabin with a lit interior".
 def make_bulkhead_window(x, z_face, facing_sign, name,
-                         y=0.62, size_x=0.055, size_y=0.09):
+                         y=0.80, size_x=0.055, size_y=0.11):
     bpy.ops.mesh.primitive_cube_add(
         size=1, location=(x, y, z_face + facing_sign * 0.010))
     w = bpy.context.active_object; w.name = name
@@ -899,7 +975,7 @@ extras.append(make_bulkhead_window(+0.14, +0.50, -1, "ForecastleWindow_R"))
 # Thin wooden planks running the width of each bulkhead, breaking up the
 # otherwise-flat wall and matching the trim-plank language used elsewhere.
 def make_cabin_trim(name_prefix, z_pos, x_half, facing_sign,
-                     y_bottom=0.50, y_top=0.76):
+                     y_bottom=0.64, y_top=1.00):
     parts = []
     z_trim = z_pos + facing_sign * 0.018
     # Cap rail (top of wall)
@@ -918,14 +994,15 @@ def make_cabin_trim(name_prefix, z_pos, x_half, facing_sign,
     s.data.materials.append(mat_wood); parts.append(s)
     return parts
 
-extras += make_cabin_trim("PoopBulkhead",       -0.50, 0.28, +1)
-extras += make_cabin_trim("ForecastleBulkhead", +0.50, 0.20, -1)
+extras += make_cabin_trim("PoopBulkhead",       -0.50, 0.28, +1, y_bottom=0.64, y_top=1.00)
+extras += make_cabin_trim("ForecastleBulkhead", +0.50, 0.20, -1, y_bottom=0.64, y_top=0.98)
 
 # --- Stairs (main deck up to each raised deck) -------------------------------
-def make_stairs(name, z_base, z_step, y_top=0.80, step_count=3, width=0.18):
-    """Series of rising cuboid steps from y=0.50 (main deck) to y_top."""
+def make_stairs(name, z_base, z_step, y_top=1.00, y_main=0.64, step_count=4, width=0.18):
+    """Series of rising cuboid steps from y_main (main deck) to y_top (raised
+    deck top). step_count bumped from 3 to 4 because the new rise (0.36) is
+    larger than the old (0.30) — keeps the per-step rise comfortable."""
     parts = []
-    y_main = 0.50
     rise_per = (y_top - y_main) / step_count
     run_per = z_step / step_count
     for i in range(step_count):
@@ -940,8 +1017,8 @@ def make_stairs(name, z_base, z_step, y_top=0.80, step_count=3, width=0.18):
         parts.append(s)
     return parts
 
-extras += make_stairs("PoopStairs", z_base=-0.48, z_step=-0.22)
-extras += make_stairs("ForecastleStairs", z_base=+0.48, z_step=+0.22)
+extras += make_stairs("PoopStairs", z_base=-0.48, z_step=-0.22, y_top=1.00)
+extras += make_stairs("ForecastleStairs", z_base=+0.48, z_step=+0.22, y_top=0.98)
 
 # --- Ship's wheel (spoked wheel on a post, mounted on the poop deck) ---------
 def make_ships_wheel():
@@ -950,7 +1027,7 @@ def make_ships_wheel():
     helmsman stands aft of the wheel looking forward and sees the spoked face
     full-on. All parts are joined into a single mesh at the end."""
     parts = []
-    wheel_x, wheel_y, wheel_z = 0.0, 0.95, -0.55
+    wheel_x, wheel_y, wheel_z = 0.0, 1.15, -0.55
     rim_r = 0.09
     # Rim: a torus's default orientation has its axle along +Z and its ring in
     # the XY plane — exactly the wheel orientation we want, so no rotation.
@@ -988,10 +1065,11 @@ def make_ships_wheel():
                                             location=(hx, hy, hz))
         handle = bpy.context.active_object; handle.name = f"_WheelHandle{i}"
         parts.append(handle)
-    # Mounting post down to the poop deck.
-    post_h = (wheel_y - rim_r - 0.01) - 0.80
+    # Mounting post down to the poop deck (new y=1.00).
+    deck_y_here = 1.00
+    post_h = (wheel_y - rim_r - 0.01) - deck_y_here
     bpy.ops.mesh.primitive_cylinder_add(radius=0.020, depth=max(post_h, 0.02), vertices=12,
-                                        location=(0.0, 0.80 + max(post_h, 0.02) / 2, wheel_z))
+                                        location=(0.0, deck_y_here + max(post_h, 0.02) / 2, wheel_z))
     post = bpy.context.active_object; post.name = "_WheelPost"
     parts.append(post)
     bpy.ops.object.select_all(action='DESELECT')
@@ -1075,10 +1153,12 @@ extras += [yard_fore, yard_main]
 # --- Bowsprit + triangular jib sail ------------------------------------------
 def make_bowsprit():
     """Angled spar projecting forward and up from the bow. Tilted ~20° above
-    horizontal via R_x, so its +Z end points skyward."""
+    horizontal via R_x, so its +Z end points skyward.
+    Anchor moved to (0, 0.90, 1.18) to launch from the top of the new raked
+    stem (deck_y ≈ 0.94 at z=1.20 stem point)."""
     length = 0.55
     bpy.ops.mesh.primitive_cylinder_add(radius=0.022, depth=length, vertices=12,
-                                        location=(0.0, 0.78, 1.28))
+                                        location=(0.0, 0.90, 1.18))
     b = bpy.context.active_object
     b.name = "Bowsprit"
     # Cylinder long axis starts along Z; rotating by -20° about X tilts the +Z
@@ -1098,8 +1178,10 @@ def make_jib():
     obj = bpy.data.objects.new("Jib", mesh)
     bpy.context.collection.objects.link(obj)
     bm = bmesh.new()
-    tip   = (0, 0.78 + math.sin(math.radians(20)) * 0.275, 1.28 + math.cos(math.radians(20)) * 0.275)
-    base  = (0, 0.78, 1.03)
+    # Triangle corners: bowsprit tip (forward+up), bowsprit base (aft+down along
+    # the spar from its new centre at (0, 0.90, 1.18)), and MastFore upper mid.
+    tip   = (0, 0.90 + math.sin(math.radians(20)) * 0.275, 1.18 + math.cos(math.radians(20)) * 0.275)
+    base  = (0, 0.90 - math.sin(math.radians(20)) * 0.275, 1.18 - math.cos(math.radians(20)) * 0.275)
     mtop  = (0, 1.80, 0.50)
     for p in (tip, base, mtop):
         bm.verts.new(p)
@@ -1116,7 +1198,10 @@ extras += [make_jib()]
 
 # --- Rudder (flat plank hanging off the stern transom) -----------------------
 def make_rudder():
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(0.0, -0.08, -1.20))
+    # Rudder hangs from the new sternpost: top ≈ keel height at transom (y≈0.40)
+    # — bottom reaches below waterline. Centre at y=0.24, height 0.32 → spans
+    # y=0.08 (below waterline) to y=0.40 (meeting the counter).
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(0.0, 0.24, -1.15))
     r = bpy.context.active_object
     r.name = "Rudder"
     r.scale = (0.04, 0.32, 0.14)
@@ -1133,9 +1218,10 @@ def make_rudder():
 extras += [make_rudder()]
 
 # --- Deck railings (gunwale-top rails, with a gap at midship for gunports) ---
-def make_railing_segment(name, x_side, z_start, z_end, y_top=0.65, post_every=0.18):
+def make_railing_segment(name, x_side, z_start, z_end, y_top=0.80, post_every=0.18):
     """Top rail bar + posts at regular intervals; one pair per side, fore and aft
-    of the gunports. Leaves the midship region clear so the cannons aren't boxed in."""
+    of the gunports. Leaves the midship region clear so the cannons aren't boxed
+    in. y_top raised to 0.80 to sit above the new deck (0.64 midship)."""
     parts = []
     mid_z = (z_start + z_end) * 0.5
     length_z = abs(z_end - z_start)
@@ -1145,10 +1231,11 @@ def make_railing_segment(name, x_side, z_start, z_end, y_top=0.65, post_every=0.
     bpy.ops.object.transform_apply(scale=True)
     parts.append(top)
     n_posts = max(2, int(length_z / post_every))
+    post_y = y_top - 0.08    # post centre drops 0.08 below the rail (posts are 0.16 tall)
     for i in range(n_posts + 1):
         t = i / max(1, n_posts)
         zp = z_start + (z_end - z_start) * t
-        bpy.ops.mesh.primitive_cube_add(size=1, location=(x_side, 0.57, zp))
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(x_side, post_y, zp))
         post = bpy.context.active_object; post.name = f"{name}_Post{i}"
         post.scale = (0.022, 0.16, 0.022)
         bpy.ops.object.transform_apply(scale=True)
@@ -1226,9 +1313,10 @@ extras += [
 # --- Figurehead (skull at the prow) ------------------------------------------
 def make_figurehead_skull():
     """Cranium UV sphere + a blocky jaw wedge (bone material), plus two small
-    dark spheres embedded as eye sockets (iron material). Positioned forward of
-    and just below the cutwater tip so it reads as a carved prow decoration."""
-    x_c, y_c, z_c = 0.0, 0.45, 1.18
+    dark spheres embedded as eye sockets (iron material). Positioned on the
+    new raked stem, forward and below the bowsprit anchor — sits at about 2/3
+    up the stem height so it reads as a prow carving."""
+    x_c, y_c, z_c = 0.0, 0.65, 1.22
     # Cranium
     bpy.ops.mesh.primitive_uv_sphere_add(radius=0.07, segments=16, ring_count=10,
                                          location=(x_c, y_c, z_c))
@@ -1272,12 +1360,14 @@ extras += [skull, skull_eyes]
 
 # --- Ship's bell (small belfry aft of the wheel) -----------------------------
 def make_bell():
-    """A short vertical post + a truncated-cone bell hanging from it."""
+    """A short vertical post + a truncated-cone bell hanging from it.
+    Post base sits on the new poop deck (y=1.00); bell hangs just below the
+    post top. Old post base was at y=0.80 — everything shifted up by 0.20."""
     bpy.ops.mesh.primitive_cylinder_add(radius=0.012, depth=0.14, vertices=10,
-                                        location=(0.0, 0.87, -0.40))
+                                        location=(0.0, 1.07, -0.40))
     post = bpy.context.active_object; post.name = "_BellPost"
     bpy.ops.mesh.primitive_cone_add(radius1=0.045, radius2=0.025, depth=0.06,
-                                    vertices=14, location=(0.0, 0.80, -0.40))
+                                    vertices=14, location=(0.0, 1.00, -0.40))
     bell = bpy.context.active_object; bell.name = "_Bell"
     bpy.ops.object.select_all(action='DESELECT')
     post.select_set(True); bell.select_set(True)
@@ -1294,13 +1384,15 @@ extras += [make_bell()]
 
 # --- Stern lantern (emissive box on top of the poop rail) --------------------
 def make_stern_lantern():
-    """Glowing lantern body + iron cap, at the aft-centre of the poop deck."""
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(0.0, 0.92, -1.02))
+    """Glowing lantern body + iron cap, perched at the aft-centre of the poop
+    deck. Lantern body sits on top of the roundhouse (y=1.19) — high enough to
+    read as "mast-head lantern" silhouette from the side."""
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(0.0, 1.24, -1.02))
     body = bpy.context.active_object; body.name = "_LanternBody"
     body.scale = (0.07, 0.10, 0.07)
     bpy.ops.object.transform_apply(scale=True)
     body.data.materials.append(mat_glow)
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(0.0, 0.99, -1.02))
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(0.0, 1.31, -1.02))
     cap = bpy.context.active_object; cap.name = "_LanternCap"
     cap.scale = (0.09, 0.015, 0.09)
     bpy.ops.object.transform_apply(scale=True)
