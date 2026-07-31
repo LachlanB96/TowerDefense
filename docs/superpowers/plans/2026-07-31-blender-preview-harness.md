@@ -1219,6 +1219,11 @@ Replace with:
 # before anything is built, so a variant can override any tuning constant, any
 # material, or any builder function.
 #
+# This block cannot be moved into a shared helper and imported. globals() here
+# resolves to the CALLING module's namespace - which is precisely what the hook
+# needs and precisely what an imported function could not give it. A DRY cleanup
+# that extracts this silently breaks name resolution for every variant.
+#
 # RENDER_DIR rides in here too, deliberately: line 48 assigns it unconditionally,
 # so a plain namespace seed would be clobbered. Applying it here — after that
 # assignment, before render_view() reads it — is what makes previews land in the
