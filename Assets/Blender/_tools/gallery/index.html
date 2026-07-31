@@ -51,9 +51,22 @@
 // Poll latest.json once a second. Re-render whenever the BODY changes, not just
 // when the run number does: the manifest is rewritten several times within a
 // run as each variant lands, and we want those to appear as they arrive.
-let lastBody = null, asset = null;
+//
+// lastBody is only ever assigned AFTER body is confirmed to parse (see tick()).
+// A truncated HTTP read - a dropped connection mid-response, which is not
+// covered by the atomic-write protection on the server side, since that only
+// guards against reading a half-written FILE, not a half-delivered response -
+// must be skippable, not something that poisons every future tick. lastRun is
+// kept alongside as a plain value instead of re-parsing lastBody each time.
+let lastBody = null, lastRun = null, asset = null;
 
 const q = p => p + (p.includes('?') ? '&' : '?') + 't=' + Date.now();
+
+// Escape before any JSON-sourced text goes into innerHTML/insertAdjacentHTML.
+// Applied at every such site (labels, diff entries, stderr, run timestamps) -
+// without it, a `<` anywhere in a variant's data would inject markup instead
+// of rendering as text.
+const esc = s => String(s).replace(/[<&]/g, c => ({'<':'&lt;','&':'&amp;'}[c]));
 
 async function findAsset() {
   // preview.py maintains assets.json, most-recently-built first. We cannot
@@ -71,16 +84,15 @@ function card(v) {
   const el = document.createElement('div');
   el.className = 'col' + (v.exit !== 0 && v.exit !== null ? ' err' : '');
   const diff = Object.entries(v.diff || {})
-      .map(([k, val]) => `${k} = ${JSON.stringify(val)}`).join('\n');
-  el.innerHTML = `<h2><span class="num">${v.n}</span>${v.label}</h2>`
+      .map(([k, val]) => `${esc(k)} = ${esc(JSON.stringify(val))}`).join('\n');
+  el.innerHTML = `<h2><span class="num">${v.n}</span>${esc(v.label)}</h2>`
     + (diff ? `<div class="diff">${diff}</div>` : '<div class="diff dim">baseline</div>');
 
   if (v.exit === null) {
     el.insertAdjacentHTML('beforeend', '<div class="pending">building…</div>');
   } else if (v.exit !== 0) {
     el.insertAdjacentHTML('beforeend',
-      `<pre>exit ${v.exit}\n\n${(v.stderr_tail || '(no stderr)')
-        .replace(/[<&]/g, c => ({'<':'&lt;','&':'&amp;'}[c]))}</pre>`);
+      `<pre>exit ${v.exit}\n\n${esc(v.stderr_tail || '(no stderr)')}</pre>`);
   } else {
     for (const r of v.renders) {
       const img = new Image();
@@ -100,6 +112,10 @@ function card(v) {
 }
 
 function renderRun(m, into) {
+  // Full, one-shot render: used for history entries, which are rendered once
+  // when their <details> is created and never updated again afterwards. The
+  // live section below needs a different, incremental version of this same
+  // idea - see renderLive().
   const wrap = document.createElement('div');
   wrap.className = 'cols';
   for (const v of m.variants) {
@@ -107,6 +123,59 @@ function renderRun(m, into) {
     wrap.appendChild(card(v));
   }
   into.appendChild(wrap);
+}
+
+// What #live is currently showing, so a same-run manifest rewrite (the
+// runner rewrites the manifest once per variant as it lands - see preview.py)
+// can patch only the card(s) whose own state changed, instead of tearing down
+// and recreating every column. Recreating every <img> on every rewrite would
+// force a real network re-fetch of every already-loaded image each time
+// (each gets a fresh q()-appended cache-buster), which is quadratic in
+// variant count for images that never changed.
+let liveRun = null;
+let liveCards = [];       // card elements currently in #live, indexed by v.n - 1
+let liveSignatures = [];  // what each of those cards was rendered from
+
+function variantSignature(v) {
+  // Only the fields that change what the card actually looks like. `seconds`
+  // lands in the same rewrite as `exit` flipping away from null, so it's
+  // already covered without being named explicitly.
+  return JSON.stringify([v.exit, v.renders]);
+}
+
+function renderLive(m) {
+  const live = document.getElementById('live');
+  if (m.run !== liveRun) {
+    // A new run: there is nothing sensible to diff against, so rebuild
+    // wholesale. This is also the very first tick's path (liveRun starts null).
+    live.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'cols';
+    liveCards = [];
+    liveSignatures = [];
+    for (const v of m.variants) {
+      v.runDir = 'run-' + String(m.run).padStart(3, '0');
+      const el = card(v);
+      wrap.appendChild(el);
+      liveCards.push(el);
+      liveSignatures.push(variantSignature(v));
+    }
+    live.appendChild(wrap);
+    liveRun = m.run;
+    return;
+  }
+  // Same run, rewritten because one variant finished: swap in only the
+  // card(s) whose signature actually changed. Everything else - in
+  // particular any <img> that already loaded - is left completely alone.
+  for (const v of m.variants) {
+    v.runDir = 'run-' + String(m.run).padStart(3, '0');
+    const sig = variantSignature(v);
+    if (sig === liveSignatures[v.n - 1]) continue;
+    const el = card(v);
+    liveCards[v.n - 1].replaceWith(el);
+    liveCards[v.n - 1] = el;
+    liveSignatures[v.n - 1] = sig;
+  }
 }
 
 async function loadHistory(current) {
@@ -120,8 +189,8 @@ async function loadHistory(current) {
     if (!res.ok) continue;
     const m = await res.json();
     const d = document.createElement('details');
-    d.innerHTML = `<summary>run ${m.run} · ${m.started} · `
-      + `${m.variants.map(v => v.label).join(', ')}</summary>`;
+    d.innerHTML = `<summary>run ${m.run} · ${esc(m.started)} · `
+      + `${m.variants.map(v => esc(v.label)).join(', ')}</summary>`;
     host.appendChild(d);
     renderRun(m, d);
   }
@@ -135,10 +204,23 @@ async function tick() {
     if (!res.ok) return;
     const body = await res.text();
     if (body === lastBody) return;          // nothing changed; leave the DOM alone
-    const wasNewRun = lastBody === null
-      || JSON.parse(lastBody).run !== JSON.parse(body).run;
+
+    // Parse before committing to anything. A truncated HTTP read must be
+    // skippable rather than becoming the new "last known good" state: if it
+    // were assigned to lastBody regardless, every later tick would try to
+    // re-derive wasNewRun from that same unparseable text and throw before
+    // ever reaching a line that could replace it with something valid again
+    // - the poller would be wedged until a manual reload.
+    let m;
+    try {
+      m = JSON.parse(body);
+    } catch (e) {
+      console.debug('poll skipped: malformed body', e);
+      return;
+    }
+    const wasNewRun = lastRun === null || lastRun !== m.run;
     lastBody = body;
-    const m = JSON.parse(body);
+    lastRun = m.run;
 
     document.getElementById('title').textContent = `${m.asset} · run ${m.run}`;
     const badge = document.getElementById('audit');
@@ -148,9 +230,7 @@ async function tick() {
       ? (m.audit.includes('FAIL') ? 'badge bad' : 'badge ok') : '';
     document.getElementById('sub').textContent =
       m.started + (m.done ? '' : ' · building…');
-    const live = document.getElementById('live');
-    live.innerHTML = '';
-    renderRun(m, live);
+    renderLive(m);
     if (wasNewRun) loadHistory(m.run);
   } catch (e) {
     // A half-written manifest or a momentary 404 is expected during a run.
