@@ -2697,10 +2697,14 @@ def render_view(name, cam_loc, target=(0, 0, 1.05), res=(900, 1250), lens=62,
     cam.data.lens = lens
     SCENE.render.resolution_x, SCENE.render.resolution_y = res
     # SAMPLE_SCALE lets a preview run trade noise for speed. Views that pass no
-    # explicit count fall back to the rig's default of 96 (see build_rig).
+    # explicit count skip this assignment entirely and inherit whatever the
+    # previous render_view() call left set - exactly like the original
+    # unconditional-samples code before RENDER_ONLY/SAMPLE_SCALE existed. Call
+    # order matters: "poster" (320) and "hero_34" (160) set explicit counts
+    # below, and every view after inherits from whichever ran last.
     scale = globals().get("SAMPLE_SCALE", 1.0)
-    if hasattr(SCENE.eevee, "taa_render_samples"):
-        SCENE.eevee.taa_render_samples = max(16, int((samples or 96) * scale))
+    if samples and hasattr(SCENE.eevee, "taa_render_samples"):
+        SCENE.eevee.taa_render_samples = max(16, int(samples * scale))
     os.makedirs(RENDER_DIR, exist_ok=True)
     SCENE.render.filepath = os.path.join(RENDER_DIR, name + ".png")
     bpy.ops.render.render(write_still=True)

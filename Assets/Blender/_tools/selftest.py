@@ -365,19 +365,23 @@ def test_knight_preview_is_non_destructive():
     before = {p: (os.path.getmtime(p) if os.path.exists(p) else None)
               for p in (blend, fbx)}
 
-    manifest = preview.run(
-        asset="knight000",
-        variants=[{"label": "baseline"}],
-        views=["icon_184"],
-        root=tempfile.mkdtemp(prefix="gf_knight_"),
-    )
-    v = manifest["variants"][0]
-    check("knight variant built", v["exit"] == 0, v["stderr_tail"][:400])
-    check("icon rendered", any("icon_184" in r for r in v["renders"]),
-          str(v["renders"]))
-    for p, was in before.items():
-        now = os.path.getmtime(p) if os.path.exists(p) else None
-        check("untouched: " + os.path.basename(p), now == was)
+    root = tempfile.mkdtemp(prefix="gf_knight_")
+    try:
+        manifest = preview.run(
+            asset="knight000",
+            variants=[{"label": "baseline"}],
+            views=["icon_184"],
+            root=root,
+        )
+        v = manifest["variants"][0]
+        check("knight variant built", v["exit"] == 0, v["stderr_tail"][:400])
+        check("icon rendered", any("icon_184" in r for r in v["renders"]),
+              str(v["renders"]))
+        for p, was in before.items():
+            now = os.path.getmtime(p) if os.path.exists(p) else None
+            check("untouched: " + os.path.basename(p), now == was)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 TESTS = [
