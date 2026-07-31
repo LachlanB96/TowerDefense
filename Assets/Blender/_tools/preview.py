@@ -90,11 +90,29 @@ def compute_diffs(variants):
 
 def _atomic_json(target, data):
     """Temp file + replace: the gallery polls once a second and would otherwise
-    occasionally read a half-written file."""
+    occasionally read a half-written file.
+
+    On Windows, os.replace onto a file something else has open can raise
+    PermissionError [WinError 5]: CPython's open() doesn't request
+    FILE_SHARE_DELETE, so the gallery's HTTP server mid-read of latest.json is
+    enough to collide. Task 3's gallery polls latest.json once a second on
+    this exact machine, so that window is open continuously during every run.
+    Retry a few times with a short backoff rather than letting one collision
+    abort the whole build; if it's still locked after all attempts, something
+    is genuinely wrong and the error should propagate, not be swallowed.
+    """
     tmp = target + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2)
-    os.replace(tmp, target)
+    attempts = 3
+    for attempt in range(1, attempts + 1):
+        try:
+            os.replace(tmp, target)
+            return
+        except PermissionError:
+            if attempt == attempts:
+                raise
+            time.sleep(0.05)
 
 
 def write_manifest(run_dir, asset_base, manifest):
@@ -165,18 +183,27 @@ def build_variant(script, spec, out_dir, views, sample_scale, timeout):
         # A wedged Blender must not strand the whole run.
         code, err = "timeout", "killed after %ss" % timeout
 
-    # build_one writes this even when the build raises; prefer it over the exit
-    # code, which Blender does not report reliably for a -P script.
+    # build_one writes this even when the build raises; it is AUTHORITATIVE
+    # over the exit code, which Blender does not report reliably for a -P
+    # script (build_one.py says so outright). That has to cut both ways: a
+    # build that finished and rendered but hit a nonzero exit on the way out
+    # (teardown noise, not a real failure) must be upgraded back to success,
+    # not just downgraded when it lies about being fine.
     status_path = os.path.join(out_dir, "_build.json")
     if os.path.exists(status_path):
         try:
             with open(status_path, encoding="utf-8") as fh:
                 status = json.load(fh)
-            if not status.get("ok"):
+            if status.get("ok"):
+                code = 0
+            else:
                 err = status.get("error", err)
                 code = code or 1
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError) as exc:
+            # _build.json IS the success signal here; failing to parse it
+            # must count as a failure, not silently fall through as ok.
+            code = code or 1
+            err = err or "unreadable _build.json: %r" % exc
     elif code == 0:
         # Blender exited clean without the bootstrap finishing: it died early.
         code, err = 1, err or "build_one.py never wrote _build.json"

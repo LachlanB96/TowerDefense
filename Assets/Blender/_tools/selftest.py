@@ -22,6 +22,10 @@ BLENDER = os.environ.get(
     r"C:\Program Files\Blender Foundation\Blender 5.1\blender.exe",
 )
 ASSET = os.path.join(HERE, "_selftest_asset.py")
+# What preview.resolve_asset() derives ASSET's name as (splitext of the
+# basename) - used below to find where on disk a run's manifest/latest.json
+# landed, since preview.run() only returns the manifest dict, not its path.
+ASSET_NAME = os.path.splitext(os.path.basename(ASSET))[0]
 BUILD_ONE = os.path.join(HERE, "build_one.py")
 
 _failures = []
@@ -166,36 +170,64 @@ def test_broken_variant_reports_error():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _read_json(path):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _assert_manifest_on_disk(root, manifest):
+    """Task 3's gallery never sees the dict preview.run() returns - it polls
+    manifest.json/latest.json/assets.json directly. Asserting only the
+    in-memory manifest would keep passing even if write_manifest() were
+    deleted entirely, so read back what actually landed on disk."""
+    run_dir = os.path.join(root, ASSET_NAME, "run-%03d" % manifest["run"])
+    on_disk = _read_json(os.path.join(run_dir, "manifest.json"))
+    check("on-disk manifest.json matches the returned manifest",
+          on_disk == manifest)
+
+    latest = _read_json(os.path.join(root, ASSET_NAME, "latest.json"))
+    check("latest.json mirrors the run's manifest", latest == manifest)
+
+    assets = _read_json(os.path.join(root, "assets.json"))
+    check("assets.json lists the built asset", ASSET_NAME in assets,
+          str(assets))
+
+
 def test_runner_produces_manifest():
     """Three variants, run in parallel, all recorded in one manifest."""
     print("test_runner_produces_manifest")
     sys.path.insert(0, HERE)
     import preview
 
-    manifest = preview.run(
-        asset=ASSET,                     # explicit path, not a name
-        variants=[
-            {"label": "small", "vars": {"CUBE_SIZE": 0.5}},
-            {"label": "big", "vars": {"CUBE_SIZE": 2.0}},
-            {"label": "blue", "vars": {"CUBE_COLOR": [0.1, 0.2, 0.9, 1.0]}},
-        ],
-        views=["front"],
-        root=tempfile.mkdtemp(prefix="gf_runner_"),
-    )
-    check("three variants recorded", len(manifest["variants"]) == 3,
-          "got %d" % len(manifest["variants"]))
-    check("run marked done", manifest.get("done") is True)
-    check("all exited zero",
-          all(v["exit"] == 0 for v in manifest["variants"]),
-          str([v["exit"] for v in manifest["variants"]]))
-    check("every variant has a render",
-          all(v["renders"] for v in manifest["variants"]))
-    check("variants numbered from 1",
-          [v["n"] for v in manifest["variants"]] == [1, 2, 3])
-    # diff must isolate only what differs, so the gallery can caption it
-    diffs = [set(v["diff"]) for v in manifest["variants"]]
-    check("diff holds only differing keys",
-          all(d <= {"CUBE_SIZE", "CUBE_COLOR"} for d in diffs), str(diffs))
+    root = tempfile.mkdtemp(prefix="gf_runner_")
+    try:
+        manifest = preview.run(
+            asset=ASSET,                     # explicit path, not a name
+            variants=[
+                {"label": "small", "vars": {"CUBE_SIZE": 0.5}},
+                {"label": "big", "vars": {"CUBE_SIZE": 2.0}},
+                {"label": "blue", "vars": {"CUBE_COLOR": [0.1, 0.2, 0.9, 1.0]}},
+            ],
+            views=["front"],
+            root=root,
+        )
+        check("three variants recorded", len(manifest["variants"]) == 3,
+              "got %d" % len(manifest["variants"]))
+        check("run marked done", manifest.get("done") is True)
+        check("all exited zero",
+              all(v["exit"] == 0 for v in manifest["variants"]),
+              str([v["exit"] for v in manifest["variants"]]))
+        check("every variant has a render",
+              all(v["renders"] for v in manifest["variants"]))
+        check("variants numbered from 1",
+              [v["n"] for v in manifest["variants"]] == [1, 2, 3])
+        # diff must isolate only what differs, so the gallery can caption it
+        diffs = [set(v["diff"]) for v in manifest["variants"]]
+        check("diff holds only differing keys",
+              all(d <= {"CUBE_SIZE", "CUBE_COLOR"} for d in diffs), str(diffs))
+        _assert_manifest_on_disk(root, manifest)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def test_one_broken_variant_does_not_block_siblings():
@@ -203,23 +235,30 @@ def test_one_broken_variant_does_not_block_siblings():
     sys.path.insert(0, HERE)
     import preview
 
-    manifest = preview.run(
-        asset=ASSET,
-        variants=[
-            {"label": "fine", "vars": {"CUBE_SIZE": 1.0}},
-            {"label": "broken", "patch": "raise RuntimeError('deliberate')"},
-            {"label": "also fine", "vars": {"CUBE_SIZE": 1.5}},
-        ],
-        views=["front"],
-        root=tempfile.mkdtemp(prefix="gf_runner_broken_"),
-    )
-    good = [v for v in manifest["variants"] if v["label"] != "broken"]
-    bad = [v for v in manifest["variants"] if v["label"] == "broken"][0]
-    check("siblings still rendered", all(v["renders"] for v in good))
-    check("siblings exited zero", all(v["exit"] == 0 for v in good))
-    check("broken variant nonzero exit", bad["exit"] != 0, str(bad["exit"]))
-    check("broken variant captured traceback",
-          "deliberate" in bad["stderr_tail"], bad["stderr_tail"][:200])
+    root = tempfile.mkdtemp(prefix="gf_runner_broken_")
+    try:
+        manifest = preview.run(
+            asset=ASSET,
+            variants=[
+                {"label": "fine", "vars": {"CUBE_SIZE": 1.0}},
+                {"label": "broken", "patch": "raise RuntimeError('deliberate')"},
+                {"label": "also fine", "vars": {"CUBE_SIZE": 1.5}},
+            ],
+            views=["front"],
+            root=root,
+        )
+        good = [v for v in manifest["variants"] if v["label"] != "broken"]
+        bad = [v for v in manifest["variants"] if v["label"] == "broken"][0]
+        check("siblings still rendered", all(v["renders"] for v in good))
+        check("siblings exited zero", all(v["exit"] == 0 for v in good))
+        check("broken variant nonzero exit", bad["exit"] != 0, str(bad["exit"]))
+        check("broken variant captured traceback",
+              "deliberate" in bad["stderr_tail"], bad["stderr_tail"][:200])
+        # The broken variant's failure must survive the round trip to disk
+        # too, not just live in the dict this process happens to hold.
+        _assert_manifest_on_disk(root, manifest)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 TESTS = [
