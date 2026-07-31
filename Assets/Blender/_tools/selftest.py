@@ -166,11 +166,69 @@ def test_broken_variant_reports_error():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_runner_produces_manifest():
+    """Three variants, run in parallel, all recorded in one manifest."""
+    print("test_runner_produces_manifest")
+    sys.path.insert(0, HERE)
+    import preview
+
+    manifest = preview.run(
+        asset=ASSET,                     # explicit path, not a name
+        variants=[
+            {"label": "small", "vars": {"CUBE_SIZE": 0.5}},
+            {"label": "big", "vars": {"CUBE_SIZE": 2.0}},
+            {"label": "blue", "vars": {"CUBE_COLOR": [0.1, 0.2, 0.9, 1.0]}},
+        ],
+        views=["front"],
+        root=tempfile.mkdtemp(prefix="gf_runner_"),
+    )
+    check("three variants recorded", len(manifest["variants"]) == 3,
+          "got %d" % len(manifest["variants"]))
+    check("run marked done", manifest.get("done") is True)
+    check("all exited zero",
+          all(v["exit"] == 0 for v in manifest["variants"]),
+          str([v["exit"] for v in manifest["variants"]]))
+    check("every variant has a render",
+          all(v["renders"] for v in manifest["variants"]))
+    check("variants numbered from 1",
+          [v["n"] for v in manifest["variants"]] == [1, 2, 3])
+    # diff must isolate only what differs, so the gallery can caption it
+    diffs = [set(v["diff"]) for v in manifest["variants"]]
+    check("diff holds only differing keys",
+          all(d <= {"CUBE_SIZE", "CUBE_COLOR"} for d in diffs), str(diffs))
+
+
+def test_one_broken_variant_does_not_block_siblings():
+    print("test_one_broken_variant_does_not_block_siblings")
+    sys.path.insert(0, HERE)
+    import preview
+
+    manifest = preview.run(
+        asset=ASSET,
+        variants=[
+            {"label": "fine", "vars": {"CUBE_SIZE": 1.0}},
+            {"label": "broken", "patch": "raise RuntimeError('deliberate')"},
+            {"label": "also fine", "vars": {"CUBE_SIZE": 1.5}},
+        ],
+        views=["front"],
+        root=tempfile.mkdtemp(prefix="gf_runner_broken_"),
+    )
+    good = [v for v in manifest["variants"] if v["label"] != "broken"]
+    bad = [v for v in manifest["variants"] if v["label"] == "broken"][0]
+    check("siblings still rendered", all(v["renders"] for v in good))
+    check("siblings exited zero", all(v["exit"] == 0 for v in good))
+    check("broken variant nonzero exit", bad["exit"] != 0, str(bad["exit"]))
+    check("broken variant captured traceback",
+          "deliberate" in bad["stderr_tail"], bad["stderr_tail"][:200])
+
+
 TESTS = [
     test_bootstrap_renders,
     test_variant_overrides_a_constant,
     test_patch_can_call_script_helpers,
     test_broken_variant_reports_error,
+    test_runner_produces_manifest,
+    test_one_broken_variant_does_not_block_siblings,
 ]
 
 
