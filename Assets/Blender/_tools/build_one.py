@@ -9,6 +9,9 @@ Why a bootstrap rather than running the asset script directly: the asset script
 has no way to receive a variant dict from the command line, and we do not want
 to teach every script an argument parser. Pre-seeding a namespace and exec'ing
 is the pattern _knight000/audit_knight000.py already uses.
+
+"Conforming" is enforced, not assumed: a script without the variant-hook marker
+is refused outright rather than exec'd. See HOOK_MARKER below.
 """
 
 import argparse
@@ -16,6 +19,22 @@ import json
 import os
 import sys
 import traceback
+
+# SAFETY INTERLOCK, not a style marker. Must stay byte-identical to
+# preview.py's HOOK_MARKER; it is duplicated rather than imported because this
+# file runs inside Blender, where _tools/ is not on sys.path.
+#
+# The seeded DO_SAVE / DO_EXPORT below only protect a script that READS them.
+# Eight of the nine blender_*.py scripts in this repo never do - they save
+# and/or export unconditionally at module scope - so exec'ing one here would
+# overwrite the real .blend and .fbx. preview.py gates this too, but build_one
+# is directly invocable (`blender -b -P build_one.py -- --script ...`), so that
+# gate alone is not enough.
+HOOK_MARKER = "# --- variant hook ---"
+
+# Distinct from 3 ("the script raised") so the refusal is tellable apart from a
+# build failure by exit code alone, without parsing _build.json.
+EXIT_NOT_CONFORMING = 4
 
 
 def parse_args():
@@ -32,6 +51,24 @@ def main():
     a = parse_args()
     os.makedirs(a.out, exist_ok=True)
     status_path = os.path.join(a.out, "_build.json")
+
+    # Read the script before doing anything else with it, so the interlock can
+    # be checked before a single line of it is compiled or run.
+    with open(a.script, encoding="utf-8") as fh:
+        src = fh.read()
+
+    if HOOK_MARKER not in src:
+        # Reported through _build.json for the same reason build failures are:
+        # the runner reads that file, and Blender's exit code for a -P script
+        # is not a channel worth trusting on its own.
+        msg = ("refused: %s has no %r block, so it has not opted into the "
+               "preview harness. Running it would save and export over the "
+               "real .blend and .fbx. See CLAUDE.md, \"Preview harness\"."
+               % (a.script, HOOK_MARKER))
+        with open(status_path, "w", encoding="utf-8") as fh:
+            json.dump({"ok": False, "error": msg}, fh, indent=2)
+        print(msg, file=sys.stderr)
+        return EXIT_NOT_CONFORMING
 
     with open(a.variant, encoding="utf-8") as fh:
         variant = dict(json.load(fh))
@@ -59,9 +96,6 @@ def main():
         "DO_SAVE": False,
         "DO_EXPORT": False,
     }
-
-    with open(a.script, encoding="utf-8") as fh:
-        src = fh.read()
 
     try:
         exec(compile(src, a.script, "exec"), ns)

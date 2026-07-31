@@ -23,7 +23,7 @@ Two things are missing, and neither is a small convenience:
    other, described one at a time from memory. So alternatives are effectively never
    offered, and design choices get made by whoever describes them first.
 
-The pipeline is also single-asset. Eight `blender_*.py` scripts exist; only
+The pipeline is also single-asset. Nine `blender_*.py` scripts exist; only
 `blender_knight000.py` has the modern shape (argv flag parser, named per-part builder
 functions). More heroes are planned, so anything built here should not be knight-shaped.
 
@@ -48,7 +48,8 @@ A build harness where:
 - **No click-to-choose in the browser.** The gallery is view-only. The terminal remains
   the single control surface, which removes the need for a write-back endpoint, a choice
   file, and any polling for the user's answer.
-- **No retrofitting of the other seven scripts.** They opt in when next touched.
+- **No retrofitting of the other eight scripts.** They opt in when next touched, and
+  until they do the harness refuses to run them (see "Opting in another script").
   `blender_boat000.py` in particular has uncommitted work in progress.
 - **No test framework.** The repo has none; verification is a defined smoke run (below).
 
@@ -100,6 +101,8 @@ beyond four they contend for cores and the wall-clock win flattens.
   "asset": "knight000",
   "run": 14,
   "started": "2026-07-31T14:22:03",
+  "done": false,
+  "audit": null,
   "variants": [
     {
       "n": 1,
@@ -108,12 +111,15 @@ beyond four they contend for cores and the wall-clock win flattens.
       "renders": ["v1/hero_34.png", "v1/front.png", "v1/icon_184.png"],
       "exit": 0,
       "seconds": 14.8,
-      "stderr_tail": "",
-      "audit": null
+      "stderr_tail": ""
     }
   ]
 }
 ```
+
+This is a contract with `index.html`, which reads exactly these fields and nothing else;
+`selftest.py` asserts the key sets on both levels, because a rename here breaks the page
+silently rather than loudly.
 
 `exit` is `null` while a variant is still building, the process exit code once it
 finishes, or the string `"timeout"` if it was killed. The gallery renders those three
@@ -121,7 +127,9 @@ states as a spinner, a result, and a red card respectively.
 
 `diff` holds only the keys that differ between variants — empty for a single-variant
 run — and is what the gallery prints under each column — so the visual difference always has its cause next to it. `audit` is
-`null` until an audit is run against that variant, then the PASS/FAIL summary string.
+run-level, not per variant (the audit script only ever sees the baseline): `null` until
+an audit is run, then the PASS/FAIL summary string. `done` flips true when every variant
+has landed.
 
 ### 2. `_tools/build_one.py` — the in-Blender bootstrap
 
@@ -199,8 +207,28 @@ convention rather than introducing one.
 
 ### Opting in another script
 
-A script qualifies if it (a) has a single top-level build call and (b) reads its tuning
-values from module globals. `blender_knight000.py` and `blender_boat000.py` both do.
+A script qualifies if it (a) has a single top-level build call, (b) reads its tuning
+values from module globals, (c) carries the `# --- variant hook ---` block immediately
+above that build call, and (d) puts its own save and export behind `DO_SAVE` /
+`DO_EXPORT`.
+
+**Only `blender_knight000.py` conforms today.** The other eight write their real output
+unconditionally at module scope with no flag to switch off — seven call both
+`bpy.ops.wm.save_as_mainfile()` and `bpy.ops.export_scene.fbx()`, and
+`blender_walk_anim.py` exports the FBX. `build_one.py` seeding `DO_SAVE = False` is inert
+against a script that never reads it, so previewing one of them would rebuild the asset
+and overwrite the real `.blend` and `.fbx`, with no warning and no undo — over
+uncommitted work, in `blender_boat000.py`'s case.
+
+**Both `preview.py` and `build_one.py` therefore refuse outright to run a script that
+does not contain the hook marker** — `preview.py` before any Blender is launched,
+`build_one.py` before it exec's anything, since it is directly invocable and cannot
+assume the runner's gate ran at all. `--audit` is gated the same way, because it spawns
+Blender on the audit script directly and so bypasses `build_one.py` entirely. The marker
+is a safety interlock, not a style convention: adopting the hook is also the moment a
+script's save/export get put behind flags, so its presence is the cheapest reliable proof
+that the script is safe to drive.
+
 Older tack scripts are flat imperative code and would need light restructuring first —
 deferred until they are next touched.
 
@@ -215,6 +243,12 @@ deferred until they are next touched.
 - **A build that hangs** is killed at a 180 s per-variant timeout and recorded as
   `exit: "timeout"`. The 15 s typical build gives this a wide margin; the timeout exists
   so one wedged process cannot strand a run.
+- **A build that renders nothing is a failure**, whatever its exit code says. The
+  realistic cause is a view name no `render_view()` call uses — a typo in `--views`, or
+  the knight-shaped `DEFAULT_VIEWS` meeting an asset that names its views differently —
+  which otherwise yields a green column with a label, a diff, a duration and no pictures.
+  That reads as a gallery bug rather than as the caller's typo, so it is routed to the
+  red card with the requested view names in the message.
 - **A malformed or missing `manifest.json`** leaves the gallery showing the last good
   run with a staleness notice, rather than blanking.
 

@@ -58,6 +58,11 @@
 // guards against reading a half-written FILE, not a half-delivered response -
 // must be skippable, not something that poisons every future tick. lastRun is
 // kept alongside as a plain value instead of re-parsing lastBody each time.
+//
+// `asset` is which asset the page is currently showing. It is NOT resolved once
+// and kept - tick() re-reads assets.json every second and switches when the
+// newest build changes. See the switch block in tick() for what has to be reset
+// when it does.
 let lastBody = null, lastRun = null, asset = null;
 
 const q = p => p + (p.includes('?') ? '&' : '?') + 't=' + Date.now();
@@ -72,6 +77,10 @@ async function findAsset() {
   // preview.py maintains assets.json, most-recently-built first. We cannot
   // scrape a directory listing instead: http.server serves index.html when one
   // is present, so GET / returns this very page.
+  //
+  // Called once per tick, so the page follows whatever was built most recently.
+  // ?asset=<name> pins it instead, and wins outright - that override is the way
+  // to keep an older asset on screen while another one is being built.
   const override = new URLSearchParams(location.search).get('asset');
   if (override) return override;
   const res = await fetch(q('/assets.json'));
@@ -178,14 +187,20 @@ function renderLive(m) {
   }
 }
 
-async function loadHistory(current) {
+async function loadHistory(current, forAsset) {
   // Earlier runs, newest first, collapsed. This is the "watch it change" half:
   // the model's history across builds, not just its current state.
   const host = document.getElementById('history');
   host.innerHTML = '';
   for (let n = current - 1; n > 0 && n > current - 12; n--) {
     const dir = 'run-' + String(n).padStart(3, '0');
-    const res = await fetch(q(`/${asset}/${dir}/manifest.json`));
+    const res = await fetch(q(`/${forAsset}/${dir}/manifest.json`));
+    // The displayed asset can change under us mid-loop: tick() re-resolves it
+    // every second and this function awaits between appends. Bailing out here
+    // is what stops the previous asset's runs trickling into the history
+    // container that switching already cleared. card() reads the global
+    // `asset` for its image URLs, so past this line the two must agree.
+    if (forAsset !== asset) return;
     if (!res.ok) continue;
     const m = await res.json();
     const d = document.createElement('details');
@@ -198,8 +213,34 @@ async function loadHistory(current) {
 
 async function tick() {
   try {
-    if (!asset) asset = await findAsset();
-    if (!asset) return;
+    // Re-resolved EVERY tick, not cached for the page's lifetime. preview.py
+    // keeps assets.json most-recently-built-first precisely so this page can
+    // follow the newest build; resolving once would latch the tab onto the
+    // first asset it ever saw, so previewing a second one would show the old
+    // model indefinitely with nothing on screen to say so. findAsset() still
+    // returns the ?asset= override unchanged when one is present, so an
+    // explicitly pinned asset never moves.
+    const next = await findAsset();
+    if (!next) return;
+    if (next !== asset) {
+      // Every piece of view state is derived from the old asset, so all of it
+      // has to go. Leaving lastBody/lastRun alone would make the first tick of
+      // the new asset look like "nothing changed" (or like a same-run rewrite,
+      // if the run numbers happened to match), and renderLive() would then
+      // patch the new asset's variants into the old asset's cards.
+      asset = next;
+      lastBody = null;
+      lastRun = null;
+      liveRun = null;
+      liveCards = [];
+      liveSignatures = [];
+      document.getElementById('live').innerHTML = '';
+      document.getElementById('history').innerHTML = '';
+      document.getElementById('title').textContent = `${asset} · loading…`;
+      document.getElementById('sub').textContent = '';
+      document.getElementById('audit').textContent = '';
+      document.getElementById('audit').className = '';
+    }
     const res = await fetch(q(`/${asset}/latest.json`));
     if (!res.ok) return;
     const body = await res.text();
@@ -231,7 +272,7 @@ async function tick() {
     document.getElementById('sub').textContent =
       m.started + (m.done ? '' : ' · building…');
     renderLive(m);
-    if (wasNewRun) loadHistory(m.run);
+    if (wasNewRun) loadHistory(m.run, asset);
   } catch (e) {
     // A half-written manifest or a momentary 404 is expected during a run.
     // Keep the last good render on screen rather than blanking the page.

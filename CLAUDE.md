@@ -92,11 +92,18 @@ goes to `_previews~/` — the trailing tilde is what stops Unity importing every
 scratch render.
 
 A script is "conforming" (drivable by the harness) if its tunables are module-level
-globals, it has a single top-level build call with the variant hook immediately
-above it, and its `render_view()` honours `RENDER_ONLY`. `_tools/_selftest_asset.py`
-is the shortest complete example. `blender_knight000.py` conforms;
-the other `blender_*.py` scripts do not yet and should adopt the hook when next
-touched.
+globals, it has a single top-level build call with the `# --- variant hook ---`
+block immediately above it, its `render_view()` honours `RENDER_ONLY`, and its own
+save/export are behind `DO_SAVE` / `DO_EXPORT`. `_tools/_selftest_asset.py` is the
+shortest complete example. **Only `blender_knight000.py` conforms.**
+
+The other eight scripts save and/or export unconditionally at module scope, so a
+preview would rebuild the asset and overwrite the real `.blend` and `.fbx` with no
+undo. Both `preview.py` and `build_one.py` refuse outright to run a script without
+the hook marker — this is a safety interlock, not a style check, so do not loosen
+it. To opt a script in: copy the hook block from `_tools/_selftest_asset.py` to just
+above its top-level build call, and put its `save_as_mainfile` / `export_scene.fbx`
+calls behind `DO_SAVE` / `DO_EXPORT` (see `blender_knight000.py`'s `_flag()`).
 
 Run `python Assets/Blender/_tools/selftest.py` after changing anything in `_tools/`.
 

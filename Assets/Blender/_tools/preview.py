@@ -18,6 +18,7 @@ import concurrent.futures
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -39,11 +40,123 @@ DEFAULT_VIEWS = ["hero_34", "front", "icon_184"]
 MAX_JOBS = 4          # each job is a whole Blender; beyond 4 they fight for cores
 STDERR_TAIL_LINES = 20
 
+# SAFETY INTERLOCK, not a style marker. Do not relax this into a "warn and
+# continue", and do not match on something softer like the word "VARIANT".
+#
+# A preview exec's the target asset script whole, in-process, inside Blender.
+# Eight of the nine blender_*.py scripts in this repo write their real output
+# UNCONDITIONALLY at module scope, with no DO_SAVE / DO_EXPORT flag anywhere in
+# the file to switch off: seven call both bpy.ops.wm.save_as_mainfile() and
+# bpy.ops.export_scene.fbx(), and blender_walk_anim.py exports the FBX. So
+# build_one.py's DO_SAVE = False seeding is inert against them: previewing one
+# would rebuild the asset from scratch and overwrite the real .blend and .fbx,
+# silently, with no undo, over whatever uncommitted work was in them.
+#
+# The hook block is the only thing a script gains by opting in, and adopting it
+# is also when its save/export get put behind flags, so the marker's presence is
+# the cheapest reliable proof that a script is safe to drive. Same string in
+# build_one.py - keep the two identical.
+HOOK_MARKER = "# --- variant hook ---"
+
+
+def has_variant_hook(script_path):
+    """True if `script_path` carries the harness opt-in marker.
+
+    Unreadable counts as "no": refusing is the safe answer, and every caller
+    names the offending path in its own message anyway.
+    """
+    try:
+        with open(script_path, encoding="utf-8") as fh:
+            return HOOK_MARKER in fh.read()
+    except OSError:
+        return False
+
+
+def require_variant_hook(script_path):
+    """Refuse, before any Blender starts, to preview a non-conforming script.
+
+    See HOOK_MARKER for why this is a hard stop rather than a warning.
+    """
+    if has_variant_hook(script_path):
+        return
+    raise SystemExit(
+        "Refusing to preview %s\n"
+        "\n"
+        "It does not contain the %r block, so it has not opted into the\n"
+        "preview harness. Scripts without the hook save and export\n"
+        "unconditionally at module scope: running a preview would rebuild the\n"
+        "asset and OVERWRITE the real .blend and .fbx. There is no undo.\n"
+        "\n"
+        "To opt the script in, copy the hook block from\n"
+        "Assets/Blender/_tools/_selftest_asset.py to just above its top-level\n"
+        "build call, and put its save/export behind DO_SAVE / DO_EXPORT.\n"
+        "See CLAUDE.md, \"Preview harness\"."
+        % (script_path, HOOK_MARKER)
+    )
+
+
+def audit_target_scripts(audit_script, asset_name):
+    """Every asset script an audit script looks like it will exec.
+
+    Audit scripts name their target as a literal path and exec it (see
+    _knight000/audit_knight000.py), so reading the source is how we find out
+    what one will run. A regex is cruder than importing the module and asking
+    it, but importing it means RUNNING it, which is the exact thing being
+    gated. Both the convention-implied script and anything else the file
+    mentions are included, because --audit must not become a side door around
+    require_variant_hook().
+    """
+    targets = set()
+    conventional = os.path.join(BLENDER_DIR, "blender_%s.py" % asset_name)
+    if os.path.exists(conventional):
+        targets.add(conventional)
+    try:
+        with open(audit_script, encoding="utf-8") as fh:
+            src = fh.read()
+    except OSError:
+        return sorted(targets)
+    for name in re.findall(r"blender_[A-Za-z0-9_]+\.py", src):
+        path = os.path.join(BLENDER_DIR, name)
+        if os.path.exists(path):
+            targets.add(path)
+    return sorted(targets)
+
+
+def audit_hook_refusal(audit_script, asset_name):
+    """None if running `audit_script` is safe, else the reason it is not.
+
+    run_audit() spawns Blender on the audit script DIRECTLY, bypassing
+    build_one.py, so neither of the other two interlocks covers it.
+    audit_knight000.py is safe today - it execs the knight with nothing seeded
+    and no `--` argv, so the knight's own _flag() returns False for save and
+    export - but the same file for a less careful asset is the identical
+    footgun. Callers phrase the refusal themselves: it is fatal for --audit at
+    the start of a run, and a red badge in the manifest afterwards.
+    """
+    bad = [os.path.basename(p) for p in audit_target_scripts(audit_script, asset_name)
+           if not has_variant_hook(p)]
+    if not bad:
+        return None
+    return ("%s execs %s, which %s no %r block and so would save and export "
+            "over the real asset."
+            % (os.path.basename(audit_script), ", ".join(bad),
+               "have" if len(bad) > 1 else "has", HOOK_MARKER))
+
 
 def resolve_asset(asset):
     """Accept either a bare name (knight000) or an explicit script path."""
     if os.path.exists(asset):
-        return os.path.abspath(asset), os.path.splitext(os.path.basename(asset))[0]
+        path = os.path.abspath(asset)
+        name = os.path.splitext(os.path.basename(path))[0]
+        # Tab-completion makes `preview.py Assets/Blender/blender_knight000.py`
+        # at least as likely as the bare name, and both must land in the same
+        # _previews~/knight000/. A separate "blender_knight000" directory would
+        # get its own run counter and its own latest.json, and - being the
+        # newest - would head assets.json, so the gallery would follow it and
+        # show a single run with no history.
+        if name.startswith("blender_"):
+            name = name[len("blender_"):]
+        return path, name
     path = os.path.join(BLENDER_DIR, "blender_%s.py" % asset)
     if not os.path.exists(path):
         raise SystemExit(
@@ -146,6 +259,14 @@ def run_audit(asset_name):
     script = os.path.join(BLENDER_DIR, "_%s" % asset_name, "audit_%s.py" % asset_name)
     if not os.path.exists(script):
         return None
+    # Second half of the interlock. run() refuses up front too, but this path
+    # spawns Blender on the audit script itself - not via build_one.py - so it
+    # needs its own gate rather than inheriting anyone else's.
+    refusal = audit_hook_refusal(script, asset_name)
+    if refusal:
+        # "FAIL" is what the gallery colours the badge red on, so the refusal
+        # is as visible as a genuine audit failure rather than blending in.
+        return "FAIL - audit skipped: " + refusal
     try:
         proc = subprocess.run([BLENDER, "-b", "-P", script],
                               capture_output=True, text=True, timeout=300)
@@ -213,6 +334,26 @@ def build_variant(script, spec, out_dir, views, sample_scale, timeout):
         if f.endswith(".png")
     ) if os.path.isdir(out_dir) else []
 
+    if code == 0 and not renders:
+        # A build that produced no image is not a success, whatever the exit
+        # code and _build.json say. The realistic cause is a view name that no
+        # render_view() call in the script actually uses - a typo in --views,
+        # or DEFAULT_VIEWS (knight-shaped names) meeting an asset that names
+        # its views differently. RENDER_ONLY then matches nothing, the build
+        # "succeeds", and the gallery shows a column with a label, a diff and a
+        # duration but no pictures, which reads as a gallery bug rather than as
+        # the caller's typo. Route it to the red-card path instead.
+        #
+        # Appended AFTER any existing stderr, not prepended: stderr_tail keeps
+        # only the LAST STDERR_TAIL_LINES lines, so a message put first would
+        # be the first thing trimmed away.
+        code = 1
+        err = (err.rstrip() + "\n\nno .png was produced, so this build is "
+               "recorded as a failure.\nRequested views: %s\nCheck those "
+               "against the render_view() names in %s."
+               % (", ".join(views) if views else "(all views)",
+                  os.path.basename(script))).strip()
+
     tail = "\n".join(err.strip().splitlines()[-STDERR_TAIL_LINES:])
     return {
         "exit": code,
@@ -226,6 +367,17 @@ def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
         jobs=MAX_JOBS, root=None, all_views=False, audit=False):
     """Build every variant in parallel. Returns the completed manifest."""
     script, asset_name = resolve_asset(asset)
+    # Before anything: no Blender launched, no run directory allocated, nothing
+    # on disk touched. See HOOK_MARKER.
+    require_variant_hook(script)
+    if audit:
+        # Checked here as well as inside run_audit() so that --audit fails
+        # before a 15 s build rather than after it.
+        refusal = audit_hook_refusal(
+            os.path.join(BLENDER_DIR, "_%s" % asset_name, "audit_%s.py" % asset_name),
+            asset_name)
+        if refusal:
+            raise SystemExit("Refusing to run --audit: " + refusal)
     variants = variants or [{"label": "default"}]
     if all_views:
         views = None
