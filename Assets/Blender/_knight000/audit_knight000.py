@@ -178,8 +178,12 @@ def bb_gap(a, b):
     """Widest axis-wise separation between two world bounding boxes; 0 if they overlap."""
     return max(max(a[0][k] - b[1][k], b[0][k] - a[1][k], 0.0) for k in range(3))
 
-# FX_ meshes are glows and auras - they are SUPPOSED to hang in the air.
-FLOATERS_OK = ("FX_",)
+# Parts that are SUPPOSED to hang in the air. Confirmed with the user 2026-07-31;
+# everything else that floats is a defect under modelling rule 1.
+#   FX_*                     auras and glows
+#   Eye_InnerGlow            the red glow inside the helmet - emissive, like FX_
+#   Tome_Glyph_*, Tome_Seal  magic runes hovering above the book's page
+FLOATERS_OK = ("FX_", "Eye_InnerGlow", "Tome_Glyph_", "Tome_Seal")
 solid = [o for o in objs if not o.name.startswith(FLOATERS_OK)]
 bbs = {o.name: wbb(o) for o in solid}
 evl = {o.name: o.evaluated_get(dg) for o in solid}

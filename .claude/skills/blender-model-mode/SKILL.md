@@ -30,7 +30,8 @@ Three things to internalise before you touch anything:
 **1. No levitating or disconnected parts.** `[checked]`
 Every part must touch or overlap another part. Nothing hovers unless I say so
 explicitly. A pauldron floating 4cm off the shoulder is a defect even if it looks fine
-from the front.
+from the front. Deliberate exceptions — glows, auras, floating runes — are listed in
+`FLOATERS_OK` in the asset's audit script; ask me before adding one.
 
 **2. Silhouette first.** `[craft]`
 The model must still name the character at 184×184 — Steam app-icon size — with every
