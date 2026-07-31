@@ -33,7 +33,12 @@ def add_cube_at(x, y, z):
     bpy.ops.mesh.primitive_cube_add(size=CUBE_SIZE, location=(x, y, z))
     ob = bpy.context.active_object
     mat = bpy.data.materials.new("SelftestMat")
-    mat.use_nodes = True
+    # In Blender 5.1, bpy.data.materials.new() already returns a material with
+    # use_nodes == True and a populated node_tree (Principled BSDF + Material
+    # Output) - node-based shading is no longer optional. Explicitly assigning
+    # mat.use_nodes = True here is a no-op that only serves to touch a property
+    # slated for removal in 6.0 and trip a DeprecationWarning, so it is
+    # deliberately not set.
     mat.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = CUBE_COLOR
     ob.data.materials.append(mat)
     return ob
@@ -68,6 +73,16 @@ def render_view(name, res=(160, 160), samples=32):
 # --- variant hook -------------------------------------------------------------
 # Copy this block verbatim into any script that opts in. It goes AFTER every
 # default is set and BEFORE anything is built.
+#
+# Why copy-paste rather than import: globals() below resolves to the CALLING
+# module's own namespace - this script's globals, which is exactly what the
+# hook needs (VARIANT overrides must land as THIS script's globals, and
+# _patch must exec against those same globals so it can see this script's
+# own helpers). If this block lived in an importable helper function instead,
+# calling that helper would make globals() resolve to the HELPER module's
+# namespace, not the asset script's - so VARIANT overrides and _patch would
+# silently land somewhere the real build never reads from. Do not "clean this
+# up" into a shared function; it would break name resolution, not simplify it.
 _v = globals().get("VARIANT", {})
 globals().update({k: v for k, v in _v.items() if not k.startswith("_")})
 if _v.get("_patch"):

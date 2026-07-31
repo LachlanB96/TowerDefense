@@ -53,7 +53,7 @@ def test_bootstrap_renders():
     print("test_bootstrap_renders")
     tmp = tempfile.mkdtemp(prefix="gf_selftest_")
     try:
-        run_build_one({}, tmp)
+        _rc, stderr = run_build_one({}, tmp)
         status_path = os.path.join(tmp, "_build.json")
         check("_build.json written", os.path.exists(status_path))
         if os.path.exists(status_path):
@@ -62,6 +62,13 @@ def test_bootstrap_renders():
             check("build reported ok", status.get("ok") is True,
                   str(status.get("error", ""))[:400])
         check("front.png rendered", os.path.exists(os.path.join(tmp, "front.png")))
+        # run_build_one's stderr was captured but never inspected until now, so
+        # a regression like the Material.use_nodes DeprecationWarning could
+        # only ever be caught by an out-of-band manual run. A clean build
+        # should be silent on stderr; assert it rather than just discarding it.
+        check("stderr has no Warning/Error noise",
+              "Warning" not in stderr and "Error" not in stderr,
+              stderr[:400])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -92,28 +99,53 @@ def test_patch_can_call_script_helpers():
     This is the failure mode the hook exists to prevent: a replacement builder
     that cannot see the script's own helpers dies deep in the build with an
     error that looks nothing like its cause.
+
+    Asserting only `ok is True` is not enough to catch every way this can
+    break: if the hook were written `exec(_v["_patch"], dict(globals()))` (a
+    plausible "defensive copy" mistake), the patched build_asset() would be
+    defined into that throwaway copy, never replace the real one, and the
+    ORIGINAL unpatched build_asset() would run instead. Nothing would raise,
+    ok would still be True, and this test would pass while the mechanism is
+    silently broken - only the narrower "helper extracted to another module"
+    mistake would still be caught, via NameError. So build an unpatched
+    baseline and byte-diff the patched render against it, the same technique
+    test_variant_overrides_a_constant already uses: the patch moves the cube
+    to z=1.5, which only shows up in the render if the patch actually replaced
+    the function the real exec runs.
     """
     print("test_patch_can_call_script_helpers")
-    tmp = tempfile.mkdtemp(prefix="gf_selftest_patch_")
+    baseline = tempfile.mkdtemp(prefix="gf_selftest_patch_base_")
+    patched = tempfile.mkdtemp(prefix="gf_selftest_patch_")
     try:
         patch = (
             "def build_asset():\n"
             "    # calls a helper defined in the asset script, not in the runner\n"
             "    add_cube_at(0.0, 0.0, 1.5)\n"
         )
-        run_build_one({"_patch": patch}, tmp)
-        status_path = os.path.join(tmp, "_build.json")
+        run_build_one({}, baseline)
+        run_build_one({"_patch": patch}, patched)
+
+        status_path = os.path.join(patched, "_build.json")
         ok = False
+        detail = "no _build.json"
         if os.path.exists(status_path):
             with open(status_path, encoding="utf-8") as fh:
                 status = json.load(fh)
             ok = status.get("ok") is True
             detail = str(status.get("error", ""))[:400]
-        else:
-            detail = "no _build.json"
         check("_patch replaced the builder and ran", ok, detail)
+
+        a = os.path.join(baseline, "front.png")
+        b = os.path.join(patched, "front.png")
+        check("both builds rendered", os.path.exists(a) and os.path.exists(b))
+        if os.path.exists(a) and os.path.exists(b):
+            check("patched render differs from unpatched baseline",
+                  open(a, "rb").read() != open(b, "rb").read(),
+                  "identical bytes - build_asset() ran unpatched; the patch "
+                  "was defined somewhere the real exec never reached")
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(baseline, ignore_errors=True)
+        shutil.rmtree(patched, ignore_errors=True)
 
 
 def test_broken_variant_reports_error():
