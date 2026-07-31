@@ -1,6 +1,6 @@
 ---
 name: blender-model-mode
-description: Primes the session for Gloomfell Blender modelling — the modelling rules, the render-and-pick workflow, and the Blender traps that have actually bitten. Invoke ONLY when the user explicitly types /blender-model-mode. Never auto-invoke, even when Blender, modelling, or the preview harness come up in conversation.
+description: Primes the session for Gloomfell Blender modelling — the modelling rules, the render-and-pick workflow, and the Blender traps that have actually bitten. Starts by asking the user what they want to work on. Invoke ONLY when the user explicitly types /blender-model-mode. Never auto-invoke, even when Blender, modelling, or the preview harness come up in conversation.
 ---
 
 # Blender Model Mode
@@ -10,18 +10,98 @@ assets are not sculpted by hand — they are *built by Python scripts* that driv
 headlessly. You change a model by changing code, running a build, and looking at the
 render.
 
-Three things to internalise before you touch anything:
+---
 
-- **The design doc is the intent; the code may lag behind it.** Hero and tower specs live
-  in `Obsidian/TD/` (`Heroes/<Name>.md`, `Towers/<Name>/`). Read the doc before the code.
-- **Never change a model without showing the user first.** See "How to work" below. This
-  is the standing rule, not a suggestion.
-- **The rules in section 1 are the user's, not yours.** Follow them. If the user states a
-  new preference, add it to that section — do not put it anywhere else.
+## STOP. Ask before you do anything.
+
+**Your first action after reading this file is a question to the user. Not a tool call.**
+
+Ask which they want:
+
+> **1.** Start a new model
+> **2.** Work on an existing model
+
+Then follow route 1 or route 2 below.
+
+Until they answer, do **not**:
+
+- read or list asset scripts, `.blend` files, or design docs
+- run a build, a preview, or an audit
+- go looking for defects, or report any problem you happen to notice
+
+This matters. This skill is not about any one asset. A previous version of it was
+written around the knight, and a freshly-primed agent went straight to auditing the
+knight and reported a defect the user had not asked about. Assume nothing about which
+model is in play, and do not volunteer findings. If you spot something alarming while
+doing requested work, mention it in one line and let the user decide whether to chase it.
 
 ---
 
-## 1. My rules
+## Route 1 — starting a new model
+
+1. **Ask what it is.** A hero, an enemy unit, a tower, a prop, a piece of environment?
+   What is it called? What should it read as at a glance?
+
+2. **Agree the code name.** Heroes and units are `<name>000` (`knight000`). Towers use a
+   3-digit path-tier code — each digit is the tier in paths 1/2/3, so `tack000` is the
+   base and `tack210` is tier 2 in path 1 and tier 1 in path 2. Confirm the name before
+   creating files; it becomes the script name, the folder name and the Unity prefab key.
+
+3. **Find or write the design doc.** Look for `Obsidian/TD/Heroes/<Name>.md` or
+   `Obsidian/TD/Towers/<Name>/Base.md`. If one exists it is the intent — read it before
+   writing any geometry. If not, ask the user enough to work from, and offer to write the
+   doc first so the intent is recorded somewhere other than the code.
+
+4. **Create the script, conforming from the start.**
+   `Assets/Blender/blender_<asset>.py`. Copy the skeleton from
+   `Assets/Blender/_tools/_selftest_asset.py` — it is the shortest complete example of a
+   conforming script. Four requirements:
+   - every tunable value is a module-level global, set before the build runs
+   - a single top-level build call
+   - the `# --- variant hook ---` block immediately before that call
+   - `render_view()` honours `RENDER_ONLY`, and save/export sit behind `DO_SAVE` /
+     `DO_EXPORT`
+
+   Get this right on day one. Retrofitting it later is how the other eight scripts ended
+   up unusable by the harness.
+
+5. **Create the audit.** `Assets/Blender/_<asset>/audit_<asset>.py`. Start with the four
+   checks that apply to any asset — non-manifold meshes, geometry below the floor,
+   left/right mirror symmetry, and the rule-1 levitation check. Copy them from
+   `Assets/Blender/_knight000/audit_knight000.py`. If a third asset ever needs them,
+   extract a shared module instead of copying a third time.
+
+6. **Blockout, then iterate.** Build the rough forms, render it, and go round the loop
+   below. Do not try to land the finished model in one pass.
+
+---
+
+## Route 2 — working on an existing model
+
+1. **Show the user what exists and let them pick.** Enumerate live — do not work from a
+   list in this file, it will go stale:
+
+   ```bash
+   for f in Assets/Blender/blender_*.py; do
+     n=$(basename "$f" .py); n=${n#blender_}
+     grep -q "variant hook ---" "$f" && echo "  $n  [conforming]" || echo "  $n"
+   done
+   ```
+
+2. **Check whether it conforms.** Only a script marked `[conforming]` can be driven by
+   the preview harness. The rest save and export unconditionally the moment they run, so
+   the harness refuses them outright — see gotcha 1. Opting one in is a small, separate
+   job; ask the user before doing it.
+
+3. **Read the design doc, then the script.** The doc in `Obsidian/TD/` is the intent; the
+   code may lag behind it. Entries marked TBD are common and normal.
+
+4. **Ask what they want changed.** Then do that. Do not audit the model, hunt for
+   defects, or report unrelated problems unless asked.
+
+---
+
+## The rules
 
 > **This section belongs to the user. Edit it freely — it is the whole point of this file.**
 > `[checked]` means a script verifies it and a violation fails the build.
@@ -38,18 +118,18 @@ The model must still name the character at 184×184 — Steam app-icon size — 
 interior detail lost. Spikes, plumes, flares and stance do that work. If the outline
 reads as a blob, the model has failed regardless of how good the detail is.
 
-**3. Gold draws the form.** `[craft]`
-Bright steel alone flattens into a featureless blob under any key light. Outline every
-plate boundary in gold trim so the internal lines survive downscaling the way an inked
-drawing does.
+**3. Trim draws the form.** `[craft]`
+Bright metal alone flattens into a featureless blob under any key light. Outline plate
+boundaries in a contrasting trim so the internal lines survive downscaling the way an
+inked drawing does. On the Silent Knight that trim is gold.
 
 **4. Dark recesses.** `[craft]`
-Mail voiders, plate undersides and helmet interiors use a near-black material. Without
-them, a red eye-glow has nothing to glow *against* and just looks like a pink smudge.
+Undersides, interiors and mail voiders use a near-black material. Without them a glowing
+element has nothing to glow *against* and just reads as a smudge.
 
 **5. Rounded armour, never visible cubes.** `[craft]`
 Everything reads as forged armour, not as the primitives it was built from. This is the
-difference between a finished character and a blockout.
+difference between a finished asset and a blockout.
 
 **6. Prefer spheres and cylinders.** `[craft]`
 Reach for a rounded primitive as the base shape wherever possible, rather than starting
@@ -74,35 +154,37 @@ into the contrast rather than splitting the difference.
 
 ---
 
-## 2. How to work
+## The loop
 
 ### Always render variants and let the user pick
 
 **Do not commit a visual change the user has not seen and chosen.** Every change comes
 back as 2–4 numbered options, rendered side by side.
 
-For an open aesthetic question, the variants are genuine alternatives (barbute vs great
-helm vs sallet). For a defect with one obvious outcome, they are *different approaches to
+For an open aesthetic question the variants are genuine alternatives (barbute vs great
+helm vs sallet). For a defect with one obvious outcome they are *different approaches to
 the fix* (rotate the wrist, shrink the guard, move the grip) — the user still sees the
 result rendered before it lands, which is the point.
 
 Number them 1/2/3 and ask by number. The gallery numbers its columns the same way.
 
-### The loop
+### Commands
+
+Replace `<asset>` with the code name agreed above.
 
 ```bash
-# 1. Gallery — start once, leave running on the second monitor
-python Assets/Blender/_tools/serve.py                    # http://localhost:8777/
+# Gallery — start once, leave running on the second monitor
+python Assets/Blender/_tools/serve.py                     # http://localhost:8777/
 
-# 2. Render variants in parallel (3 ≈ 20s)
-python Assets/Blender/_tools/preview.py knight000 --variants v.json
+# Render variants in parallel (3 ≈ 20s)
+python Assets/Blender/_tools/preview.py <asset> --variants v.json
 
-# 3. Objective geometry check
-python Assets/Blender/_tools/preview.py knight000 --audit
+# Objective geometry check
+python Assets/Blender/_tools/preview.py <asset> --audit
 
-# 4. Only once the user has picked: the real build
+# Only once the user has picked: the real build
 "/c/Program Files/Blender Foundation/Blender 5.1/blender.exe" -b \
-    -P Assets/Blender/blender_knight000.py -- save export render
+    -P Assets/Blender/blender_<asset>.py -- save export render
 ```
 
 A variants file is a JSON list:
@@ -119,34 +201,25 @@ A variants file is a JSON list:
 text** that replaces a whole builder function — it must be source, not a function object,
 because it has to bind to the asset script's own globals.
 
-Previews are non-destructive: they never write the `.blend` or the `.fbx`. Only step 4
-does, and only after the user has chosen.
+Previews are non-destructive: they never write the `.blend` or the `.fbx`. Only the last
+command does, and only after the user has chosen.
 
 ### Adding a checked rule
 
 When the user gives a rule that can be verified mechanically, add the check to that
-asset's audit script (`Assets/Blender/_<asset>/audit_<asset>.py`), append it to the
-`fails` list so it turns the result to FAIL, and tag the rule `[checked]` in section 1.
-Do not invent a separate rules file — this file is the only config.
-
-### Making another script usable
-
-Only `blender_knight000.py` currently works with the harness. To opt another one in:
-copy the `# --- variant hook ---` block from `Assets/Blender/_tools/_selftest_asset.py`
-to sit immediately before the script's top-level build call, put its save/export behind
-`DO_SAVE`/`DO_EXPORT`, and make `render_view()` honour `RENDER_ONLY`.
-
-Until then the harness **refuses** to run it, on purpose — see gotcha 1.
+asset's audit script, append it to the `fails` list so it turns the result to FAIL, and
+tag the rule `[checked]` in the rules section. Do not invent a separate rules file — this
+file is the only config.
 
 ---
 
-## 3. Gotchas
+## Gotchas
 
 These have all actually cost time. They are not hypothetical.
 
-1. **Seven of the nine `blender_*.py` scripts save and export unconditionally at module
-   scope.** Simply running one rebuilds the asset and overwrites its `.blend` and `.fbx`,
-   with no undo. `preview.py` refuses any script without the variant hook for exactly this
+1. **Seven of the nine asset scripts save and export unconditionally at module scope.**
+   Simply running one rebuilds the asset and overwrites its `.blend` and `.fbx`, with no
+   undo. `preview.py` refuses any script without the variant hook for exactly this
    reason. Do not defeat that check.
 
 2. **Builds go through the headless CLI, not MCP.** The Blender MCP tools are fine for
@@ -163,9 +236,9 @@ These have all actually cost time. They are not hypothetical.
    and friends need a 3D-viewport context, so they are unreliable under `blender -b`.
    Build with `bmesh.ops` and modifiers instead; both are entirely context-free.
 
-5. **Axes:** the knight faces **-Y** in Blender (the front orthographic view), so forward
-   is `-Y`, his right is `-X`. With the export axes in the script this lands facing `+Z`
-   in Unity. Z-up, origin between the feet.
+5. **Axes:** characters face **-Y** in Blender (the front orthographic view), so forward
+   is `-Y` and the character's right is `-X`. With the export axes in the scripts this
+   lands facing `+Z` in Unity. Z-up, origin on the ground between the feet.
 
 6. **`_previews~` keeps its trailing tilde.** Unity imports everything under `Assets/`,
    and the tilde is what stops it generating a `.meta` for every scratch render. Never
