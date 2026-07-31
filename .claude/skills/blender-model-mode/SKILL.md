@@ -168,14 +168,44 @@ result rendered before it lands, which is the point.
 
 Number them 1/2/3 and ask by number. The gallery numbers its columns the same way.
 
+### Getting the gallery in front of the user
+
+The user sees renders in a browser tab, not in the terminal. Before the first preview of
+a session:
+
+1. **Start the server in the background.** It runs forever and never exits — starting it
+   in the foreground will block you until the call times out.
+
+   ```bash
+   python Assets/Blender/_tools/serve.py     # MUST be run in the background
+   ```
+
+   **Kill any existing server before starting one.** `serve.py` sets
+   `allow_reuse_address`, and on Windows that means a second instance binds to 8777
+   silently instead of failing — you then cannot tell which process is answering, and a
+   "restart" leaves the old one serving the old page. Check first:
+
+   ```bash
+   # PowerShell: find anything already on 8777, and stop it before restarting
+   Get-NetTCPConnection -State Listen -LocalPort 8777 -EA SilentlyContinue |
+     ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+   ```
+
+   A server left running from an earlier session is otherwise harmless — reuse it rather
+   than starting a second, unless `gallery/index.html` has changed (gotcha 7).
+
+2. **Tell the user to open `http://localhost:8777/` and leave the tab open.** Say it in
+   plain words — they will not find it on their own. The page polls once a second and
+   redraws itself, so they open it once per session and never touch it again.
+
+3. Only then run a preview. The page follows whichever asset was built most recently, so
+   a brand-new asset appears on its own with no configuration.
+
 ### Commands
 
 Replace `<asset>` with the code name agreed above.
 
 ```bash
-# Gallery — start once, leave running on the second monitor
-python Assets/Blender/_tools/serve.py                     # http://localhost:8777/
-
 # Render variants in parallel (3 ≈ 20s)
 python Assets/Blender/_tools/preview.py <asset> --variants v.json
 
