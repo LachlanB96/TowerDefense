@@ -102,7 +102,11 @@ InitTestScene*.unity*
 /**/screenshot*.png
 /**/screenshot*.png.meta
 Obsidian/TD/.obsidian/
-.claude/
+# Ignore .claude's contents rather than the directory itself: git cannot
+# re-include a path whose parent directory is excluded, so a plain `.claude/`
+# would make the negation below silently do nothing.
+.claude/*
+!.claude/skills/
 
 # Blender preview harness scratch renders. The trailing tilde keeps Unity from
 # importing every scratch PNG; the ignore keeps them out of git.
