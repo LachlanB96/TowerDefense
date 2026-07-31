@@ -70,6 +70,36 @@ Implement `ITowerAttack` (`Range` property). Concrete attacks: `TackAttack`, `Sn
 
 Tower/unit meshes are authored in Blender via scripts in `Assets/Blender/blender_*.py`. Each script opens a base `.blend`, mutates it, and exports an `.fbx` into `Assets/Models/` (path is hardcoded to `C:\Users\LachlanB\TD\...`, which matters if the repo ever moves). This is how visual variants of tower upgrades are produced (e.g. `tack100.blend` = red-metal fire variant of `tack000`).
 
+### Preview harness
+
+`Assets/Blender/_tools/` renders variants of an asset in parallel and shows them in a
+browser gallery. Start the gallery once and leave it running:
+
+    python Assets/Blender/_tools/serve.py        # http://localhost:8777/
+
+Then, to compare alternatives:
+
+    python Assets/Blender/_tools/preview.py knight000 --variants helmets.json
+
+where `helmets.json` is a list of `{"label": ..., "vars": {...}, "patch": "..."}`.
+`vars` overrides any module-level global in the asset script; `patch` is Python
+source (not a function object — it must bind to the script's own globals) that can
+replace a whole builder such as `build_helmet`. Variants are numbered 1..N in the
+gallery, which is how they should be referred to when asking the user to choose.
+
+Preview runs are non-destructive: they never write the `.blend` or the FBX. Output
+goes to `_previews~/` — the trailing tilde is what stops Unity importing every
+scratch render.
+
+A script is "conforming" (drivable by the harness) if its tunables are module-level
+globals, it has a single top-level build call with the variant hook immediately
+above it, and its `render_view()` honours `RENDER_ONLY`. `_tools/_selftest_asset.py`
+is the shortest complete example. `blender_knight000.py` conforms;
+the other `blender_*.py` scripts do not yet and should adopt the hook when next
+touched.
+
+Run `python Assets/Blender/_tools/selftest.py` after changing anything in `_tools/`.
+
 ## Design documentation
 
 Design specs live in an Obsidian vault at `Obsidian/TD/` (the vault itself is untracked, the content is). Layout:

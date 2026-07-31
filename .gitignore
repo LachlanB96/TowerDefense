@@ -103,3 +103,7 @@ InitTestScene*.unity*
 /**/screenshot*.png.meta
 Obsidian/TD/.obsidian/
 .claude/
+
+# Blender preview harness scratch renders. The trailing tilde keeps Unity from
+# importing every scratch PNG; the ignore keeps them out of git.
+/[Aa]ssets/Blender/_previews~/

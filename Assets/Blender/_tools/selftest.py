@@ -349,6 +349,37 @@ def test_gallery_server_contract():
             os.remove(assets_json)
 
 
+def test_knight_preview_is_non_destructive():
+    """A knight preview run must not touch the real .blend or FBX.
+
+    This is the check worth having: previews and real exports share a script,
+    and the failure mode is silent - you only notice when a half-finished
+    variant has overwritten the asset Unity is importing.
+    """
+    print("test_knight_preview_is_non_destructive")
+    sys.path.insert(0, HERE)
+    import preview
+
+    blend = os.path.join(os.path.dirname(HERE), "knight000.blend")
+    fbx = os.path.join(os.path.dirname(HERE), "..", "Models", "knight000.fbx")
+    before = {p: (os.path.getmtime(p) if os.path.exists(p) else None)
+              for p in (blend, fbx)}
+
+    manifest = preview.run(
+        asset="knight000",
+        variants=[{"label": "baseline"}],
+        views=["icon_184"],
+        root=tempfile.mkdtemp(prefix="gf_knight_"),
+    )
+    v = manifest["variants"][0]
+    check("knight variant built", v["exit"] == 0, v["stderr_tail"][:400])
+    check("icon rendered", any("icon_184" in r for r in v["renders"]),
+          str(v["renders"]))
+    for p, was in before.items():
+        now = os.path.getmtime(p) if os.path.exists(p) else None
+        check("untouched: " + os.path.basename(p), now == was)
+
+
 TESTS = [
     test_bootstrap_renders,
     test_variant_overrides_a_constant,
@@ -357,6 +388,7 @@ TESTS = [
     test_runner_produces_manifest,
     test_one_broken_variant_does_not_block_siblings,
     test_gallery_server_contract,
+    test_knight_preview_is_non_destructive,
 ]
 
 
