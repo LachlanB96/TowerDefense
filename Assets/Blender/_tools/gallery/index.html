@@ -1,0 +1,165 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Gloomfell · preview gallery</title>
+<style>
+  :root { color-scheme: dark; --bg:#131317; --card:#1c1c22; --line:#2e2e38;
+          --dim:#8b8b99; --fg:#e8e8ef; --bad:#c8443c; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.5 "Segoe UI", system-ui, sans-serif; }
+  header { position:sticky; top:0; background:var(--bg); border-bottom:1px solid var(--line);
+           padding:12px 20px; display:flex; gap:16px; align-items:baseline; z-index:2; }
+  h1 { font-size:15px; margin:0; font-weight:600; letter-spacing:.3px; }
+  .dim { color:var(--dim); }
+  .cols { display:flex; gap:16px; padding:20px; align-items:flex-start;
+          overflow-x:auto; }
+  .col { background:var(--card); border:1px solid var(--line); border-radius:8px;
+         padding:12px; min-width:220px; flex:0 0 auto; }
+  .col h2 { font-size:13px; margin:0 0 2px; }
+  .num { display:inline-block; min-width:20px; height:20px; line-height:20px;
+         text-align:center; background:var(--fg); color:var(--bg);
+         border-radius:4px; font-weight:700; margin-right:6px; }
+  .diff { font:11px/1.4 ui-monospace, Consolas, monospace; color:var(--dim);
+          margin:6px 0 10px; white-space:pre-wrap; }
+  .col img { display:block; width:100%; border-radius:4px; margin-bottom:8px;
+             background:#000; cursor:zoom-in; }
+  .err { border-color:var(--bad); }
+  .err pre { font:11px/1.4 ui-monospace, Consolas, monospace; color:#ffb4ae;
+             background:#2a1614; padding:8px; border-radius:4px; margin:0;
+             max-height:260px; overflow:auto; white-space:pre-wrap; }
+  .pending { color:var(--dim); font-style:italic; padding:24px 0; text-align:center; }
+  .badge { font:11px/1 ui-monospace, Consolas, monospace; padding:4px 8px;
+           border-radius:4px; margin-left:auto; }
+  .badge.ok  { background:#1d3a24; color:#7ee08e; }
+  .badge.bad { background:#3a1a17; color:#ffb4ae; }
+  details { margin:0 20px 12px; }
+  summary { cursor:pointer; color:var(--dim); padding:6px 0; }
+  dialog { border:none; background:transparent; max-width:96vw; max-height:96vh; }
+  dialog img { max-width:96vw; max-height:96vh; }
+  dialog::backdrop { background:#000c; }
+</style>
+
+<header>
+  <h1 id="title">waiting for a build…</h1>
+  <span class="dim" id="sub"></span>
+  <span id="audit"></span>
+</header>
+<div id="live"></div>
+<div id="history"></div>
+<dialog id="zoom"><img></dialog>
+
+<script>
+// Poll latest.json once a second. Re-render whenever the BODY changes, not just
+// when the run number does: the manifest is rewritten several times within a
+// run as each variant lands, and we want those to appear as they arrive.
+let lastBody = null, asset = null;
+
+const q = p => p + (p.includes('?') ? '&' : '?') + 't=' + Date.now();
+
+async function findAsset() {
+  // preview.py maintains assets.json, most-recently-built first. We cannot
+  // scrape a directory listing instead: http.server serves index.html when one
+  // is present, so GET / returns this very page.
+  const override = new URLSearchParams(location.search).get('asset');
+  if (override) return override;
+  const res = await fetch(q('/assets.json'));
+  if (!res.ok) return null;
+  const list = await res.json();
+  return list.length ? list[0] : null;
+}
+
+function card(v) {
+  const el = document.createElement('div');
+  el.className = 'col' + (v.exit !== 0 && v.exit !== null ? ' err' : '');
+  const diff = Object.entries(v.diff || {})
+      .map(([k, val]) => `${k} = ${JSON.stringify(val)}`).join('\n');
+  el.innerHTML = `<h2><span class="num">${v.n}</span>${v.label}</h2>`
+    + (diff ? `<div class="diff">${diff}</div>` : '<div class="diff dim">baseline</div>');
+
+  if (v.exit === null) {
+    el.insertAdjacentHTML('beforeend', '<div class="pending">building…</div>');
+  } else if (v.exit !== 0) {
+    el.insertAdjacentHTML('beforeend',
+      `<pre>exit ${v.exit}\n\n${(v.stderr_tail || '(no stderr)')
+        .replace(/[<&]/g, c => ({'<':'&lt;','&':'&amp;'}[c]))}</pre>`);
+  } else {
+    for (const r of v.renders) {
+      const img = new Image();
+      img.src = q(`/${asset}/${v.runDir}/${r}`);
+      img.loading = 'lazy';
+      img.onclick = () => {
+        const d = document.getElementById('zoom');
+        d.querySelector('img').src = img.src;
+        d.showModal();
+      };
+      el.appendChild(img);
+    }
+    if (v.seconds !== null)
+      el.insertAdjacentHTML('beforeend', `<div class="diff">${v.seconds}s</div>`);
+  }
+  return el;
+}
+
+function renderRun(m, into) {
+  const wrap = document.createElement('div');
+  wrap.className = 'cols';
+  for (const v of m.variants) {
+    v.runDir = 'run-' + String(m.run).padStart(3, '0');
+    wrap.appendChild(card(v));
+  }
+  into.appendChild(wrap);
+}
+
+async function loadHistory(current) {
+  // Earlier runs, newest first, collapsed. This is the "watch it change" half:
+  // the model's history across builds, not just its current state.
+  const host = document.getElementById('history');
+  host.innerHTML = '';
+  for (let n = current - 1; n > 0 && n > current - 12; n--) {
+    const dir = 'run-' + String(n).padStart(3, '0');
+    const res = await fetch(q(`/${asset}/${dir}/manifest.json`));
+    if (!res.ok) continue;
+    const m = await res.json();
+    const d = document.createElement('details');
+    d.innerHTML = `<summary>run ${m.run} · ${m.started} · `
+      + `${m.variants.map(v => v.label).join(', ')}</summary>`;
+    host.appendChild(d);
+    renderRun(m, d);
+  }
+}
+
+async function tick() {
+  try {
+    if (!asset) asset = await findAsset();
+    if (!asset) return;
+    const res = await fetch(q(`/${asset}/latest.json`));
+    if (!res.ok) return;
+    const body = await res.text();
+    if (body === lastBody) return;          // nothing changed; leave the DOM alone
+    const wasNewRun = lastBody === null
+      || JSON.parse(lastBody).run !== JSON.parse(body).run;
+    lastBody = body;
+    const m = JSON.parse(body);
+
+    document.getElementById('title').textContent = `${m.asset} · run ${m.run}`;
+    const badge = document.getElementById('audit');
+    badge.textContent = m.audit || '';
+    // Run level, not per variant: the audit script only ever sees the baseline.
+    badge.className = m.audit
+      ? (m.audit.includes('FAIL') ? 'badge bad' : 'badge ok') : '';
+    document.getElementById('sub').textContent =
+      m.started + (m.done ? '' : ' · building…');
+    const live = document.getElementById('live');
+    live.innerHTML = '';
+    renderRun(m, live);
+    if (wasNewRun) loadHistory(m.run);
+  } catch (e) {
+    // A half-written manifest or a momentary 404 is expected during a run.
+    // Keep the last good render on screen rather than blanking the page.
+    console.debug('poll skipped:', e);
+  }
+}
+
+document.getElementById('zoom').onclick = e => e.currentTarget.close();
+tick();
+setInterval(tick, 1000);
+</script>

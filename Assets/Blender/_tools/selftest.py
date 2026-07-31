@@ -15,6 +15,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BLENDER = os.environ.get(
@@ -27,6 +30,11 @@ ASSET = os.path.join(HERE, "_selftest_asset.py")
 # landed, since preview.run() only returns the manifest dict, not its path.
 ASSET_NAME = os.path.splitext(os.path.basename(ASSET))[0]
 BUILD_ONE = os.path.join(HERE, "build_one.py")
+SERVE = os.path.join(HERE, "serve.py")
+# serve.py hardcodes its previews root relative to itself (no env override for
+# that, only for PORT), so this must match Assets/Blender/_previews~ exactly -
+# see serve.py's own PREVIEW_ROOT computation.
+PREVIEW_ROOT = os.path.join(os.path.dirname(HERE), "_previews~")
 
 _failures = []
 
@@ -261,6 +269,86 @@ def test_one_broken_variant_does_not_block_siblings():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def _wait_for_server(base_url, deadline_seconds=10):
+    """Poll until the socket accepts connections, or give up.
+
+    A fixed sleep-then-hope would be flaky (Blender-adjacent boxes are slow to
+    schedule a fresh python.exe under load) and a hang would be worse; this
+    bounds the wait and returns the last connection error for the failure
+    message instead of hanging the whole selftest run.
+    """
+    deadline = time.time() + deadline_seconds
+    last_exc = None
+    while time.time() < deadline:
+        try:
+            return urllib.request.urlopen(base_url + "/", timeout=1)
+        except (urllib.error.URLError, ConnectionError) as exc:
+            last_exc = exc
+            time.sleep(0.1)
+    raise last_exc or RuntimeError("server never came up")
+
+
+def test_gallery_server_contract():
+    """serve.py's whole job is a contract with gallery/index.html's poller:
+
+    - GET / must return the page itself (proves index.html got copied into
+      the previews root and stock http.server is serving it, not a 404).
+    - GET /assets.json must be 200 and a JSON list (the page's findAsset()
+      parses it with no error handling for "not a list").
+    - every response carries Cache-Control: no-store (QuietHandler.end_headers
+      - without it the 1 Hz poller could get a cached latest.json and never
+        notice a run finished).
+
+    Hermetic: runs on GLOOMFELL_GALLERY_PORT=8778, not the default 8777, so it
+    cannot collide with a human's already-open gallery tab. Does not require
+    any preview run to already exist - assets.json is real shared scratch
+    state under Assets/Blender/_previews~ (a human's manual gallery check may
+    be using it too), so if it is missing this writes a throwaway empty list
+    and removes it afterwards rather than assuming any asset has ever built.
+    """
+    print("test_gallery_server_contract")
+    port = 8778
+    base = "http://127.0.0.1:%d" % port
+    env = dict(os.environ, GLOOMFELL_GALLERY_PORT=str(port))
+
+    os.makedirs(PREVIEW_ROOT, exist_ok=True)
+    assets_json = os.path.join(PREVIEW_ROOT, "assets.json")
+    wrote_placeholder = not os.path.exists(assets_json)
+    if wrote_placeholder:
+        with open(assets_json, "w", encoding="utf-8") as fh:
+            json.dump([], fh)
+
+    proc = subprocess.Popen(
+        [sys.executable, SERVE], env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    try:
+        root_resp = _wait_for_server(base)
+        root_body = root_resp.read().decode("utf-8")
+        check("GET / is 200", root_resp.status == 200)
+        check("GET / body contains the gallery page's title marker",
+              "<title>Gloomfell · preview gallery</title>" in root_body,
+              root_body[:200])
+        check("GET / carries Cache-Control: no-store",
+              root_resp.headers.get("Cache-Control") == "no-store")
+
+        assets_resp = urllib.request.urlopen(base + "/assets.json", timeout=5)
+        check("GET /assets.json is 200", assets_resp.status == 200)
+        parsed = json.loads(assets_resp.read().decode("utf-8"))
+        check("assets.json parses as a list", isinstance(parsed, list), repr(parsed))
+        check("GET /assets.json carries Cache-Control: no-store",
+              assets_resp.headers.get("Cache-Control") == "no-store")
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+        if wrote_placeholder and os.path.exists(assets_json):
+            os.remove(assets_json)
+
+
 TESTS = [
     test_bootstrap_renders,
     test_variant_overrides_a_constant,
@@ -268,6 +356,7 @@ TESTS = [
     test_broken_variant_reports_error,
     test_runner_produces_manifest,
     test_one_broken_variant_does_not_block_siblings,
+    test_gallery_server_contract,
 ]
 
 
