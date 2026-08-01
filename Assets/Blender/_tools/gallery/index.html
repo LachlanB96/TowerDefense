@@ -59,6 +59,14 @@
   .crit { font:11px/1.4 ui-monospace, Consolas, monospace; color:#ffb4ae;
           background:#2a1614; padding:8px; border-radius:4px; margin:10px 0 0;
           white-space:pre-wrap; }
+  .thumb.inflight img { opacity:.5; outline:1px dashed var(--dim); }
+  .thumb.inflight span { color:var(--dim); font-style:italic; }
+  /* The audit gates nothing - it is evidence, not a verdict. Styled muted and
+     always prefixed "audit" so it never reads as the thing that accepted or
+     rejected a change. */
+  .audit-info { font:11px/1 ui-monospace, Consolas, monospace; padding:4px 8px;
+                border-radius:4px; background:#22222a; color:var(--dim); }
+  .audit-info.fail { color:#e0c07e; }
   .state { font:11px/1 ui-monospace, Consolas, monospace; padding:4px 8px;
            border-radius:4px; }
   .state.run   { background:#1d2f3a; color:#7ec8e0; }
@@ -245,10 +253,10 @@ function zoomable(img) {
   return img;
 }
 
-function attemptLabel(a) {
-  // "7.2" reads as iteration 7, attempt 2. Attempt is omitted when it is the
-  // only one, which is the common case and would otherwise be noise.
-  return a.attempt && a.attempt > 1 ? `${a.iteration}.${a.attempt}` : `${a.iteration}`;
+function auditChip(a) {
+  if (!a.audit) return '';
+  const fail = a.audit.includes('FAIL');
+  return ` <span class="audit-info${fail ? ' fail' : ''}">audit ${esc(a.audit)}</span>`;
 }
 
 function renderProgression(log) {
@@ -256,56 +264,67 @@ function renderProgression(log) {
   const host = document.getElementById('prog');
   host.innerHTML = '';
   if (!attempts.length) {
-    host.innerHTML = '<div class="pending">director started, no attempts yet…</div>';
+    host.innerHTML = '<div class="pending">pipeline started, nothing built yet…</div>';
     return;
   }
-  const current = attempts[attempts.length - 1];
-  const rejected = current.verdict === 'rejected';
 
-  const now = document.createElement('div');
-  now.className = 'prog-now';
-  const big = zoomable(new Image());
-  big.src = q(`/${asset}/${current.render}`);
-  now.appendChild(big);
+  // The big image is the newest ACCEPTED attempt - that is the model as it
+  // actually stands. With up to seven modellers in flight at once, "the latest
+  // attempt" is whichever thread happened to finish last and says nothing about
+  // the model; several of those attempts will be thrown away.
+  const current = [...attempts].reverse().find(a => a.verdict === 'accepted');
 
-  const why = document.createElement('div');
-  why.className = 'prog-why';
-  why.innerHTML = `<h2>iteration ${attemptLabel(current)}</h2>`
-    + `<p>${esc(current.summary || '')}</p>`
-    + `<span class="badge ${rejected ? 'bad' : 'ok'}">`
-    + `${esc(current.verdict || 'pending')}</span>`
-    + (current.audit ? ` <span class="badge ${current.audit.includes('FAIL')
-        ? 'bad' : 'ok'}">${esc(current.audit)}</span>` : '')
-    + (rejected && current.critique
-        ? `<p class="crit">${esc(current.critique)}</p>` : '');
-  now.appendChild(why);
-  host.appendChild(now);
+  if (current) {
+    const now = document.createElement('div');
+    now.className = 'prog-now';
+    const big = zoomable(new Image());
+    big.src = q(`/${asset}/${current.render}`);
+    now.appendChild(big);
+
+    const why = document.createElement('div');
+    why.className = 'prog-why';
+    why.innerHTML = `<h2>accepted · ${log.accepted || 0} change`
+      + `${(log.accepted || 0) === 1 ? '' : 's'} in the model</h2>`
+      + `<p>${esc(current.summary || '')}</p>`
+      + `<span class="badge ok">accepted</span>${auditChip(current)}`;
+    now.appendChild(why);
+    host.appendChild(now);
+  } else {
+    host.innerHTML = '<div class="pending">nothing accepted yet — '
+      + 'everything below is still being judged or was rejected</div>';
+  }
 
   const strip = document.createElement('div');
   strip.className = 'strip';
   for (const a of [...attempts].reverse()) {
     if (a === current) continue;
-    const bad = a.verdict === 'rejected';
+    const bad = a.verdict === 'rejected' || a.verdict === 'bad';
+    const pending = a.verdict === 'in-flight' || !a.verdict;
     const t = document.createElement('div');
-    t.className = 'thumb' + (bad ? ' rejected' : '');
+    t.className = 'thumb' + (bad ? ' rejected' : pending ? ' inflight' : '');
     const img = zoomable(new Image());
     img.src = q(`/${asset}/${a.render}`);
     img.loading = 'lazy';
-    // Hover gives the full reasoning without spending vertical space on it.
-    img.title = (a.summary || '') + (bad && a.critique ? `\n\nrejected: ${a.critique}` : '');
+    // Hover gives the critic's full reasoning without spending vertical space.
+    img.title = (a.summary || '')
+      + (a.critique ? `\n\n${a.verdict}: ${a.critique}` : '');
     t.appendChild(img);
+    const mark = bad ? '✕ ' : pending ? '… ' : '✓ ';
     const cap = document.createElement('span');
-    cap.textContent = (bad ? '✕ ' : '') + attemptLabel(a) + ' · ' + (a.summary || '');
+    cap.textContent = mark + (a.summary || '');
     t.appendChild(cap);
     strip.appendChild(t);
   }
   host.appendChild(strip);
 
+  const inFlight = attempts.filter(a => a.verdict === 'in-flight' || !a.verdict).length;
   document.getElementById('title').textContent =
-    `${log.asset} · iteration ${log.iteration}`;
+    `${log.asset} · ${attempts.length} attempts, ${log.accepted || 0} kept`;
   const sub = document.getElementById('sub');
   sub.innerHTML = `<span class="state ${log.state === 'run' ? 'run' : 'stuck'}">`
-    + `${esc(log.state || 'run')}</span>` + (log.note ? ' ' + esc(log.note) : '');
+    + `${esc(log.state || 'run')}</span>`
+    + (inFlight ? ` <span class="dim">${inFlight} in flight</span>` : '')
+    + (log.note ? ' ' + esc(log.note) : '');
   document.getElementById('audit').textContent = '';
   document.getElementById('audit').className = '';
 }

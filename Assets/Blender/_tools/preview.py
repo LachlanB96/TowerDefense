@@ -15,10 +15,12 @@ gallery fills in column by column instead of staying blank for the whole run.
 
 import argparse
 import concurrent.futures
+import contextlib
 import datetime
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -39,6 +41,55 @@ DEFAULT_VIEWS = ["hero_34", "front", "icon_184"]
 
 MAX_JOBS = 4          # each job is a whole Blender; beyond 4 they fight for cores
 STDERR_TAIL_LINES = 20
+
+# Machine-wide cap on concurrent Blender builds, across every process that
+# calls this module. Several modeller agents may run preview.py at once, and
+# each call can itself spawn up to MAX_JOBS Blenders - without a cap the box
+# thrashes and every render finishes slower than if they had queued.
+#
+# This lives here rather than in the agents' instructions on purpose: it is a
+# machine-resource constraint, and an instruction is something an agent can
+# forget while a semaphore is not.
+RENDER_SLOTS = int(os.environ.get("GLOOMFELL_RENDER_SLOTS", "3"))
+
+
+@contextlib.contextmanager
+def render_slot(root, timeout):
+    """Hold one of RENDER_SLOTS build slots for the duration of the block.
+
+    Implemented with mkdir, which is atomic on every platform we care about, so
+    whichever process creates the directory owns that slot. Slots are reclaimed
+    by age rather than by checking whether the owning PID is alive: PID liveness
+    is platform-specific and a stale slot only costs throughput, never
+    correctness.
+    """
+    slot_dir = os.path.join(root, ".render-slots")
+    os.makedirs(slot_dir, exist_ok=True)
+    stale_after = timeout + 60
+    # Never block a build forever over a scheduling nicety - if the pool stays
+    # full past this, run anyway and accept the contention.
+    deadline = time.time() + stale_after
+    mine = None
+    while mine is None and time.time() < deadline:
+        for i in range(max(1, RENDER_SLOTS)):
+            path = os.path.join(slot_dir, "slot-%d" % i)
+            try:
+                os.mkdir(path)
+                mine = path
+                break
+            except FileExistsError:
+                try:
+                    if time.time() - os.path.getmtime(path) > stale_after:
+                        shutil.rmtree(path, ignore_errors=True)
+                except OSError:
+                    pass
+        if mine is None:
+            time.sleep(0.5)
+    try:
+        yield
+    finally:
+        if mine:
+            shutil.rmtree(mine, ignore_errors=True)
 
 # SAFETY INTERLOCK, not a style marker. Do not relax this into a "warn and
 # continue", and do not match on something softer like the word "VARIANT".
@@ -277,7 +328,7 @@ def run_audit(asset_name):
     return lines[-1].strip() if lines else "audit produced no verdict"
 
 
-def build_variant(script, spec, out_dir, views, sample_scale, timeout):
+def build_variant(script, spec, out_dir, views, sample_scale, timeout, root):
     """Run one Blender process. Returns the finished variant record fields."""
     os.makedirs(out_dir, exist_ok=True)
 
@@ -293,12 +344,15 @@ def build_variant(script, spec, out_dir, views, sample_scale, timeout):
         json.dump(payload, fh, indent=2)
 
     started = time.time()
+    # The slot is taken around the Blender call only - not around the JSON
+    # bookkeeping above - so a queued build holds nothing while it waits.
     try:
-        proc = subprocess.run(
-            [BLENDER, "-b", "-P", BUILD_ONE, "--",
-             "--script", script, "--variant", vpath, "--out", out_dir],
-            capture_output=True, text=True, timeout=timeout,
-        )
+        with render_slot(root, timeout):
+            proc = subprocess.run(
+                [BLENDER, "-b", "-P", BUILD_ONE, "--",
+                 "--script", script, "--variant", vpath, "--out", out_dir],
+                capture_output=True, text=True, timeout=timeout,
+            )
         code, err = proc.returncode, proc.stderr or ""
     except subprocess.TimeoutExpired:
         # A wedged Blender must not strand the whole run.
@@ -416,7 +470,7 @@ def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
         for i, spec in enumerate(variants):
             out_dir = os.path.join(run_dir, "v%d" % (i + 1))
             futures[pool.submit(build_variant, script, spec, out_dir,
-                                views, sample_scale, timeout)] = i
+                                views, sample_scale, timeout, root)] = i
         for fut in concurrent.futures.as_completed(futures):
             i = futures[fut]
             try:
@@ -459,6 +513,10 @@ def main():
     ap.add_argument("--jobs", type=int, default=MAX_JOBS)
     ap.add_argument("--audit", action="store_true",
                     help="also run _<asset>/audit_<asset>.py and record its verdict")
+    # A modeller agent working in a git worktree has its own _previews~ that the
+    # gallery is not watching. --root points its renders back at the real one so
+    # the user sees the work as it happens.
+    ap.add_argument("--root", help="preview output root (default: the repo's _previews~)")
     a = ap.parse_args()
 
     if not os.path.exists(BLENDER):
@@ -472,6 +530,7 @@ def main():
         sample_scale=a.samples,
         jobs=a.jobs,
         audit=a.audit,
+        root=os.path.abspath(a.root) if a.root else None,
     )
     failed = [v for v in manifest["variants"] if v["exit"] != 0]
     return 1 if failed else 0
