@@ -25,9 +25,8 @@ Ask two things, in one message:
 > **1.** New model, or an existing one?
 > **2.** Give me a loose design brief — as rough as you like.
 
-The brief can be a sentence. "A plague doctor, gothic, tattered, ash-grey." That is
-enough; extrapolating it is Agent C's entire job, and over-interrogating the user here
-defeats the point.
+A sentence is enough. "A plague doctor, gothic, tattered, ash-grey." Extrapolating it is
+the designers' entire job, and over-interrogating the user here defeats the point.
 
 Until they answer, do **not** read asset scripts, `.blend` files or design docs, run a
 build, or go looking for defects. Assume nothing about which model is in play.
@@ -57,14 +56,13 @@ word, every build is a preview and nothing writes the `.blend` or the FBX.
    1, tier 1 in path 2. It becomes the script name, the folder name and the Unity prefab
    key.
 2. **Write the loose brief into `Obsidian/TD/Heroes/<Name>.md`** (or
-   `Towers/<Name>/Base.md`). Every C and D reads it. Anything not written there is
-   something they cannot aim at.
+   `Towers/<Name>/Base.md`). This is the durable record of intent.
 3. **Create the script, conforming from the start** — `Assets/Blender/blender_<asset>.py`,
-   copying the skeleton from `Assets/Blender/_tools/_selftest_asset.py`:
-   tunables as module globals, one top-level build call, the `# --- variant hook ---`
-   block immediately before it, `render_view()` honouring `RENDER_ONLY`, save/export
-   behind `DO_SAVE` / `DO_EXPORT`. Retrofitting this later is how the other eight scripts
-   ended up unusable by the harness.
+   copying the skeleton from `Assets/Blender/_tools/_selftest_asset.py`: tunables as
+   module globals, one top-level build call, the `# --- variant hook ---` block
+   immediately before it, `render_view()` honouring `RENDER_ONLY`, save/export behind
+   `DO_SAVE` / `DO_EXPORT`. Retrofitting this later is how the other asset scripts ended up
+   unusable by the harness.
 4. **Build a rough blockout yourself**, so the pipeline has something to work on.
 
 ### If it is an existing model
@@ -79,8 +77,8 @@ done
 ```
 
 Only a `[conforming]` script can be driven by the harness; the rest save and export
-unconditionally the moment they run (gotcha 1). Read its design doc, append the user's
-new brief to it, then start the pipeline.
+unconditionally the moment they run (gotcha 1). Read its design doc, append the user's new
+brief to it, then start the pipeline.
 
 ---
 
@@ -97,8 +95,8 @@ new brief to it, then start the pipeline.
                                      │ brief
                                      ▼
                         ┌─────────────────────────┐
-                        │  B · ORCHESTRATOR  ×1   │  routes only. never designs,
-                        │  queues · dispatches    │  models, or judges
+                        │  B · ORCHESTRATOR  ×1   │  routes, aggregates, decides —
+                        │  queues · dispatches    │  but never looks at a render
                         └──┬──────────────────┬───┘
         ┌──────────────────┘                  └──────────────────┐
         ▼                                                        ▼
@@ -108,101 +106,150 @@ new brief to it, then start the pipeline.
 │  colour, character│                              │  own worktree, then  │
 │  backstory, arc,  │                              │  renders             │
 │  add / remove     │                              └──────────┬───────────┘
-└───────────────────┘                                         │ diff + render
+└───────────────────┘                                         │ change + render
                                                               ▼
-                                                  ┌──────────────────────┐
-                                                  │  E · CRITIC  1 per D │
-                                                  │  pure judgement,     │
-                                                  │  no rulebook         │
-                                                  └──────────┬───────────┘
-                                                             │ good / needs work / bad
-                                                             ▼
-                                                            to B
+                                          ┌───────────────────────────────────┐
+                                          │  E · VERIFIER  ×3 per attempt     │
+                                          │  independent; none sees the others│
+                                          │  pure judgement, no rulebook      │
+                                          └──────────┬────────────────────────┘
+                                                     │ three reports
+                                                     ▼
+                                                 back to B
 ```
 
-**B's routing on E's verdict:**
+### The verify cycle
 
-| Verdict | B does |
+B receives three independent reports and **synthesises them into one**:
+
+- A problem raised by **two or more** verifiers is marked `[CONSENSUS]` and is a
+  **blocker**.
+- A problem raised by **one** verifier is a **suggestion**, not a blocker.
+- The combined report must reflect all three, not just the majority.
+
+B then decides from **its own combined report only**:
+
+| Decision | B does |
 |---|---|
-| **good** | apply the diff to the real script, log it accepted, free the slot |
-| **needs work** | spawn a **new D** carrying E's critique → its result goes to a **new E** |
-| **bad** | discard the change; return the design to the queue or drop it |
+| **accept** | apply the diff to the real script, log it accepted, discard D and remove its worktree |
+| **needs changes** | **resume the same D** with the combined report as *primary* and the three raw reports as *secondary*, then send its next output to **three fresh verifiers** |
+| **attempt 5 still not accepted** | **shelve** it — see below. Never abandon earlier than that. |
 
-Every design, every attempt and every verdict is logged and rendered. The user sees
-accepted and rejected work alike.
+### Shelving
+
+When attempt 5 is not accepted, the work is **not thrown away**:
+
+- write the diff to `docs/shelved/<asset>/<design-id>.patch`
+- log the attempt with `verdict: "shelved"`, keeping all five attempts, every verifier
+  report and every combined report
+- leave the render visible in the gallery
+
+The user can later list what is shelved, accept one as-is, or hand it to a fresh modeller
+to continue. Shelved work is tracked in git on purpose — the point is that it survives.
 
 ### Why the separations matter
 
-- **B never judges**, so it cannot rationalise its own dispatch decisions.
-- **D is fresh per attempt**, so it cannot get attached to choices it made earlier.
-- **E is fresh per D and has no rulebook**, so its verdict is taste, not compliance.
+- **B decides but never looks at a render.** It chairs the panel; it does not sit on it.
+  This is what stops it substituting its own taste for the verifiers'.
+- **D persists across attempts of the same change.** It already knows the design, the
+  script and its own reasoning. Re-spawning would pay ~35k tokens to re-learn all of it.
+- **E is fresh every single attempt.** A resumed verifier anchors on its own previous
+  verdict and tends to approve whatever it just asked for. The builder needs continuity;
+  the judge needs independence.
+
+---
+
+## Front-load everything you already know
+
+**An agent that begins by reading files, running `pwd`, or hunting for paths has been
+badly briefed.** You already paid to know those things. Pay once, inline the result.
+
+A child agent should read only:
+- **(a)** a file too large to inline that it must *edit*, and
+- **(b)** an image it must *look at*.
+
+Everything else arrives in its prompt. Measured on this project, the files the briefs used
+to tell agents to read came to ~58 KB — about **15k tokens per spawn**, and a wave is 31
+agents.
+
+| Agent | Gets inlined | Reads for itself |
+|---|---|---|
+| **C** designer | brief, character summary, preferences, condensed "already tried" list | **nothing** |
+| **D** modeller | design spec, preferences, this design's critique history, fully-resolved absolute commands, main-repo path | `blender_<asset>.py` — must read it to edit it |
+| **E** verifier | character summary, the attempted change, absolute paths to both renders | the two PNGs — that is its job |
+
+**Exactly one agent reads this file: B, once, at startup.** Nobody else ever does.
+
+**Never pass the raw `iteration-log.json`.** It grows all session and was already 20 KB
+an hour into one run. B maintains a condensed `summary` — one line per design — and passes
+that instead.
+
+**Inlined preferences can go stale.** B stamps them into every dispatch from its startup
+read. If the user edits the preferences below mid-run, tell B to re-read them; treat it as
+a steering event.
 
 ---
 
 ## Concurrency, isolation and contention
 
-**Caps** live in `control.json` — designers default to **3**, modellers to **7**. Fewer
-designers than modellers on purpose: a design idea takes seconds to invent and minutes to
-build, so equal numbers would pile up a queue that is mostly never used. Raise it if the
-queue ever runs dry.
+**Caps** live in `control.json` — designers default to **3**, modellers to **7**, and each
+attempt gets exactly **3** verifiers. Fewer designers than modellers on purpose: a design
+takes seconds to invent and minutes to build, so equal numbers pile up a queue nobody
+consumes.
 
-**Every D runs in its own git worktree** (`isolation: "worktree"` on the dispatch). Seven
-agents editing one file would silently clobber each other — last write wins, no error.
+**Every D runs in its own git worktree** (`isolation: "worktree"`). Seven agents editing
+one file would silently clobber each other.
 
-**D returns a diff, B applies it.** In its worktree, D produces:
+**B must remove a D's worktree when it discards the D** — on accept, on shelve, or on
+abandonment:
+
+```bash
+git worktree remove --force <path> ; git worktree prune
+```
+
+Left alone these accumulate; one session leaked fifteen full checkouts.
+
+**D returns a diff, B applies it.** In its worktree:
 
 ```bash
 git diff -- Assets/Blender/blender_<asset>.py
 ```
 
-B applies accepted diffs to the real tree one at a time, checking first:
-
-```bash
-git apply --check <patch>  &&  git apply <patch>
-```
-
-If it no longer applies — because another change landed first — B sends the design to a
-fresh D to redo against current state. Do not hand-merge.
+B applies accepted diffs to the real tree one at a time, checking first with
+`git apply --check`. If it no longer applies because another change landed first, resume
+that D and tell it to redo against current state. Do not hand-merge.
 
 **Renders are capped machine-wide at 3 concurrent Blender builds**, enforced inside
-`preview.py` by a slot semaphore, not by agent discipline. Seven modellers rendering at
-once would otherwise put ~28 Blender processes on the box and finish slower than one.
+`preview.py` by a slot semaphore rather than by agent discipline.
 
-**D must render into the real previews root**, or its work is invisible to the user:
-
-```bash
-python <repo>/Assets/Blender/_tools/preview.py <asset> --audit \
-    --root <repo>/Assets/Blender/_previews~
-```
-
-where `<repo>` is the **main** checkout, not the worktree.
+**D must render into the real previews root**, or its work is invisible to the user —
+`--root <main-repo>/Assets/Blender/_previews~`, where main-repo is the **main** checkout,
+never the worktree.
 
 ---
 
 ## The audit runs, but gates nothing
 
 `--audit` is on for every render, and its result is logged and shown. **It never blocks a
-change and E never sees it.** The rules are young and might be wrong; a good design must
-not die because a legacy check disliked it.
+change and no verifier ever sees it.** The rules are young and might be wrong; a good
+design must not die because a legacy check disliked it.
 
-Its purpose is evidence. When you have watched enough work, you will be able to tell the
+Its purpose is evidence. Once you have watched enough work you will be able to tell the
 user things like *"the last six changes you kept all failed the levitation check — that
-rule may be wrong"* or *"every change E rejected also failed the audit — worth promoting
-to a gate."* That is a decision the user makes later, from data, not one this file makes
-in advance.
+rule may be wrong"*, or *"every change the panel rejected also failed the audit — worth
+promoting to a gate."* That is a decision the user makes later, from data.
 
 ---
 
 ## Preferences, not rules
 
-> **This section belongs to the user.** Nothing here is enforced. C and D get it as
-> context; **E does not** — E judges on its own taste alone, by design.
+> **This section belongs to the user.** Nothing here is enforced. C and D receive it as
+> context; **E never does** — verifiers judge on their own taste alone, by design.
 
 1. **No levitating or disconnected parts** unless deliberate. Glows and auras are fine.
-2. **Silhouette first** — must name the character at 184×184 with all interior detail
-   lost.
-3. **Trim draws the form** — bright metal flattens to a blob; outline plate boundaries in
-   a contrasting trim so internal lines survive downscaling.
+2. **Silhouette first** — must name the character at 184×184 with all interior detail lost.
+3. **Trim draws the form** — bright metal flattens to a blob; outline plate boundaries in a
+   contrasting trim so internal lines survive downscaling.
 4. **Dark recesses** — undersides and interiors near-black, or a glow has nothing to glow
    against.
 5. **Rounded armour, never visible cubes.**
@@ -222,7 +269,7 @@ wooden tack launchers. Lean into the contrast rather than splitting the differen
 
 ```json
 { "state": "run", "notes": ["more gold", "stop making it taller"],
-  "caps": { "designers": 3, "modellers": 7 } }
+  "caps": { "designers": 3, "modellers": 7, "verifiers": 3 } }
 ```
 
 `state` is `run` | `pause` | `stop`. `notes` steers **without stopping anything**.
@@ -233,104 +280,146 @@ wooden tack launchers. Lean into the contrast rather than splitting the differen
 {
   "asset": "mage000", "state": "run", "accepted": 12,
   "note": "3 modellers in flight",
+  "summary": [
+    "d01 accepted — widened pauldrons for icon legibility",
+    "d09 shelved  — reliquary lockets; 5 attempts, all read as clutter"
+  ],
   "designs": [
     { "id": "d17", "origin": "C2", "status": "in-progress",
-      "summary": "ash-grey robe, tattered hem, a lantern that never lights" }
+      "summary": "a lantern that has never once been lit" }
   ],
   "attempts": [
-    { "id": "a41", "design": "d17", "attempt": 1,
-      "summary": "tattered the hem with a noise-displaced solidify",
+    { "id": "a41", "design": "d17", "attempt": 3,
+      "summary": "hung an unlit lantern from the left hand",
       "render": "run-041/v1/hero_34.png",
       "audit": "PASS",
       "verdict": "rejected",
-      "critique": "reads as damage, not age — the tear pattern is too regular" }
+      "report": "[CONSENSUS] the lantern reads as luggage, not as a burden ...",
+      "critiques": [
+        { "verifier": 1, "stance": "change", "text": "..." },
+        { "verifier": 2, "stance": "change", "text": "..." },
+        { "verifier": 3, "stance": "keep",   "text": "..." }
+      ],
+      "patch": null }
   ]
 }
 ```
 
-`verdict` is `in-flight` | `accepted` | `rejected` | `needs-work`. Rejected entries stay
-forever; seeing what was thrown away is the point.
+`verdict` is `in-flight` | `accepted` | `rejected` | `shelved`. `patch` is set only on
+shelve. Rejected and shelved entries stay forever; seeing what was thrown away is the
+point.
 
-**`_previews~/<asset>/process-notes.md`** — **yours**, written by nobody else. See below.
+**`docs/shelved/<asset>/<design-id>.patch`** — shelved work, tracked in git.
+
+**`_previews~/<asset>/process-notes.md`** — **yours**, written by nobody else.
 
 ---
 
 ## Dispatching
 
+Fill every `<placeholder>` from what you already know. **Never** tell a child to read
+`SKILL.md`, the design doc, or the iteration log.
+
 ### B — the orchestrator
 
-Background, one only:
+Background, one only. B is the single agent that reads this file:
 
 > You are **Agent B**, orchestrator for Gloomfell asset `<asset>`. Read
-> `.claude/skills/blender-model-mode/SKILL.md` — "The pipeline", "Concurrency, isolation
-> and contention" and "State files" are your instructions. Read
-> `Obsidian/TD/<design-doc>`.
+> `.claude/skills/blender-model-mode/SKILL.md` in full — you are the only agent that ever
+> does. "The pipeline", "Front-load everything you already know", "Concurrency, isolation
+> and contention", "State files" and "Dispatching" are your instructions.
 >
-> **You never design, never model, never judge.** You route.
+> **You never design, never model, and never look at a render.** You route, aggregate and
+> decide.
 >
-> Loop: read `control.json`; keep the design queue topped up by spawning Agent C's up to
-> the designer cap; dispatch queued designs to Agent D's up to the modeller cap, each in
-> its own worktree; pair every returning D with a **fresh** Agent E; apply E's verdict per
-> the routing table. Write every design, attempt and verdict to `iteration-log.json` as it
-> happens — that file is the user's only window into what you are doing.
+> Asset script: `<abs path>`   Design doc: `<abs path>`   Main repo: `<abs path>`
+> Character summary you must pass to designers and verifiers:
+> `<2–3 sentences — write this yourself from the doc and reuse it verbatim>`
+> The user's brief: `<verbatim>`
 >
-> Work in waves: dispatch a batch, collect, verify, decide, repeat. Do not try to hold
-> many independent async streams in your head — keep all state in the log and re-read it.
+> Loop: read `control.json`; keep the queue topped up with designers; dispatch designs to
+> modellers in worktrees; send each modeller's output to three fresh verifiers; combine
+> their reports marking `[CONSENSUS]`; decide; act. Write every design, attempt, report and
+> verdict to `iteration-log.json` as it happens — it is the user's only window into you.
 >
-> Return only when `control.json` says `stop`. Report the accepted count and why you
-> stopped.
+> Work in waves: dispatch a batch, collect, verify, decide, repeat. Keep all state in the
+> log and re-read the `summary` field rather than the whole history.
+>
+> Return only when `control.json` says `stop`. Report the accepted count and why.
 
 ### C — the designer
 
-> You are **Agent C**, a designer for Gloomfell asset `<asset>`. Read
-> `Obsidian/TD/<design-doc>` for the brief so far, and
-> `Assets/Blender/_previews~/<asset>/iteration-log.json` for what has already been tried.
+> You are a designer for Gloomfell asset `<asset>`.
 >
-> Extrapolate the brief. Propose ONE concrete addition or change that would make this
-> character more striking. Colour, silhouette, an object it carries, an asymmetry, a
-> texture, a piece of backstory that implies a visual — you may invent backstory and
-> character arc freely if it produces something to build.
+> WHAT IT IS: `<character summary>`
+> THE BRIEF: `<user's loose brief>`
 >
-> Do not repeat anything in the log. Do not touch any file.
+> ALREADY TRIED — do not repeat or invert any of these:
+> `<the condensed summary list, one line each>`
 >
-> Return: a one-line summary and a short paragraph a modeller could implement. Nothing
-> else.
+> PREFERENCES (context, not rules): `<the nine, inline>`
+>
+> Propose **3–5** concrete additions or changes that would make this character more
+> striking. Colour, silhouette, an object it carries, an asymmetry, a texture, a piece of
+> backstory that implies a visual — invent backstory and character arc freely if it
+> produces something to build.
+>
+> **Do not read or touch any file.** Everything you need is above.
+>
+> Return a JSON list: `[{"summary": "one line", "detail": "a paragraph a modeller could
+> implement"}]`. Nothing else.
 
 ### D — the modeller
 
-Dispatch with `isolation: "worktree"`:
+Dispatch with `isolation: "worktree"`. On *needs changes*, **resume this same agent**
+rather than spawning a new one:
 
-> You are **Agent D**, a modeller for Gloomfell asset `<asset>`, working in an isolated
-> git worktree. Read `.claude/skills/blender-model-mode/SKILL.md` "Preferences, not rules"
-> and `Obsidian/TD/<design-doc>`.
+> You are a modeller for Gloomfell asset `<asset>`, in an isolated git worktree.
 >
-> Implement exactly this, and nothing else: `<design spec>`
-> `<if a retry: The previous attempt was rejected. Critic's words: "..." Address that.>`
+> IMPLEMENT EXACTLY THIS, AND NOTHING ELSE: `<design detail>`
 >
-> Make ONE change to `Assets/Blender/blender_<asset>.py`, then render it:
+> `<on a retry only:>`
+> This is attempt `<n>` of 5. Your previous attempt was not accepted.
+> **PRIMARY — the combined report. This is what you must address:** `<B's report>`
+> **SECONDARY — the three raw verifier reports, for nuance:** `<all three>`
+> Address the `[CONSENSUS]` points first; they are what blocked acceptance.
+>
+> PREFERENCES (context, not rules): `<the nine, inline>`
+>
+> The one file you may edit: `<worktree>/Assets/Blender/blender_<asset>.py`
+> It is large. Read it, make ONE change, do not restructure it.
+>
+> Render with exactly this command — paths are already resolved, do not go looking:
 > `python <MAIN-REPO>/Assets/Blender/_tools/preview.py <asset> --audit --root <MAIN-REPO>/Assets/Blender/_previews~`
 >
-> Do not save or export. Do not make a second change.
+> Do not save or export. Do not make a second change. Do not read any other file.
 >
 > Return: what you changed and why, the run directory, the audit line, and the output of
 > `git diff -- Assets/Blender/blender_<asset>.py`.
 
-### E — the critic
+### E — the verifier
 
-One fresh E per D. **Give it no rules and no preferences** — that is deliberate:
+Three per attempt, dispatched together, **fresh every attempt**. Give them no rules and no
+preferences — that is deliberate:
 
-> You are **Agent E**, critic for Gloomfell asset `<asset>`. Read
-> `Obsidian/TD/<design-doc>` for what this character is meant to be.
+> You are a verifier for Gloomfell asset `<asset>`. You judge on your own taste alone.
+> There is no rulebook and no checklist — do not ask for one and do not go looking.
 >
-> The intended change was: `<design spec>`
-> Look at the render: `<path to the new PNG>`
-> Compare it against the current accepted model: `<path to the previous accepted PNG>`
+> WHAT THIS CHARACTER IS MEANT TO BE: `<character summary>`
+> THE CHANGE THAT WAS ATTEMPTED: `<design detail>`
 >
-> Judge it on your own taste alone. There is no rulebook and no checklist — do not ask for
-> one. Does this make the character more striking, more coherent, more itself?
+> BEFORE — the model as accepted before this change: `<abs path to PNG>`
+> AFTER  — the model with this change: `<abs path to PNG>`
 >
-> Return exactly one of `good` / `needs work` / `bad`, then two or three sentences saying
-> why. If `needs work`, say specifically what a modeller should change.
+> Look at both images. **Do not read any file other than those two.**
+>
+> Return exactly this shape and nothing else:
+> ```
+> STANCE: keep | change
+> WORKS: <what this change gets right>
+> PROBLEMS: <numbered, one line each; omit if none>
+> CHANGE: <if stance is change, what specifically a modeller should do>
+> ```
 
 ---
 
@@ -341,32 +430,37 @@ One fresh E per D. **Give it no rules and no preferences** — that is deliberat
 | They say | You do |
 |---|---|
 | *"more gold"* — steering | append to `notes`. **Do not stop anything.** |
-| *"how's it going"* | read the log; report accepted count, what's in flight, last verdicts |
+| *"how's it going"* | read the log's `summary`; report accepted count, in flight, last verdicts |
 | *"pause"* / *"stop"* | set `state`; say where it stopped |
-| *"switch to <asset>"* | `stop`, wait for B to exit, start a fresh B |
+| *"what's shelved"* | list `docs/shelved/<asset>/` with each design's summary and why it failed |
+| *"accept `<id>`"* | `git apply` that shelved patch, log it accepted |
+| *"resume `<id>`"* | hand it to a fresh modeller with the full attempt history |
+| *"switch to `<asset>`"* | `stop`, wait for B to exit, start a fresh B |
 | *"finish"* | `stop`, wait for exit, **then** the real build below |
+
+If the user edits the preferences, tell B to re-read them.
 
 ### Take process notes — this duty is yours alone
 
-You see every stage: what C invents, what D builds, what E accepts and rejects, and what
-the user keeps. Nobody else sees all of it. Maintain
-`_previews~/<asset>/process-notes.md` as you go, and record:
+You see every stage: what designers invent, what modellers build, what verifiers accept
+and reject, and what the user keeps. Nobody else sees all of it. Maintain
+`_previews~/<asset>/process-notes.md` and record:
 
-- **What E rejects, and whether it is right.** If E keeps rejecting a whole category of
-  idea, either the critic is too conservative or the designers keep reaching for something
-  that does not work here. Say which you think it is.
-- **Designs that never got built.** A queue that is always full means too many designers;
-  one that is always empty means too few.
-- **Where the time goes.** Renders, retries, or thinking.
-- **Whether the audit is predicting anything.** It gates nothing, but if audit failures
-  correlate with the user disliking a change, that is a rule worth promoting. If they do
-  not correlate at all, say so — that is evidence for deleting a rule.
+- **What the panel rejects, and whether it is right.** If verifiers keep killing a whole
+  category of idea, either they are too conservative or the designers keep reaching for
+  something that does not work here. Say which you think it is.
+- **How often the three verifiers disagree.** Constant unanimity means they are
+  interchangeable and two are wasted; constant three-way splits mean the character brief
+  is too vague to judge against.
+- **Designs that never got built,** and how many attempts designs typically take.
+- **Whether the audit predicts anything.** It gates nothing, but if its failures correlate
+  with changes the user dislikes, that is a rule worth promoting. If they do not correlate
+  at all, that is evidence for deleting a rule.
 - **Rules worth introducing.** The user is deliberately running without gates to see what
   happens. Your notes are how they find out.
 
-Volunteer this when the user asks how it is going, when they say *finish*, or when a
-pattern is strong enough to matter. Keep it short and concrete — observations with
-evidence, not speculation.
+Volunteer this when asked how it is going, when they say *finish*, or when a pattern is
+strong enough to matter. Observations with evidence, not speculation.
 
 ### The real build — the only destructive step
 
@@ -403,17 +497,18 @@ Before starting B:
    plain words; they will not find it on their own.
 
 3. While an `iteration-log.json` exists the page shows **progression view**: the current
-   accepted model large, above a strip of every attempt newest-first — accepted, rejected
-   (dimmed, red-outlined, `✕`) and in-flight alike, each captioned with its summary and,
-   where rejected, E's critique. `?asset=<name>` pins the page if two assets are in play.
+   accepted model large, above a strip of every attempt newest-first — accepted, rejected,
+   shelved and in-flight alike. Clicking one opens the full-size viewer: **← / →** step
+   through attempts, and it can show the attempt beside the state accepted before it, or a
+   pixel diff of the two. `?asset=<name>` pins the page if two assets are in play.
 
 ---
 
 ## Gotchas
 
-1. **Seven of the nine asset scripts save and export unconditionally at module scope.**
-   Running one rebuilds the asset and overwrites its `.blend` and `.fbx`, with no undo.
-   `preview.py` refuses any script without the variant hook. Do not defeat that check.
+1. **Most asset scripts save and export unconditionally at module scope.** Running one
+   rebuilds the asset and overwrites its `.blend` and `.fbx`, with no undo. `preview.py`
+   refuses any script without the variant hook. Do not defeat that check.
 
 2. **Builds go through the headless CLI, not MCP.** MCP is fine for *inspecting* a scene,
    but on 2026-07-30 a compositor call over MCP hung Blender's Python permanently and the
@@ -439,9 +534,8 @@ Before starting B:
 
 9. **Always pass `encoding="utf-8"` when reading or writing the JSON state files in
    Python.** Windows defaults to cp1252, so a plain `open(path)` silently mangles the
-   em-dashes and curly quotes that critiques are full of — `—` becomes `â€"` and the
-   gallery shows the damage. `preview.py` already does this correctly; anything you write
-   by hand must too.
+   em-dashes and curly quotes that critiques are full of. `preview.py` already does this
+   correctly; anything written by hand must too.
 
 10. **After any `.cs` edit**, recompile via UnityMCP and check the console. Pre-existing
     warnings in `FloatingText.cs`, `TowerSelection.cs`, `Movement.cs` and

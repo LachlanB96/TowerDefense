@@ -111,3 +111,7 @@ Obsidian/TD/.obsidian/
 # Blender preview harness scratch renders. The trailing tilde keeps Unity from
 # importing every scratch PNG; the ignore keeps them out of git.
 /[Aa]ssets/Blender/_previews~/
+
+# Python bytecode from the preview harness, and the .meta Unity generates for it.
+__pycache__/
+__pycache__.meta

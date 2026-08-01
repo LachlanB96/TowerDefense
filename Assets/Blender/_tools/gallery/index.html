@@ -71,9 +71,37 @@
            border-radius:4px; }
   .state.run   { background:#1d2f3a; color:#7ec8e0; }
   .state.stuck { background:#3a2f17; color:#e0c07e; }
+  .thumb.shelved img { opacity:.55; outline:1px solid #c8a23c; }
+  .thumb.shelved span { color:#e0c07e; }
   dialog { border:none; background:transparent; max-width:96vw; max-height:96vh; }
-  dialog img { max-width:96vw; max-height:96vh; }
-  dialog::backdrop { background:#000c; }
+  dialog::backdrop { background:#000d; }
+  /* Full-size viewer: arrow keys step through attempts, and the same attempt can
+     be shown alone, beside the state accepted before it, or as a pixel diff. */
+  #viewer { color:var(--fg); font:14px/1.5 "Segoe UI", system-ui, sans-serif; }
+  .v-bar { display:flex; gap:14px; align-items:center; padding:0 0 10px;
+           flex-wrap:wrap; }
+  .v-bar button { background:var(--card); color:var(--fg); border:1px solid var(--line);
+                  border-radius:4px; padding:4px 10px; cursor:pointer; font:inherit;
+                  font-size:12px; }
+  .v-bar button[aria-pressed="true"] { background:var(--fg); color:var(--bg);
+                                       border-color:var(--fg); }
+  .v-bar button:disabled { opacity:.35; cursor:not-allowed; }
+  #v-stage { display:flex; gap:12px; align-items:flex-start; justify-content:center; }
+  #v-stage img, #v-stage canvas { max-height:72vh; max-width:46vw; border-radius:6px;
+                                  background:#000; }
+  #v-stage.solo img, #v-stage.solo canvas { max-width:92vw; }
+  .v-pane { text-align:center; }
+  .v-pane b { display:block; font:11px/2 ui-monospace, Consolas, monospace;
+              color:var(--dim); font-weight:400; }
+  #v-notes { max-width:92vw; margin-top:12px; font-size:13px; }
+  #v-notes .rep { background:var(--card); border:1px solid var(--line);
+                  border-radius:6px; padding:10px 12px; white-space:pre-wrap; }
+  #v-notes details { margin:8px 0 0; }
+  #v-notes summary { font-size:12px; }
+  #v-notes .one { background:#1a1a20; border-left:2px solid var(--line);
+                  padding:8px 10px; margin:6px 0; white-space:pre-wrap;
+                  font:12px/1.5 ui-monospace, Consolas, monospace; }
+  .v-warn { color:#e0c07e; font-size:12px; padding:20px; text-align:center; }
 </style>
 
 <header>
@@ -84,7 +112,19 @@
 <div id="prog"></div>
 <div id="live"></div>
 <div id="history"></div>
-<dialog id="zoom"><img></dialog>
+<dialog id="viewer">
+  <div class="v-bar">
+    <span id="v-title"></span>
+    <button id="v-prev" title="older (←)">←</button>
+    <button id="v-next" title="newer (→)">→</button>
+    <button data-mode="single" aria-pressed="true">single</button>
+    <button data-mode="side">side-by-side</button>
+    <button data-mode="diff">diff</button>
+    <span class="dim">← → step · S / D / 1 switch view · Esc close</span>
+  </div>
+  <div id="v-stage"></div>
+  <div id="v-notes"></div>
+</dialog>
 
 <script>
 // Poll latest.json once a second. Re-render whenever the BODY changes, not just
@@ -146,11 +186,9 @@ function card(v) {
       const img = new Image();
       img.src = q(`/${asset}/${v.runDir}/${r}`);
       img.loading = 'lazy';
-      img.onclick = () => {
-        const d = document.getElementById('zoom');
-        d.querySelector('img').src = img.src;
-        d.showModal();
-      };
+      // Comparison mode has no attempt history to walk, so this opens the
+      // viewer in its bare single-image form.
+      img.onclick = () => openImage(img.src);
       el.appendChild(img);
     }
     if (v.seconds !== null)
@@ -244,14 +282,190 @@ function renderLive(m) {
 // ---------------------------------------------------------------------------
 let lastLogBody = null;
 
-function zoomable(img) {
-  img.onclick = () => {
-    const d = document.getElementById('zoom');
-    d.querySelector('img').src = img.src;
-    d.showModal();
-  };
-  return img;
+// --- full-size viewer -------------------------------------------------------
+// Holds the attempt list in CHRONOLOGICAL order even though the strip renders it
+// newest-first, because "the state accepted before this attempt" is a backwards
+// walk and is far easier to reason about forwards.
+let viewList = [];        // chronological attempts, or [] for a bare image
+let viewIdx = 0;
+let viewMode = 'single';  // single | side | diff
+let viewBare = null;      // src when opened from comparison mode (no attempts)
+
+function loadImg(src) {
+  return new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = () => rej(new Error('could not load ' + src));
+    i.src = src;
+  });
 }
+
+function acceptedBefore(idx) {
+  // The most recent accepted state strictly before this attempt. That is the
+  // honest "before": comparing against the immediately-previous attempt would
+  // often compare against something that was itself thrown away.
+  for (let i = idx - 1; i >= 0; i--) {
+    if (viewList[i].verdict === 'accepted') return viewList[i];
+  }
+  return null;
+}
+
+// Renders noisier than this are treated as unchanged. Previews run at half
+// sample count, so a threshold of zero would light up the whole frame with
+// sampling noise and hide the actual change.
+const DIFF_THRESHOLD = 24;
+
+async function drawDiff(stage, beforeSrc, afterSrc) {
+  let a, b;
+  try {
+    [a, b] = await Promise.all([loadImg(beforeSrc), loadImg(afterSrc)]);
+  } catch (e) {
+    stage.innerHTML = `<div class="v-warn">${esc(e.message)}</div>`;
+    return;
+  }
+  if (a.naturalWidth !== b.naturalWidth || a.naturalHeight !== b.naturalHeight) {
+    stage.innerHTML = '<div class="v-warn">Cannot diff: the two renders are '
+      + `different sizes (${a.naturalWidth}×${a.naturalHeight} vs `
+      + `${b.naturalWidth}×${b.naturalHeight}). They were rendered from different `
+      + 'views — side-by-side still works.</div>';
+    return;
+  }
+  const w = a.naturalWidth, h = a.naturalHeight;
+  const mk = img => {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d').drawImage(img, 0, 0);
+    return c.getContext('2d').getImageData(0, 0, w, h).data;
+  };
+  const A = mk(a), B = mk(b);
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const ctx = out.getContext('2d');
+  const img = ctx.createImageData(w, h);
+  const D = img.data;
+  for (let i = 0; i < D.length; i += 4) {
+    const d = Math.abs(A[i] - B[i]) + Math.abs(A[i+1] - B[i+1])
+            + Math.abs(A[i+2] - B[i+2]);
+    if (d > DIFF_THRESHOLD) {
+      // Changed: amber, hotter the bigger the change. Showing WHERE it changed
+      // over the new render reads far better than a raw |a-b| image, which for
+      // geometry tweaks comes out almost entirely black.
+      const k = Math.min(1, d / 180);
+      D[i] = 255; D[i+1] = 190 - 130 * k; D[i+2] = 70 - 70 * k; D[i+3] = 255;
+    } else {
+      D[i] = B[i] * 0.22; D[i+1] = B[i+1] * 0.22; D[i+2] = B[i+2] * 0.22;
+      D[i+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  stage.className = 'solo';
+  stage.innerHTML = '';
+  const pane = document.createElement('div');
+  pane.className = 'v-pane';
+  pane.innerHTML = '<b>changed pixels highlighted over the new render</b>';
+  pane.appendChild(out);
+  stage.appendChild(pane);
+}
+
+function pane(label, src) {
+  const d = document.createElement('div');
+  d.className = 'v-pane';
+  d.innerHTML = `<b>${esc(label)}</b>`;
+  const i = new Image();
+  i.src = src;
+  d.appendChild(i);
+  return d;
+}
+
+async function renderViewer() {
+  const stage = document.getElementById('v-stage');
+  const notes = document.getElementById('v-notes');
+  const title = document.getElementById('v-title');
+
+  if (viewBare) {
+    stage.className = 'solo';
+    stage.innerHTML = '';
+    stage.appendChild(pane('', viewBare));
+    notes.innerHTML = '';
+    title.textContent = '';
+    for (const b of document.querySelectorAll('.v-bar button')) b.disabled = true;
+    return;
+  }
+
+  const a = viewList[viewIdx];
+  if (!a) return;
+  const before = acceptedBefore(viewIdx);
+  const afterSrc = q(`/${asset}/${a.render}`);
+  const beforeSrc = before ? q(`/${asset}/${before.render}`) : null;
+
+  document.getElementById('v-prev').disabled = viewIdx <= 0;
+  document.getElementById('v-next').disabled = viewIdx >= viewList.length - 1;
+  for (const b of document.querySelectorAll('.v-bar button[data-mode]')) {
+    // Comparison modes need something to compare against.
+    b.disabled = (b.dataset.mode !== 'single' && !before);
+    b.setAttribute('aria-pressed', String(b.dataset.mode === viewMode));
+  }
+
+  title.innerHTML = `<b>${viewIdx + 1}/${viewList.length}</b> · `
+    + `${esc(a.summary || '')} <span class="badge ${
+        a.verdict === 'accepted' ? 'ok' : 'bad'}">${esc(a.verdict || '')}</span>`;
+
+  if (viewMode === 'diff' && before) {
+    await drawDiff(stage, beforeSrc, afterSrc);
+  } else if (viewMode === 'side' && before) {
+    stage.className = '';
+    stage.innerHTML = '';
+    stage.appendChild(pane('before · ' + (before.summary || ''), beforeSrc));
+    stage.appendChild(pane('after · ' + (a.summary || ''), afterSrc));
+  } else {
+    stage.className = 'solo';
+    stage.innerHTML = '';
+    stage.appendChild(pane('', afterSrc));
+  }
+
+  let html = '';
+  if (a.report) html += `<div class="rep">${esc(a.report)}</div>`;
+  if (a.critiques && a.critiques.length) {
+    html += `<details><summary>${a.critiques.length} verifier reports</summary>`
+      + a.critiques.map(c => `<div class="one">`
+          + `<b>verifier ${esc(String(c.verifier ?? '?'))} — ${esc(c.stance || '')}</b>\n`
+          + esc(c.text || '') + `</div>`).join('')
+      + `</details>`;
+  }
+  notes.innerHTML = html;
+}
+
+function openViewer(idx) {
+  viewBare = null;
+  viewIdx = idx;
+  viewMode = 'single';
+  document.getElementById('viewer').showModal();
+  renderViewer();
+}
+
+function openImage(src) {
+  viewBare = src;
+  document.getElementById('viewer').showModal();
+  renderViewer();
+}
+
+document.addEventListener('keydown', e => {
+  const dlg = document.getElementById('viewer');
+  if (!dlg.open || viewBare) return;
+  if (e.key === 'ArrowLeft'  && viewIdx > 0)                   { viewIdx--; renderViewer(); }
+  else if (e.key === 'ArrowRight' && viewIdx < viewList.length - 1) { viewIdx++; renderViewer(); }
+  else if (e.key === 's' || e.key === 'S') { viewMode = 'side';   renderViewer(); }
+  else if (e.key === 'd' || e.key === 'D') { viewMode = 'diff';   renderViewer(); }
+  else if (e.key === '1')                  { viewMode = 'single'; renderViewer(); }
+  else return;
+  e.preventDefault();
+});
+
+for (const b of document.querySelectorAll('.v-bar button[data-mode]')) {
+  b.onclick = () => { viewMode = b.dataset.mode; renderViewer(); };
+}
+document.getElementById('v-prev').onclick = () => { if (viewIdx > 0) { viewIdx--; renderViewer(); } };
+document.getElementById('v-next').onclick = () => { if (viewIdx < viewList.length - 1) { viewIdx++; renderViewer(); } };
 
 function auditChip(a) {
   if (!a.audit) return '';
@@ -274,11 +488,16 @@ function renderProgression(log) {
   // the model; several of those attempts will be thrown away.
   const current = [...attempts].reverse().find(a => a.verdict === 'accepted');
 
+  // The viewer walks this same list, so it must be set before anything is
+  // clickable.
+  viewList = attempts;
+
   if (current) {
     const now = document.createElement('div');
     now.className = 'prog-now';
-    const big = zoomable(new Image());
+    const big = new Image();
     big.src = q(`/${asset}/${current.render}`);
+    big.onclick = () => openViewer(attempts.indexOf(current));
     now.appendChild(big);
 
     const why = document.createElement('div');
@@ -296,20 +515,23 @@ function renderProgression(log) {
 
   const strip = document.createElement('div');
   strip.className = 'strip';
+  const STATE = {
+    rejected: ['rejected', '✕ '],
+    shelved:  ['shelved',  '⇣ '],   // five attempts, kept for later — not discarded
+    accepted: ['',         '✓ '],
+  };
   for (const a of [...attempts].reverse()) {
     if (a === current) continue;
-    const bad = a.verdict === 'rejected' || a.verdict === 'bad';
-    const pending = a.verdict === 'in-flight' || !a.verdict;
+    const [cls, mark] = STATE[a.verdict] || ['inflight', '… '];
     const t = document.createElement('div');
-    t.className = 'thumb' + (bad ? ' rejected' : pending ? ' inflight' : '');
-    const img = zoomable(new Image());
+    t.className = 'thumb' + (cls ? ' ' + cls : '');
+    const img = new Image();
     img.src = q(`/${asset}/${a.render}`);
     img.loading = 'lazy';
-    // Hover gives the critic's full reasoning without spending vertical space.
-    img.title = (a.summary || '')
-      + (a.critique ? `\n\n${a.verdict}: ${a.critique}` : '');
+    // Hover gives the panel's reasoning without spending vertical space on it.
+    img.title = (a.summary || '') + (a.report ? `\n\n${a.verdict}: ${a.report}` : '');
+    img.onclick = () => openViewer(attempts.indexOf(a));
     t.appendChild(img);
-    const mark = bad ? '✕ ' : pending ? '… ' : '✓ ';
     const cap = document.createElement('span');
     cap.textContent = mark + (a.summary || '');
     t.appendChild(cap);
@@ -456,7 +678,11 @@ async function tick() {
   }
 }
 
-document.getElementById('zoom').onclick = e => e.currentTarget.close();
+// Click the backdrop to close, but not the images or the toolbar inside it -
+// stepping through with the arrow keys means a lot of clicking near the edges.
+document.getElementById('viewer').onclick = e => {
+  if (e.target.id === 'viewer') e.currentTarget.close();
+};
 tick();
 setInterval(tick, 1000);
 </script>
