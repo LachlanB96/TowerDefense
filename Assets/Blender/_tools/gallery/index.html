@@ -33,6 +33,33 @@
   .badge.bad { background:#3a1a17; color:#ffb4ae; }
   details { margin:0 20px 12px; }
   summary { cursor:pointer; color:var(--dim); padding:6px 0; }
+  /* Progression mode - shown instead of .cols when an iterator subagent is
+     working this asset. One round per run, so side-by-side columns are the
+     wrong shape; what matters is the current state plus the trajectory. */
+  .prog { padding:20px; }
+  .prog-now { display:flex; gap:20px; align-items:flex-start; }
+  .prog-now img { max-width:min(560px, 60vw); border-radius:8px; background:#000;
+                  cursor:zoom-in; }
+  /* Capped, not flex:1 - stretching this to the viewport strands the caption
+     metres away from the image it describes on a wide monitor. */
+  .prog-why { flex:0 1 420px; min-width:200px; }
+  .prog-why h2 { font-size:14px; margin:0 0 8px; font-weight:600; }
+  .prog-why p { color:var(--dim); margin:0 0 12px; }
+  .strip { display:flex; gap:10px; margin-top:22px; padding-bottom:8px;
+           overflow-x:auto; }
+  .thumb { flex:0 0 auto; width:104px; }
+  .thumb img { width:100%; border-radius:4px; background:#000; cursor:zoom-in;
+               display:block; }
+  .thumb span { display:block; font:11px/1.4 ui-monospace, Consolas, monospace;
+                color:var(--dim); margin-top:4px; }
+  /* A reverted round is kept visible on purpose: seeing what was tried and
+     backed out is how you tell iteration from churn. */
+  .thumb.reverted img { opacity:.35; }
+  .thumb.reverted span { color:var(--bad); }
+  .state { font:11px/1 ui-monospace, Consolas, monospace; padding:4px 8px;
+           border-radius:4px; }
+  .state.run   { background:#1d2f3a; color:#7ec8e0; }
+  .state.stuck { background:#3a2f17; color:#e0c07e; }
   dialog { border:none; background:transparent; max-width:96vw; max-height:96vh; }
   dialog img { max-width:96vw; max-height:96vh; }
   dialog::backdrop { background:#000c; }
@@ -43,6 +70,7 @@
   <span class="dim" id="sub"></span>
   <span id="audit"></span>
 </header>
+<div id="prog"></div>
 <div id="live"></div>
 <div id="history"></div>
 <dialog id="zoom"><img></dialog>
@@ -187,6 +215,86 @@ function renderLive(m) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Progression mode
+//
+// An iterator subagent writes <asset>/iteration-log.json, one entry per round.
+// While that file exists it OWNS the page: a loop produces one variant per run,
+// so the comparison view would show a single lonely column and bury the actual
+// story - the trajectory - inside collapsed <details>.
+//
+// Big image is the newest round that was NOT reverted, because that is what the
+// model currently looks like. A reverted round's render shows the state that got
+// backed out, so promoting it would misreport the model.
+// ---------------------------------------------------------------------------
+let lastLogBody = null;
+
+function zoomable(img) {
+  img.onclick = () => {
+    const d = document.getElementById('zoom');
+    d.querySelector('img').src = img.src;
+    d.showModal();
+  };
+  return img;
+}
+
+function renderProgression(log) {
+  const rounds = log.rounds || [];
+  const host = document.getElementById('prog');
+  host.innerHTML = '';
+  if (!rounds.length) {
+    host.innerHTML = '<div class="pending">iterator started, no rounds yet…</div>';
+    return;
+  }
+  const current = [...rounds].reverse().find(r => !r.reverted)
+                || rounds[rounds.length - 1];
+
+  const now = document.createElement('div');
+  now.className = 'prog-now';
+  const big = zoomable(new Image());
+  big.src = q(`/${asset}/${current.render}`);
+  now.appendChild(big);
+  const why = document.createElement('div');
+  why.className = 'prog-why';
+  why.innerHTML = `<h2>round ${current.n}</h2><p>${esc(current.summary || '')}</p>`
+    + (current.audit ? `<span class="badge ${current.audit.includes('FAIL')
+        ? 'bad' : 'ok'}">${esc(current.audit)}</span>` : '');
+  now.appendChild(why);
+  host.appendChild(now);
+
+  const strip = document.createElement('div');
+  strip.className = 'strip';
+  for (const r of [...rounds].reverse()) {
+    if (r === current) continue;
+    const t = document.createElement('div');
+    t.className = 'thumb' + (r.reverted ? ' reverted' : '');
+    const img = zoomable(new Image());
+    img.src = q(`/${asset}/${r.render}`);
+    img.loading = 'lazy';
+    img.title = r.summary || '';
+    t.appendChild(img);
+    const cap = document.createElement('span');
+    cap.textContent = (r.reverted ? '↩ ' : '') + r.n + ' · ' + (r.summary || '');
+    t.appendChild(cap);
+    strip.appendChild(t);
+  }
+  host.appendChild(strip);
+
+  document.getElementById('title').textContent = `${log.asset} · round ${log.round}`;
+  const sub = document.getElementById('sub');
+  sub.innerHTML = `<span class="state ${log.state === 'run' ? 'run' : 'stuck'}">`
+    + `${esc(log.state || 'run')}</span>` + (log.note ? ' ' + esc(log.note) : '');
+  document.getElementById('audit').textContent = '';
+  document.getElementById('audit').className = '';
+}
+
+function clearComparisonView() {
+  lastBody = null; lastRun = null; liveRun = null;
+  liveCards = []; liveSignatures = [];
+  document.getElementById('live').innerHTML = '';
+  document.getElementById('history').innerHTML = '';
+}
+
 async function loadHistory(current, forAsset) {
   // Earlier runs, newest first, collapsed. This is the "watch it change" half:
   // the model's history across builds, not just its current state.
@@ -229,18 +337,45 @@ async function tick() {
       // if the run numbers happened to match), and renderLive() would then
       // patch the new asset's variants into the old asset's cards.
       asset = next;
-      lastBody = null;
-      lastRun = null;
-      liveRun = null;
-      liveCards = [];
-      liveSignatures = [];
-      document.getElementById('live').innerHTML = '';
-      document.getElementById('history').innerHTML = '';
+      lastLogBody = null;
+      clearComparisonView();
+      document.getElementById('prog').innerHTML = '';
       document.getElementById('title').textContent = `${asset} · loading…`;
       document.getElementById('sub').textContent = '';
       document.getElementById('audit').textContent = '';
       document.getElementById('audit').className = '';
     }
+
+    // Progression mode takes precedence while an iterator is working this asset.
+    const logRes = await fetch(q(`/${asset}/iteration-log.json`));
+    if (logRes.ok) {
+      const logBody = await logRes.text();
+      if (logBody !== lastLogBody) {
+        let log;
+        try {
+          log = JSON.parse(logBody);
+        } catch (e) {
+          // Same reasoning as the manifest below: a truncated read must be
+          // skippable, never promoted to "last known good".
+          console.debug('log poll skipped: malformed body', e);
+          return;
+        }
+        lastLogBody = logBody;
+        if (!document.getElementById('live').innerHTML) clearComparisonView();
+        document.getElementById('live').innerHTML = '';
+        document.getElementById('history').innerHTML = '';
+        renderProgression(log);
+      }
+      return;                 // the log owns the page; don't also draw columns
+    }
+    if (lastLogBody !== null) {
+      // The iterator finished and its log was removed. Drop back to the
+      // comparison view rather than leaving a frozen final round on screen.
+      lastLogBody = null;
+      document.getElementById('prog').innerHTML = '';
+      clearComparisonView();
+    }
+
     const res = await fetch(q(`/${asset}/latest.json`));
     if (!res.ok) return;
     const body = await res.text();
