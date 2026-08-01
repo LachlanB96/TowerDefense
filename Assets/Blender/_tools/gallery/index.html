@@ -52,10 +52,13 @@
                display:block; }
   .thumb span { display:block; font:11px/1.4 ui-monospace, Consolas, monospace;
                 color:var(--dim); margin-top:4px; }
-  /* A reverted round is kept visible on purpose: seeing what was tried and
-     backed out is how you tell iteration from churn. */
-  .thumb.reverted img { opacity:.35; }
-  .thumb.reverted span { color:var(--bad); }
+  /* A rejected attempt is kept visible on purpose: seeing what the director
+     threw away, and why, is how you tell real iteration from churn. */
+  .thumb.rejected img { opacity:.35; outline:1px solid var(--bad); }
+  .thumb.rejected span { color:var(--bad); }
+  .crit { font:11px/1.4 ui-monospace, Consolas, monospace; color:#ffb4ae;
+          background:#2a1614; padding:8px; border-radius:4px; margin:10px 0 0;
+          white-space:pre-wrap; }
   .state { font:11px/1 ui-monospace, Consolas, monospace; padding:4px 8px;
            border-radius:4px; }
   .state.run   { background:#1d2f3a; color:#7ec8e0; }
@@ -218,14 +221,18 @@ function renderLive(m) {
 // ---------------------------------------------------------------------------
 // Progression mode
 //
-// An iterator subagent writes <asset>/iteration-log.json, one entry per round.
-// While that file exists it OWNS the page: a loop produces one variant per run,
+// A director subagent writes <asset>/iteration-log.json, one entry per ATTEMPT -
+// not per accepted change. Rejected attempts stay in the list on purpose: the
+// point of a separate verifier is that you can see what it threw away and why.
+//
+// While that file exists it OWNS the page. A loop produces one variant per run,
 // so the comparison view would show a single lonely column and bury the actual
 // story - the trajectory - inside collapsed <details>.
 //
-// Big image is the newest round that was NOT reverted, because that is what the
-// model currently looks like. A reverted round's render shows the state that got
-// backed out, so promoting it would misreport the model.
+// The big image is the LATEST attempt whatever its verdict, badged accordingly.
+// That is the honest answer to "what does the model look like right now": a
+// worker revises on top of its own rejected attempt, so the rejected render is
+// genuinely the current on-disk state until the revision lands.
 // ---------------------------------------------------------------------------
 let lastLogBody = null;
 
@@ -238,49 +245,64 @@ function zoomable(img) {
   return img;
 }
 
+function attemptLabel(a) {
+  // "7.2" reads as iteration 7, attempt 2. Attempt is omitted when it is the
+  // only one, which is the common case and would otherwise be noise.
+  return a.attempt && a.attempt > 1 ? `${a.iteration}.${a.attempt}` : `${a.iteration}`;
+}
+
 function renderProgression(log) {
-  const rounds = log.rounds || [];
+  const attempts = log.attempts || [];
   const host = document.getElementById('prog');
   host.innerHTML = '';
-  if (!rounds.length) {
-    host.innerHTML = '<div class="pending">iterator started, no rounds yet…</div>';
+  if (!attempts.length) {
+    host.innerHTML = '<div class="pending">director started, no attempts yet…</div>';
     return;
   }
-  const current = [...rounds].reverse().find(r => !r.reverted)
-                || rounds[rounds.length - 1];
+  const current = attempts[attempts.length - 1];
+  const rejected = current.verdict === 'rejected';
 
   const now = document.createElement('div');
   now.className = 'prog-now';
   const big = zoomable(new Image());
   big.src = q(`/${asset}/${current.render}`);
   now.appendChild(big);
+
   const why = document.createElement('div');
   why.className = 'prog-why';
-  why.innerHTML = `<h2>round ${current.n}</h2><p>${esc(current.summary || '')}</p>`
-    + (current.audit ? `<span class="badge ${current.audit.includes('FAIL')
-        ? 'bad' : 'ok'}">${esc(current.audit)}</span>` : '');
+  why.innerHTML = `<h2>iteration ${attemptLabel(current)}</h2>`
+    + `<p>${esc(current.summary || '')}</p>`
+    + `<span class="badge ${rejected ? 'bad' : 'ok'}">`
+    + `${esc(current.verdict || 'pending')}</span>`
+    + (current.audit ? ` <span class="badge ${current.audit.includes('FAIL')
+        ? 'bad' : 'ok'}">${esc(current.audit)}</span>` : '')
+    + (rejected && current.critique
+        ? `<p class="crit">${esc(current.critique)}</p>` : '');
   now.appendChild(why);
   host.appendChild(now);
 
   const strip = document.createElement('div');
   strip.className = 'strip';
-  for (const r of [...rounds].reverse()) {
-    if (r === current) continue;
+  for (const a of [...attempts].reverse()) {
+    if (a === current) continue;
+    const bad = a.verdict === 'rejected';
     const t = document.createElement('div');
-    t.className = 'thumb' + (r.reverted ? ' reverted' : '');
+    t.className = 'thumb' + (bad ? ' rejected' : '');
     const img = zoomable(new Image());
-    img.src = q(`/${asset}/${r.render}`);
+    img.src = q(`/${asset}/${a.render}`);
     img.loading = 'lazy';
-    img.title = r.summary || '';
+    // Hover gives the full reasoning without spending vertical space on it.
+    img.title = (a.summary || '') + (bad && a.critique ? `\n\nrejected: ${a.critique}` : '');
     t.appendChild(img);
     const cap = document.createElement('span');
-    cap.textContent = (r.reverted ? '↩ ' : '') + r.n + ' · ' + (r.summary || '');
+    cap.textContent = (bad ? '✕ ' : '') + attemptLabel(a) + ' · ' + (a.summary || '');
     t.appendChild(cap);
     strip.appendChild(t);
   }
   host.appendChild(strip);
 
-  document.getElementById('title').textContent = `${log.asset} · round ${log.round}`;
+  document.getElementById('title').textContent =
+    `${log.asset} · iteration ${log.iteration}`;
   const sub = document.getElementById('sub');
   sub.innerHTML = `<span class="state ${log.state === 'run' ? 'run' : 'stuck'}">`
     + `${esc(log.state || 'run')}</span>` + (log.note ? ' ' + esc(log.note) : '');

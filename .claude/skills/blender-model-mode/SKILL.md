@@ -1,6 +1,6 @@
 ---
 name: blender-model-mode
-description: Primes the session for Gloomfell Blender modelling — the modelling rules, a continuously-iterating modeller subagent you supervise, and the Blender traps that have actually bitten. Starts by asking the user what they want to work on. Invoke ONLY when the user explicitly types /blender-model-mode. Never auto-invoke, even when Blender, modelling, or the preview harness come up in conversation.
+description: Primes the session for Gloomfell Blender modelling — the modelling rules, a director subagent that continuously delegates and verifies model work, and the Blender traps that have actually bitten. Starts by asking the user what they want to work on. Invoke ONLY when the user explicitly types /blender-model-mode. Never auto-invoke, even when Blender, modelling, or the preview harness come up in conversation.
 ---
 
 # Blender Model Mode
@@ -10,10 +10,9 @@ Unity 6. Its 3D assets are not sculpted by hand — they are *built by Python sc
 drive Blender headlessly. A model changes by changing code, running a build, and looking
 at the render.
 
-You do not do the modelling yourself. You set it up, hand it to an **iterator subagent**
-that works continuously in the background, and stay free to take the user's steering
-while it runs. Your job is to remain responsive; its job is to keep making the model
-better.
+You do not model. You do not decide when a model is finished. You set the work up, hand
+it to a **director subagent** that runs continuously in the background, and stay free to
+take the user's steering while it runs.
 
 ---
 
@@ -34,11 +33,27 @@ Until they answer, do **not**:
 - run a build, a preview, or an audit
 - go looking for defects, or report any problem you happen to notice
 
-This matters. This skill is not about any one asset. A previous version of it was written
-around the knight, and a freshly-primed agent went straight to auditing the knight and
-reported a defect the user had not asked about. Assume nothing about which model is in
-play, and do not volunteer findings. If you spot something alarming while doing requested
-work, mention it in one line and let the user decide whether to chase it.
+This skill is not about any one asset. Assume nothing about which model is in play, and
+do not volunteer findings. If you spot something alarming while doing requested work,
+mention it in one line and let the user decide whether to chase it.
+
+---
+
+## Two things you must never do
+
+These are not style preferences. Both have actually happened and both wasted the user's
+time.
+
+**1. Never offer variants.** Do not render 2, 3 or 4 alternatives and ask the user to
+pick. That was the old design and it was rejected: it spent most of the render budget on
+candidates nobody wanted and turned every change into a full stop. When the user says
+what they want different, you start the director. You do not produce options.
+
+**2. Never save, export, or otherwise treat a model as finished** until the user says
+the word **finish** (or an unmistakable equivalent — "we're done", "ship it"). Accepting
+a change is not finishing. A good-looking render is not finishing. The director accepting
+an iteration is *definitely* not finishing. Until that word, every build is a preview and
+nothing writes the `.blend` or the FBX.
 
 ---
 
@@ -55,12 +70,12 @@ work, mention it in one line and let the user decide whether to chase it.
 3. **Find or write the design doc.** Look for `Obsidian/TD/Heroes/<Name>.md` or
    `Obsidian/TD/Towers/<Name>/Base.md`. If one exists it is the intent — read it before
    writing any geometry. If not, ask the user enough to work from, and offer to write the
-   doc first. **The iterator reads this doc every round**, so anything not written down
-   there is something it cannot aim at.
+   doc first. **The director and every worker read this doc**, so anything not written
+   down there is something they cannot aim at.
 
 4. **Create the script, conforming from the start.**
    `Assets/Blender/blender_<asset>.py`. Copy the skeleton from
-   `Assets/Blender/_tools/_selftest_asset.py` — it is the shortest complete example of a
+   `Assets/Blender/_tools/_selftest_asset.py` — the shortest complete example of a
    conforming script. Four requirements:
    - every tunable value is a module-level global, set before the build runs
    - a single top-level build call
@@ -77,8 +92,8 @@ work, mention it in one line and let the user decide whether to chase it.
    `Assets/Blender/_knight000/audit_knight000.py`. If a third asset ever needs them,
    extract a shared module instead of copying a third time.
 
-6. **Build a rough blockout yourself**, so the iterator has something to work on rather
-   than a blank file. Then start the iterator.
+6. **Build a rough blockout yourself**, so the director has something to work on rather
+   than a blank file. Then ask what they want and start the director.
 
 ---
 
@@ -95,15 +110,15 @@ work, mention it in one line and let the user decide whether to chase it.
    ```
 
 2. **Check whether it conforms.** Only a script marked `[conforming]` can be driven by
-   the preview harness. The rest save and export unconditionally the moment they run, so
-   the harness refuses them outright — see gotcha 1. Opting one in is a small, separate
-   job; ask the user before doing it.
+   the harness. The rest save and export unconditionally the moment they run, so the
+   harness refuses them outright — see gotcha 1. Opting one in is a small, separate job;
+   ask the user before doing it.
 
 3. **Read the design doc, then the script.** The doc in `Obsidian/TD/` is the intent; the
    code may lag behind it. Entries marked TBD are common and normal.
 
-4. **Ask what they want the iterator to focus on**, then start it. Do not audit the
-   model, hunt for defects, or report unrelated problems unless asked.
+4. **Ask what they want different**, then start the director. Do not audit the model,
+   hunt for defects, or report unrelated problems unless asked. **Do not offer variants.**
 
 ---
 
@@ -160,171 +175,175 @@ the contrast rather than splitting the difference.
 
 ---
 
-## How work happens: an iterator you supervise
-
-The model improves through a background subagent running one round at a time,
-indefinitely, until told otherwise. You stay in the conversation and steer it.
+## How work happens: three tiers
 
 ```
-user ──▶ you (supervisor)        never blocked; always able to answer
+user ──▶ SUPERVISOR (you)          never blocked; answers, steers, never models
               │
-              │ write control.json          read iteration-log.json
-              ▼                                      ▲
-        ┌──────────────────────────────────────────────┐
-        │  iterator subagent  —  one round at a time    │
-        └──────────────────────────────────────────────┘
+              │ control.json                    iteration-log.json
+              ▼                                          ▲
+        ┌───────────────────────────────────────────────────┐
+        │ DIRECTOR  (background, runs until stopped)         │
+        │   delegates, then VERIFIES — never edits the model │
+        └───────────────────────────────────────────────────┘
+              │ spawns a fresh worker per iteration
+              ▼
+        ┌───────────────────────────────────────────────────┐
+        │ WORKER  (one iteration, then discarded)            │
+        │   makes ONE change, renders, reports               │
+        └───────────────────────────────────────────────────┘
                              │ renders
                              ▼
                        gallery tab (1s poll)
 ```
 
+The separation is the point. The director never edits the model, so it can judge the work
+without defending it. The worker is fresh each iteration, so it cannot get attached to
+choices it made three iterations ago.
+
 ### Two files are the whole interface
 
-**`_previews~/<asset>/control.json`** — you write it, the iterator reads it at the top of
-every round.
+**`_previews~/<asset>/control.json`** — you write it, the director reads it at the top of
+every iteration.
 
 ```json
-{ "state": "run", "notes": ["wider hat brim", "leave the boots alone"], "cap": 20 }
+{ "state": "run", "notes": ["wider hat brim", "leave the boots alone"] }
 ```
 
 `state` is `run` | `pause` | `stop`. `notes` is how the user steers *without stopping
-anything* — append and the next round picks it up. `cap` is how many rounds it may run
-before pausing for a check-in.
+anything* — append and the next iteration picks it up.
 
-**`_previews~/<asset>/iteration-log.json`** — the iterator writes it. It does three jobs:
-it is the memory that stops the iterator repeating itself, the status you read to tell
-the user what is happening, and the data the gallery renders.
+**`_previews~/<asset>/iteration-log.json`** — the director writes it, one entry per
+**attempt**, including rejected ones. It is the memory that stops workers repeating each
+other, the status you read to answer "how's it going", and the data the gallery renders.
 
 ```json
 {
-  "asset": "knight000", "round": 14, "state": "run",
-  "note": "working: cape chain links do not interlock",
-  "rounds": [
-    { "n": 14, "summary": "reconnected cape chain to the gorget",
-      "reasoning": "rule 1 — audit flagged 4 orphaned links",
-      "render": "run-014/v1/hero_34.png", "audit": "PASS", "reverted": false }
+  "asset": "mage000", "iteration": 7, "state": "run",
+  "note": "working: hat brim reads as a disc at icon size",
+  "attempts": [
+    { "iteration": 7, "attempt": 1,
+      "summary": "widened the hat brim 30%",
+      "render": "run-021/v1/hero_34.png", "audit": "PASS",
+      "verdict": "rejected",
+      "critique": "brim now reads as a flat disc at 184px — rule 2" },
+    { "iteration": 7, "attempt": 2,
+      "summary": "widened brim 15% and added a downward sweep",
+      "render": "run-022/v1/hero_34.png", "audit": "PASS",
+      "verdict": "accepted", "critique": "" }
   ]
 }
 ```
 
-Because all state is on disk, **the iterator is disposable**. If it dies or fills its
-context, start a fresh one — it reads the log and carries on mid-stream. Do not try to
-keep one alive forever.
+All state is on disk, so **the director is disposable**. If it dies or fills its context,
+start a fresh one — it reads the log and carries on mid-stream.
 
-### Starting the iterator
+### Starting the director
 
-Dispatch it in the **background** so you stay responsive. Give it the asset, and let it
-read this file for the rules rather than copying them into the prompt:
+Dispatch in the **background** so you stay responsive:
 
-> You are the iterator for Gloomfell asset `<asset>`. Read
-> `.claude/skills/blender-model-mode/SKILL.md` — "The rules" and "What one round is"
-> are your instructions. Read `Obsidian/TD/<path-to-design-doc>` — that is the intent
-> you are working toward.
+> You are the DIRECTOR for Gloomfell asset `<asset>`. Read
+> `.claude/skills/blender-model-mode/SKILL.md` — "The rules" and "The director's loop"
+> are your instructions. Read `Obsidian/TD/<design-doc>` — that is the intent.
 >
-> Loop indefinitely, one round at a time, following "What one round is" exactly. Your
-> control file is `Assets/Blender/_previews~/<asset>/control.json` and your log is
-> `Assets/Blender/_previews~/<asset>/iteration-log.json`. Honour the control file at
-> the top of every round without exception.
+> **You never edit the model yourself.** You delegate to worker subagents and verify
+> their work. Loop indefinitely following "The director's loop" exactly.
+>
+> Control file: `Assets/Blender/_previews~/<asset>/control.json`
+> Log: `Assets/Blender/_previews~/<asset>/iteration-log.json`
+> Honour the control file at the top of every iteration without exception.
 >
 > The user's current focus: `<what they said>`.
 >
-> Return only when the control file says `stop`, when you have hit the round cap, or
-> when the plateau rule fires. Report the last round number and why you stopped.
+> Return only when the control file says `stop`, or when the plateau rule fires.
+> Report the last iteration number and why you stopped.
 
-### What one round is
+### The director's loop
 
-1. **Read `control.json`.** `pause` → wait, re-check, do nothing else. `stop` → write the
-   log and exit cleanly. New entries in `notes` outrank everything below.
-2. **Read the tail of `iteration-log.json`** — what has been tried, what got reverted.
-3. **Look at the newest render.** Actually read the PNG. Do not reason from the code.
-4. **Critique, in this priority order:** unaddressed user notes → the design doc → the
-   nine rules. Pick the single worst problem.
-5. **Make exactly one change.** One per round keeps cause and effect legible in the
-   gallery strip and makes a revert cheap.
-6. **Render:** `python Assets/Blender/_tools/preview.py <asset> --audit`
-7. **If the audit went from PASS to FAIL, revert the change.** Record it as
-   `"reverted": true` with the reason.
-8. **Append the round to the log** — summary, reasoning, render path, audit, reverted.
-9. **Plateau check** (below).
+One iteration:
 
-A round is roughly 60–90 seconds: the preview render plus the audit's own build, plus
-thinking. Say so if the user asks why it is not instant.
+1. **Read `control.json`.** `pause` → wait and re-check. `stop` → write the log and exit.
+   New `notes` outrank everything else.
+2. **Spawn a fresh worker** (background off — you need its result) with the brief below.
+3. **Worker returns.** It has made one change and rendered it.
+4. **Verify. Actually read the render PNG** — do not judge from the worker's description
+   of its own work. Check, in order:
+   - did the audit go from PASS to FAIL? → automatic reject
+   - does it violate any of the nine rules? → reject, naming the rule
+   - does it actually look better than the previous accepted render, against the design
+     doc and the user's notes? → reject if not
+5. **Reject** → append the attempt with `verdict: "rejected"` and a specific critique,
+   then send that critique back to **the same worker**, which revises. Re-verify. Up to
+   **3 attempts** per iteration.
+6. **Accept** → append with `verdict: "accepted"`, discard the worker, increment the
+   iteration, go to 1 with a **fresh** worker.
+7. **Three failed attempts** → log it, revert to the last accepted state, and move to a
+   different objective. Do not keep grinding the same one.
 
-### The three safeguards
+Every attempt is logged and rendered, accepted or not. The user watches both.
 
-These are what make open-ended self-critique hold up instead of drifting.
+### The worker's brief
 
-1. **Log before edit.** Check whether the log already shows this change or its inverse.
-   If it does, you may not simply repeat it — either leave that area alone, or record
-   explicitly why the new value differs. **A parameter touched in the last 3 rounds is
-   off-limits** unless a user note names it. This is what stops widen / narrow / widen.
-2. **Audit is a hard gate.** Every round runs it. A round that introduces a FAIL is
-   reverted, so drift cannot erode rule 1 or the geometry checks.
-3. **Plateau detector.** Three consecutive reverts, or the same area churned with no
-   user note, means you are out of ideas. Set `state` to `needs-input` in the log, write
-   what you are stuck on into `note`, and stop. That is a useful signal, not a failure.
+> You are a WORKER on Gloomfell asset `<asset>`, iteration `<n>`.
+>
+> Read `.claude/skills/blender-model-mode/SKILL.md` — "The rules" bind your work.
+> Read `Obsidian/TD/<design-doc>` for the intent.
+> Read `Assets/Blender/_previews~/<asset>/iteration-log.json` — everything already tried.
+> **Do not repeat a change the log shows, or its inverse.**
+>
+> Objective: `<the single thing the director wants done>`
+>
+> Make exactly ONE change to `Assets/Blender/blender_<asset>.py`, then render it:
+> `python Assets/Blender/_tools/preview.py <asset> --audit`
+>
+> Report: what you changed, why, the run directory, and the audit result. Nothing else.
+> Do not save or export. Do not make a second change.
 
-Plus the **round cap** in `control.json` (default 20): pause and report rather than
-running silently forever. The user can raise, lower, or remove it.
+### Safeguards
 
-### The user's four commands
+1. **The worker cannot repeat itself** — it reads the log and is forbidden from redoing a
+   logged change or its inverse. This is what stops widen / narrow / widen.
+2. **The audit is a hard gate** — a change that turns PASS into FAIL is rejected outright,
+   no judgement involved.
+3. **Plateau rule** — three consecutive *iterations* where every attempt was rejected
+   means the direction is wrong, not the execution. Set `state` to `needs-input` in the
+   log, write what is stuck into `note`, and stop. That is a useful signal, not a failure.
+
+There is **no cap on iterations or on how long one takes**. A worker thinking hard is
+working, not hanging. The only hard timeouts are inside `preview.py`: 180s for a Blender
+build and 300s for an audit build, which exist to kill a wedged Blender process.
+
+### The user's commands
 
 | They say | You do |
 |---|---|
-| *"make the brim wider"* — steer | append to `notes`. **Do not stop the iterator.** |
-| *"pause"* / *"stop"* | set `state`. Confirm which round it stopped on. |
-| *"switch to <other asset>"* | set `stop`, wait for it to exit, start a fresh iterator |
-| *"finish"* | set `stop`, then run the real save/export build (below) |
+| *"make the brim wider"* — steer | append to `notes`. **Do not stop the director.** |
+| *"how's it going"* | read the log, report the last iteration and verdict in 1–2 lines |
+| *"pause"* / *"stop"* | set `state`. Say which iteration it stopped on. |
+| *"switch to <asset>"* | set `stop`, wait for exit, start a fresh director |
+| *"finish"* | set `stop`, wait for exit, **then** run the real build below |
 
-Report progress in one or two lines when asked — read the log, do not guess. If the log's
-`state` is `needs-input`, tell the user immediately and say what it is stuck on.
+If the log's `state` is `needs-input`, tell the user immediately and say what is stuck.
 
 ### The real build — the only destructive step
 
-Only on *finish*, and only after the iterator has stopped:
+Only on *finish*, and only after the director has stopped:
 
 ```bash
 "/c/Program Files/Blender Foundation/Blender 5.1/blender.exe" -b \
     -P Assets/Blender/blender_<asset>.py -- save export render
 ```
 
-Everything before this is non-destructive: previews never write the `.blend` or the FBX.
-
-### When to render variants instead
-
-The old default was to offer 2–4 numbered variants for every change. That is no longer
-the default — it spent most of the render budget on candidates nobody wanted and turned
-every change into a stop.
-
-Use variants only when the **user explicitly asks for options**, or when a genuinely
-forked aesthetic decision cannot be resolved from the design doc and you need them to
-choose a direction. Then:
-
-```bash
-python Assets/Blender/_tools/preview.py <asset> --variants v.json
-```
-
-```json
-[
-  {"label": "barbute",  "vars": {"HELM_STYLE": "barbute"}},
-  {"label": "sallet",   "vars": {"HELM_STYLE": "sallet"}},
-  {"label": "reshaped", "patch": "def build_helmet():\n    ..."}
-]
-```
-
-`vars` overrides any module-level global. `patch` is Python **source text** replacing a
-whole builder — it must be source, not a function object, because it has to bind to the
-asset script's own globals. Number the options 1/2/3; the gallery numbers its columns the
-same way.
+Everything before this is a preview and writes nothing.
 
 ---
 
 ## Getting the gallery in front of the user
 
-The user watches in a browser tab, not the terminal. Before starting the iterator:
+The user watches in a browser tab, not the terminal. Before starting the director:
 
 1. **Kill any existing server, then start one in the background.** It runs forever and
-   never exits — starting it in the foreground will block you until the call times out.
+   never exits — starting it in the foreground blocks you until the call times out.
    `serve.py` sets `allow_reuse_address`, so on Windows a second instance binds to 8777
    silently instead of failing; you then cannot tell which is answering, and a "restart"
    leaves the old one serving the old page.
@@ -338,14 +357,18 @@ The user watches in a browser tab, not the terminal. Before starting the iterato
    python Assets/Blender/_tools/serve.py     # MUST be run in the background
    ```
 
+   A backgrounded server may later be reported as "failed" by the harness when it stops
+   tracking the detached process. That is not a real failure — check the port, not the
+   task status.
+
 2. **Tell the user to open `http://localhost:8777/` and leave the tab open.** Say it in
    plain words — they will not find it on their own. The page polls once a second.
 
-3. The page follows whichever asset was built most recently. While an
-   `iteration-log.json` exists it switches to **progression view**: the current model
-   large with the round's summary, and a strip of previous rounds beneath, newest first,
-   reverted ones dimmed and marked `↩`. That strip is how the user tells iteration from
-   churn. `?asset=<name>` pins it to one asset if two are in play.
+3. While an `iteration-log.json` exists the page shows **progression view**: the latest
+   attempt large with its verdict, audit badge and — when rejected — the director's
+   critique, above a strip of every previous attempt newest-first. Rejected attempts are
+   dimmed, outlined red and marked `✕`. That strip is how the user sees what was tried
+   and thrown away. `?asset=<name>` pins the page to one asset if two are in play.
 
 ---
 
