@@ -622,6 +622,15 @@ def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
                 meas = _chips.measure(vd)
                 if "error" not in meas:
                     meas["_iou_vs_base"] = _chips.iou_vs(vd, base_dir)
+                    # BOTH halves, or the inert gate is shape-only again. iou_vs asks
+                    # "did the outline move"; changed_vs asks "would a judge see
+                    # anything". Without this second line every material, colour and
+                    # emission design chips `inert` and is bounced before any judge -
+                    # which is the bug chips.changed_vs() was written to fix. It was
+                    # missed here first time round because the fix was verified through
+                    # chips.py's CLI, which sets it, and not through this path, which is
+                    # the one the pipeline actually uses.
+                    meas["_changed_vs_base"] = _chips.changed_vs(vd, base_dir)
                 v["chips"] = _chips.chips(meas, base)
                 for c in v["chips"]:
                     print("  v%d [%s] %s" % (v["n"], c["chip"], c["detail"][:88]))
