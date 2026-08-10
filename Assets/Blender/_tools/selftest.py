@@ -577,6 +577,71 @@ def test_gallery_server_contract():
             os.remove(assets_json)
 
 
+def test_chat_endpoint_and_v4_page():
+    """POST /chat appends the user's line; /v4.html is served; bad input 400s.
+
+    chat.jsonl is real shared state under the previews root, so the test
+    snapshots its length and restores the file afterwards.
+    """
+    print("test_chat_endpoint_and_v4_page")
+    port = 8779
+    base = "http://127.0.0.1:%d" % port
+    env = dict(os.environ, GLOOMFELL_GALLERY_PORT=str(port))
+    chat_path = os.path.join(PREVIEW_ROOT, "chat.jsonl")
+    os.makedirs(PREVIEW_ROOT, exist_ok=True)
+    before = open(chat_path, encoding="utf-8").read() if os.path.exists(chat_path) else None
+
+    def post(payload):
+        req = urllib.request.Request(
+            base + "/chat", data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            return urllib.request.urlopen(req, timeout=5).status
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    proc = subprocess.Popen([sys.executable, SERVE], env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        _wait_for_server(base)
+        check("valid chat message accepted", post({"text": "hello fleet"}) == 204)
+        check("asset-scoped message accepted",
+              post({"text": "more aura", "asset": "mage000"}) == 204)
+        check("empty text refused", post({"text": "   "}) == 400)
+        check("missing text refused", post({"note": "x"}) == 400)
+        check("bad asset refused", post({"text": "x", "asset": "../evil"}) == 400)
+
+        lines = []
+        if os.path.exists(chat_path):
+            lines = [json.loads(l) for l in open(chat_path, encoding="utf-8")
+                     if l.strip()]
+        tail = lines[-2:]
+        check("both accepted lines landed, in order",
+              [l["text"] for l in tail] == ["hello fleet", "more aura"], str(tail))
+        check("lines are stamped and attributed",
+              all(l.get("at") and l.get("from") == "user" for l in tail), str(tail))
+        check("asset field preserved on the scoped line",
+              tail[1].get("asset") == "mage000" if len(tail) > 1 else False, str(tail))
+
+        v4 = urllib.request.urlopen(base + "/v4.html", timeout=5)
+        check("GET /v4.html is 200", v4.status == 200)
+        check("v4 page body carries its title marker",
+              "Gloomfell · mission control" in v4.read().decode("utf-8"))
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+        if before is None:
+            if os.path.exists(chat_path):
+                os.remove(chat_path)
+        else:
+            with open(chat_path, "w", encoding="utf-8") as fh:
+                fh.write(before)
+
+
 def test_knight_preview_is_non_destructive():
     """A knight preview run must not touch the real .blend or FBX.
 
@@ -887,6 +952,7 @@ TESTS = [
     test_one_broken_variant_does_not_block_siblings,
     test_build_that_renders_nothing_is_a_failure,
     test_variant_timeout_is_recorded,
+    test_chat_endpoint_and_v4_page,
     test_gallery_server_contract,
     test_knight_preview_is_non_destructive,
 ]

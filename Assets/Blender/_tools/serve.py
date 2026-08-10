@@ -34,6 +34,9 @@ MARKS = {"star", "cross", "clear"}
 # status signal. The orchestrator reads user-directives.jsonl at the top of
 # every cycle and acknowledges each one in the iteration log.
 DIRECTIVES = {"rework", "revert", "resurrect", "withdraw"}
+# /chat is the user's one free-text door (modev4's mission-control page).
+# Replies (feed.jsonl) are written by the supervisor process directly, never
+# through HTTP, so everything in chat.jsonl is user-authored by construction.
 
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
@@ -46,6 +49,8 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_POST(self):
+        if self.path == "/chat":
+            return self._post_chat()
         route = {"/signal": ("mark", MARKS, "user-signals.jsonl"),
                  "/directive": ("directive", DIRECTIVES, "user-directives.jsonl")}.get(self.path)
         if not route:
@@ -80,6 +85,37 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(204)
         self.end_headers()
 
+    def _post_chat(self):
+        """Append one user chat line to the fleet-level chat.jsonl.
+
+        The file is append-only JSONL like the signal files: a crash loses at
+        most the line being written, and the supervisor can tail it. Everything
+        in this file is user-authored by construction - the supervisor never
+        writes here, so provenance is the file name.
+        """
+        try:
+            n = min(int(self.headers.get("Content-Length", 0)), 65536)
+            body = json.loads(self.rfile.read(n))
+            text = str(body["text"]).strip()
+            if not text:
+                raise ValueError("empty text")
+            rec = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                   "from": "user",
+                   "text": text[:2000]}
+            asset = body.get("asset")
+            if asset:
+                if not ASSET_RE.match(asset):
+                    raise ValueError("bad asset")
+                rec["asset"] = asset
+        except (KeyError, ValueError, json.JSONDecodeError):
+            self.send_error(400)
+            return
+        os.makedirs(PREVIEW_ROOT, exist_ok=True)
+        with open(os.path.join(PREVIEW_ROOT, "chat.jsonl"), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        self.send_response(204)
+        self.end_headers()
+
 
 class Server(socketserver.ThreadingTCPServer):
     """Threaded, so one slow or stalled request cannot freeze the whole gallery.
@@ -102,7 +138,7 @@ def main():
     # SEPARATE page on purpose: index.html hands the whole page to iteration-log.json
     # whenever that file exists ("owns the page when present", per its own header), so
     # a live pane bolted into it would be invisible on any asset with a log.
-    for page in ("index.html", "live.html"):
+    for page in ("index.html", "live.html", "v4.html"):
         src = os.path.join(HERE, "gallery", page)
         if os.path.exists(src):
             shutil.copyfile(src, os.path.join(PREVIEW_ROOT, page))
