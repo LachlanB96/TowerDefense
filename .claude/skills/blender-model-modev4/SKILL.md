@@ -53,17 +53,22 @@ the `.blend` or the `.fbx`. A panel accept is not finishing. The
 `# --- variant hook ---` interlock in `preview.py`/`build_one.py` is never loosened.
 
 **On `finish <asset>`, in this order:** set that asset's `control.json` state to
-`stop` → wait for its shepherd to exit → run the real build:
+`stop` → wait for its shepherd to exit → run the real build **from the bake worktree's
+script** — that copy is the accepted state; the main checkout's copy is stale until
+the user merges (`shepherd.md`, "Your workspace"). Its output paths are hardcoded
+absolute, so the `.blend`/`.fbx` land in the real asset locations:
 
 ```bash
 "/c/Program Files/Blender Foundation/Blender 5.1/blender.exe" -b \
-    -P Assets/Blender/blender_<asset>.py -- save export render
+    -P "C:\Users\LachlanB\TD\.claude\worktrees\model-<asset>\Assets\Blender\blender_<asset>.py" \
+    -- save export render
 ```
 
 → prune `asset-facts.md` (facts with an expiry die when their fix lands) → final
 report: accepts with the margin story, panel-vs-user agreement from signals, staged
-and shelved contents, and whether the user should merge `model/<asset>` to `main`
-(their call, never yours).
+and shelved contents, and whether the user wants `model/<asset>` merged to `main`
+(their call, never yours — and only after the merge should the bake worktree be
+removed).
 
 ## Pre-flight — before any shepherd starts
 
@@ -112,12 +117,15 @@ All under `Assets/Blender/_previews~/` unless noted. Full schemas: `references/p
   ```json
   {"state": "run", "notes": [],
    "makers": 2, "panel": 2, "escalate_to": 3,
-   "accept_margin": 2, "reject_margin": -2, "wave_max_cells": 8,
-   "grace": 2, "stall": 3, "abandon_at": -2, "report_at": 8}
+   "accept_margin": 2, "reject_margin": -2}
   ```
 
   `state` is `run` | `pause` | `stop`. `makers` may go to 10 when the user dials it.
-  The margins are the user's dial — never hardcode them anywhere downstream.
+  The margins are the user's dial — never hardcode them anywhere downstream. Every key
+  here is read by the shepherd every cycle; there are deliberately no dead dials. The
+  design-arc thresholds (grace 2, stall 3, abandon −2, report-at 8) live as named
+  constants in `_tools/refine.py` — argue with them there; wave size is capped
+  structurally by `axis.py` (≤ 3 clauses = ≤ 8 cells).
 - **`<asset>/design-queue.jsonl`** — you append user-origin designs
   (`{"id","at","origin":"user","spec","status":"queued"}`); the shepherd appends
   agent-origin ones, labelled. Ids are per-asset `dNN`, monotonic.
@@ -214,8 +222,8 @@ anything). The template — fill every `<placeholder>` yourself:
 
 ## Cost discipline
 
-Per attempt ≈ one maker turn + one wave (≤ `wave_max_cells` renders through the 2-slot
-GPU cap — a safety limit you never raise) + 2–3 reviewer calls reading one contact
-sheet each. Queue top-ups are small batches (3–5 specs). Ten makers exist only when
+Per attempt ≈ one maker turn + one wave (≤ 8 renders — axis.py's structural cap —
+through the 2-slot GPU semaphore, a safety limit you never raise) + 2–3 reviewer calls
+reading one contact sheet each. Queue top-ups are small batches (3–5 specs). Ten makers exist only when
 the user dialled ten. Briefs are front-loaded: a child that begins by running `pwd` or
 hunting for paths was badly briefed, and that is your bug.
