@@ -785,11 +785,99 @@ def test_record_eras_and_panel_promote():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def _refine_fixture(root, asset, rows):
+    p = os.path.join(root, asset, "attempts.jsonl")
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as fh:
+        for r in rows:
+            fh.write(json.dumps(r) + "\n")
+
+
+def test_refine_v4_ratchet_uses_current_era():
+    """With no vs-origin verdicts, policy reads the trailing era's incumbent series.
+
+    Three margins of +0/+0/+0 across THREE eras must not read as a stall: each
+    era has a different baseline, so only the trailing era's series counts for
+    stall/abandon. And a genuine within-era stall must still fire.
+    """
+    print("test_refine_v4_ratchet_uses_current_era")
+    sys.path.insert(0, HERE)
+    import refine
+
+    def wave(n, run, sha):
+        return {"kind": "wave", "design": "d01", "attempt": n, "run": run,
+                "script_sha": sha}
+
+    def verdict(run, margin, prefer="challenger"):
+        return {"kind": "verdict", "run": run, "cell": 2, "vs": "incumbent",
+                "prefer": prefer, "margin": margin, "judge": "j1",
+                "suggestion": "s%d" % run}
+
+    root = tempfile.mkdtemp(prefix="gf_refine_")
+    try:
+        # Era-reset case: attempts 1-2 era aaa (+2 then +1), attempt 3 era bbb (+1).
+        # Era bbb has one judged attempt: within grace, policy must be refine,
+        # and must NOT see era aaa's +2 as "the design's best" to stall against.
+        _refine_fixture(root, "ratchet1", [
+            wave(1, 10, "aaa"), verdict(10, 2),
+            wave(2, 11, "aaa"), verdict(11, 1),
+            wave(3, 12, "bbb"), verdict(12, 1),
+        ])
+        pk = refine.packet("ratchet1", "d01", root=root)
+        check("v4 fallback engaged (no origin verdicts, policy still computed)",
+              pk["policy"]["call"] == "refine", str(pk["policy"]))
+
+        # Within-era stall: grace is 2, stall is 3 — five attempts in ONE era,
+        # best +2 at attempt 1, then four attempts never beating it.
+        _refine_fixture(root, "ratchet2",
+            [wave(1, 20, "aaa"), verdict(20, 2)] +
+            [x for i in range(4) for x in
+             (wave(2 + i, 21 + i, "aaa"), verdict(21 + i, 1))])
+        pk2 = refine.packet("ratchet2", "d01", root=root)
+        check("a genuine within-era stall still calls redesign",
+              pk2["policy"]["call"] == "redesign", str(pk2["policy"]))
+
+        # Abandon: after grace, latest era signed margin at -2. MARGIN is a
+        # magnitude (0-3); the sign comes from PREFER, exactly as judge.py
+        # records it - a negative margin with prefer=incumbent would
+        # double-negate.
+        _refine_fixture(root, "ratchet3", [
+            wave(1, 30, "aaa"), verdict(30, 1),
+            wave(2, 31, "aaa"), verdict(31, 1, prefer="incumbent"),
+            wave(3, 32, "aaa"), verdict(32, 2, prefer="incumbent"),
+        ])
+        pk3 = refine.packet("ratchet3", "d01", root=root)
+        check("a decisively negative latest margin abandons",
+              pk3["policy"]["call"] == "abandon", str(pk3["policy"]))
+
+        # v3 data unchanged: an origin series present -> used as before.
+        _refine_fixture(root, "ratchet4", [
+            wave(1, 40, "aaa"),
+            dict(verdict(40, 2), vs="origin"),
+        ])
+        pk4 = refine.packet("ratchet4", "d01", root=root)
+        check("origin verdicts still take precedence (v3 mode)",
+              pk4["policy"]["call"] == "refine", str(pk4["policy"]))
+
+        # Report-at-8 counts attempts ACROSS eras.
+        rows8 = []
+        for i in range(8):
+            rows8.append(wave(1 + i, 50 + i, "sha%d" % (i // 2)))
+            rows8.append(verdict(50 + i, 1))
+        _refine_fixture(root, "ratchet5", rows8)
+        pk5 = refine.packet("ratchet5", "d01", root=root)
+        check("report-at-8 spans eras", pk5["policy"]["call"] == "report",
+              str(pk5["policy"]))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 TESTS = [
     test_genes_refuses_underivable_sweeps,
     test_orbit_draw_is_deterministic_and_unprivileged,
     test_next_run_dir_is_race_safe,
     test_record_eras_and_panel_promote,
+    test_refine_v4_ratchet_uses_current_era,
     test_bootstrap_renders,
     test_variant_overrides_a_constant,
     test_patch_can_call_script_helpers,

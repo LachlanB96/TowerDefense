@@ -39,6 +39,11 @@ individual comparison looks like a win.
 
 Progress is `vs origin` - judged against the design's first baseline, which never moves.
 Every policy decision below reads that series and not the other one.
+
+Under modev4 there are no separate origin verdicts: the incumbent is the baked script
+and send-backs never bake, so within one script_sha era the vs-incumbent series is the
+ratchet, and stall/abandon read only the trailing era. Origin verdicts, where they
+exist (v3 data), still take precedence.
 """
 
 import argparse
@@ -76,10 +81,12 @@ def _by_attempt(asset, design, root=None):
         # treated as real, which is the conservative reading for historical lines.
         if r.get("source", "judge") != "judge":
             continue
-        n = waves[r["run"]]["attempt"]
+        w = waves[r["run"]]
+        n = w["attempt"]
         signed = 0 if r["prefer"] == "tie" else (
             r["margin"] if r["prefer"] == "challenger" else -r["margin"])
         slot = per.setdefault(n, {"attempt": n, "run": r["run"],
+                                  "script_sha": w.get("script_sha"),
                                   "incumbent": [], "origin": [], "suggestions": []})
         slot[r["vs"]].append(signed)
         if r.get("suggestion"):
@@ -98,60 +105,91 @@ def _by_attempt(asset, design, root=None):
     return out
 
 
+def _ratchet_series(hist):
+    """(series, era_len, mode) — the numbers policy() decides from.
+
+    v3 recorded explicit vs-origin verdicts; when any exist they remain the
+    ratchet ("origin" mode, exactly the old behaviour). v4 records only
+    vs-incumbent verdicts: send-backs never bake, so within one script_sha era
+    the incumbent is FIXED and the incumbent series IS the ratchet. A bake
+    (any design's) changes the sha and ends the era; margins from different
+    eras measure against different baselines, so stall/abandon read only the
+    TRAILING era ("incumbent-era" mode). record.eras() is the tested statement
+    of the same grouping.
+    """
+    origin = [h["best_origin"] for h in hist if h["best_origin"] is not None]
+    if origin:
+        return origin, len(hist), "origin"
+    cur = hist[-1]["script_sha"] if hist else None
+    era = []
+    for h in reversed(hist):
+        if h["script_sha"] != cur:
+            break
+        era.append(h)
+    era.reverse()
+    series = [h["best_incumbent"] for h in era if h["best_incumbent"] is not None]
+    return series, len(era), "incumbent-era"
+
+
 def policy(hist):
-    """refine | redesign | abandon | report | continue, from the vs-origin series."""
+    """refine | redesign | abandon | report, from the ratchet series.
+
+    Attempt count for report-at-8 spans the design's whole life; grace, abandon
+    and stall evaluate within the current era — see _ratchet_series.
+    """
     if not hist:
         return {"call": "refine", "why": "no attempts judged yet"}
 
-    n = len(hist)
-    origin = [h["best_origin"] for h in hist if h["best_origin"] is not None]
+    n_total = len(hist)
+    series, n_era, mode = _ratchet_series(hist)
 
-    if not origin:
-        return {"call": "refine",
-                "why": "no vs-origin comparison has been made yet - judge the newest "
-                       "candidate against the design's FIRST baseline as well as against "
-                       "the incumbent, or progress is unmeasurable"}
-
-    latest, best = origin[-1], max(origin)
-
-    if n >= REPORT_AT:
+    if n_total >= REPORT_AT:
         return {"call": "report",
                 "why": "attempt %d. Past this point the decision is the user's, not a "
                        "rule's - the rule exists to stop a design running forever, not "
-                       "to kill one the user still wants." % n}
+                       "to kill one the user still wants." % n_total}
 
-    if n <= GRACE_ATTEMPTS:
+    if not series:
         return {"call": "refine",
-                "why": "attempt %d is within the grace window; an idea gets a real build "
-                       "before any policy can kill it" % n}
+                "why": "no judged comparison yet%s - convene a panel on the newest wave "
+                       "before building again, or progress is unmeasurable"
+                       % (" in the current script era" if mode == "incumbent-era" else "")}
+
+    latest, best = series[-1], max(series)
+
+    if n_era <= GRACE_ATTEMPTS:
+        return {"call": "refine",
+                "why": "attempt %d of the current era is within the grace window; an "
+                       "idea gets a real build before any policy can kill it" % n_era}
 
     if latest <= ABANDON_AT:
         return {"call": "abandon",
-                "why": "vs-origin %+d after %d attempts. That is the panel saying the "
-                       "IDEA is wrong rather than the execution - refining it spends "
-                       "renders on a premise nobody is buying." % (latest, n)}
+                "why": "ratchet %+d after %d judged attempts this era. That is the panel "
+                       "saying the IDEA is wrong rather than the execution - refining it "
+                       "spends renders on a premise nobody is buying." % (latest, n_era)}
 
     # Stall: several consecutive attempts, none beating the design's own best.
     since = 0
-    for v in reversed(origin):
+    for v in reversed(series):
         if v >= best:
             break
         since += 1
     if since >= STALL_ROUNDS:
         return {"call": "redesign",
                 "why": "%d consecutive attempts have failed to beat this design's best "
-                       "vs-origin (%+d). The feedback has stopped being actionable; take "
-                       "what landed and open a new design rather than grinding this one."
-                       % (since, best)}
+                       "ratchet margin (%+d) in the current era. The feedback has "
+                       "stopped being actionable; take what landed and open a new "
+                       "design rather than grinding this one." % (since, best)}
 
     if latest >= best and latest > 0:
         return {"call": "refine",
-                "why": "vs-origin %+d, the design's best so far. It is still climbing - "
+                "why": "ratchet %+d, the design's best this era. It is still climbing - "
                        "carry the critique forward." % latest}
 
     return {"call": "refine",
-            "why": "vs-origin %+d against a best of %+d. Oscillating but not stalled; a "
-                   "design that wobbles is still learning something." % (latest, best)}
+            "why": "ratchet %+d against a best of %+d this era. Oscillating but not "
+                   "stalled; a design that wobbles is still learning something."
+                   % (latest, best)}
 
 
 def packet(asset, design, root=None):
