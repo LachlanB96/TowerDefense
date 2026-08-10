@@ -712,9 +712,39 @@ def test_orbit_draw_is_deterministic_and_unprivileged():
         check("no '%s' criterion in orbit.py's code" % banned, banned not in code.lower())
 
 
+def test_next_run_dir_is_race_safe():
+    """Concurrent makers must never be handed the same run directory.
+
+    The old body computed max+1 and then makedirs(exist_ok=True): two callers
+    that listed the directory before either created run-NNN both got the SAME
+    path back, and their waves overwrote each other's cells. mkdir with no
+    exist_ok is the atomic claim; a loser increments and retries.
+    """
+    print("test_next_run_dir_is_race_safe")
+    sys.path.insert(0, HERE)
+    import concurrent.futures
+    import preview
+
+    root = tempfile.mkdtemp(prefix="gf_rundir_")
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(
+                lambda _i: preview.next_run_dir(root, "raceasset"), range(8)))
+        ns = sorted(n for _path, n, _base in results)
+        check("eight claims got eight distinct run numbers",
+              len(set(ns)) == 8, str(ns))
+        check("every claimed directory exists on disk",
+              all(os.path.isdir(p) for p, _n, _b in results))
+        check("numbers are a contiguous block starting at 1",
+              ns == list(range(1, 9)), str(ns))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 TESTS = [
     test_genes_refuses_underivable_sweeps,
     test_orbit_draw_is_deterministic_and_unprivileged,
+    test_next_run_dir_is_race_safe,
     test_bootstrap_renders,
     test_variant_overrides_a_constant,
     test_patch_can_call_script_helpers,

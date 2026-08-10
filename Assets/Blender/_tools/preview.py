@@ -238,15 +238,25 @@ def resolve_asset(asset):
 
 
 def next_run_dir(root, asset_name):
-    """Allocate _previews~/<asset>/run-NNN/, NNN monotonic per asset."""
+    """Allocate _previews~/<asset>/run-NNN/, NNN monotonic per asset.
+
+    os.mkdir (no exist_ok) is the atomic claim: with several maker agents
+    rendering the same asset concurrently, whoever creates the directory owns
+    that number and a loser simply takes the next one. The old makedirs
+    (exist_ok=True) body handed two concurrent callers the same directory.
+    """
     base = os.path.join(root, asset_name)
     os.makedirs(base, exist_ok=True)
     used = [int(d[4:]) for d in os.listdir(base)
             if d.startswith("run-") and d[4:].isdigit()]
     n = max(used) + 1 if used else 1
-    path = os.path.join(base, "run-%03d" % n)
-    os.makedirs(path, exist_ok=True)
-    return path, n, base
+    while True:
+        path = os.path.join(base, "run-%03d" % n)
+        try:
+            os.mkdir(path)
+            return path, n, base
+        except FileExistsError:
+            n += 1
 
 
 def compute_diffs(variants):
