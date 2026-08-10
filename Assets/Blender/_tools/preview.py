@@ -23,6 +23,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -50,11 +51,21 @@ STDERR_TAIL_LINES = 20
 # This lives here rather than in the agents' instructions on purpose: it is a
 # machine-resource constraint, and an instruction is something an agent can
 # forget while a semaphore is not.
-RENDER_SLOTS = int(os.environ.get("GLOOMFELL_RENDER_SLOTS", "3"))
+# Default lowered 3 -> 2 on 2026-08-02 after the user's machine froze for about a
+# minute mid-session. EEVEE is GPU-resident and this rig renders with raytracing,
+# shadows and volumetric shadows on, so each slot is a live GPU context - and Unity
+# and the browser gallery are holding their own at the same time. Three concurrent
+# raytraced contexts is enough to trip Windows TDR, which resets the display driver
+# and looks exactly like a freeze. A render is only ~7 s, so serialising costs a few
+# seconds of wall-clock against the many minutes a modeller spends thinking; the
+# throughput was never worth the risk of taking the desktop down.
+#
+# Set GLOOMFELL_RENDER_SLOTS=1 if it ever recurs, or 3+ on a machine with headroom.
+RENDER_SLOTS = int(os.environ.get("GLOOMFELL_RENDER_SLOTS", "2"))
 
 
 @contextlib.contextmanager
-def render_slot(root, timeout):
+def render_slot(timeout):
     """Hold one of RENDER_SLOTS build slots for the duration of the block.
 
     Implemented with mkdir, which is atomic on every platform we care about, so
@@ -62,8 +73,17 @@ def render_slot(root, timeout):
     by age rather than by checking whether the owning PID is alive: PID liveness
     is platform-specific and a stale slot only costs throughput, never
     correctness.
+
+    The lock lives in the system temp dir, NOT under the previews root
+    (changed 2026-08-02). It used to be <root>/.render-slots, which made the
+    "machine-wide" cap secretly per---root: a modeller agent that forgot
+    --root fell back to its worktree's own _previews~, got a private pool of
+    RENDER_SLOTS slots, and silently exited the cap - two such agents plus two
+    compliant ones is the 3+-GPU-context TDR freeze the cap exists to prevent.
+    A fixed location is what makes the semaphore exclude every process
+    regardless of where their output goes.
     """
-    slot_dir = os.path.join(root, ".render-slots")
+    slot_dir = os.path.join(tempfile.gettempdir(), "gloomfell-render-slots")
     os.makedirs(slot_dir, exist_ok=True)
     stale_after = timeout + 60
     # Never block a build forever over a scheduling nicety - if the pool stays
@@ -328,7 +348,7 @@ def run_audit(asset_name):
     return lines[-1].strip() if lines else "audit produced no verdict"
 
 
-def build_variant(script, spec, out_dir, views, sample_scale, timeout, root):
+def build_variant(script, spec, out_dir, views, sample_scale, timeout):
     """Run one Blender process. Returns the finished variant record fields."""
     os.makedirs(out_dir, exist_ok=True)
 
@@ -347,7 +367,7 @@ def build_variant(script, spec, out_dir, views, sample_scale, timeout, root):
     # The slot is taken around the Blender call only - not around the JSON
     # bookkeeping above - so a queued build holds nothing while it waits.
     try:
-        with render_slot(root, timeout):
+        with render_slot(timeout):
             proc = subprocess.run(
                 [BLENDER, "-b", "-P", BUILD_ONE, "--",
                  "--script", script, "--variant", vpath, "--out", out_dir],
@@ -418,7 +438,7 @@ def build_variant(script, spec, out_dir, views, sample_scale, timeout, root):
 
 
 def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
-        jobs=MAX_JOBS, root=None, all_views=False, audit=False):
+        jobs=MAX_JOBS, root=None, all_views=False, audit=False, tag=None, seed=None):
     """Build every variant in parallel. Returns the completed manifest."""
     script, asset_name = resolve_asset(asset)
     # Before anything: no Blender launched, no run directory allocated, nothing
@@ -448,6 +468,19 @@ def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
         "started": datetime.datetime.now().isoformat(timespec="seconds"),
         "done": False,
         "audit": None,
+        # Who asked for this run, and under which stimulus draw.
+        #
+        # Attribution used to be self-reported ("report your run directory"), which
+        # failed exactly when it mattered: an agent that died after rendering left an
+        # unattributable run, and the log's own note records that "the newest run at
+        # any moment is usually not the attempt". Measured: 403 run directories against
+        # 84 logged attempts. Stamping it here makes it a fact rather than a promise.
+        #
+        # `seed` is the orbit draw (see _tools/orbit.py). Recording it is what makes a
+        # past verdict re-checkable: replay the seed and you reproduce the exact
+        # stimulus the judgement was formed against.
+        "tag": tag,
+        "seed": seed,
         "variants": [
             {
                 "n": i + 1,
@@ -470,7 +503,7 @@ def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
         for i, spec in enumerate(variants):
             out_dir = os.path.join(run_dir, "v%d" % (i + 1))
             futures[pool.submit(build_variant, script, spec, out_dir,
-                                views, sample_scale, timeout, root)] = i
+                                views, sample_scale, timeout)] = i
         for fut in concurrent.futures.as_completed(futures):
             i = futures[fut]
             try:
@@ -517,6 +550,10 @@ def main():
     # gallery is not watching. --root points its renders back at the real one so
     # the user sees the work as it happens.
     ap.add_argument("--root", help="preview output root (default: the repo's _previews~)")
+    ap.add_argument("--tag", help="who is rendering this; stamped into manifest.json "
+                                  "so the run is attributable without self-reporting")
+    ap.add_argument("--seed", type=int, help="orbit stimulus seed; stamped into "
+                                             "manifest.json so a verdict is replayable")
     a = ap.parse_args()
 
     if not os.path.exists(BLENDER):
@@ -531,6 +568,8 @@ def main():
         jobs=a.jobs,
         audit=a.audit,
         root=os.path.abspath(a.root) if a.root else None,
+        tag=a.tag,
+        seed=a.seed,
     )
     failed = [v for v in manifest["variants"] if v["exit"] != 0]
     return 1 if failed else 0

@@ -605,7 +605,104 @@ def test_knight_preview_is_non_destructive():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_genes_refuses_underivable_sweeps():
+    """genes.py must refuse a gene whose dependents are computed above the hook.
+
+    This is the guard against the quietest failure mode the harness has: seeding a
+    parent constant through `vars` leaves everything derived from it stale, and the
+    result renders BROKEN BUT NOT IDENTICAL - so the identical-pair check passes it and
+    a judge scores a corrupted build. Verified against the real mage script rather than
+    the selftest cube, because the cube has no derived genes to catch.
+    """
+    print("test_genes_refuses_underivable_sweeps")
+    sys.path.insert(0, HERE)
+    import genes                                   # noqa: E402  (path set just above)
+
+    real = os.path.join(os.path.dirname(HERE), "blender_mage000.py")
+    if not os.path.exists(real):
+        check("mage000 script present to test against", True, "skipped - not in tree")
+        return
+    m = genes.build_map(real)
+    check("gene map found the variant hook", m["conforming"], str(m["hook_line"]))
+    check("gene map found module tunables", m["count"] > 50, str(m["count"]))
+    check("gene map found derived genes", m["derived_count"] > 0, str(m["derived_count"]))
+
+    derived = [n for n, g in m["genes"].items() if g["derived_from"]]
+    ok, problems = genes.check(m, derived[:1])
+    check("a derived gene is refused", not ok and len(problems) == 1, str(problems[:1]))
+
+    feeders = [n for n, g in m["genes"].items() if g["feeds"] and not g["derived_from"]]
+    ok2, _ = genes.check(m, feeders[:1])
+    check("a feeding gene is refused", not ok2, str(feeders[:1]))
+
+    ok3, problems3 = genes.check(m, ["DEFINITELY_NOT_A_REAL_GENE"])
+    # Absence must refuse rather than pass. A name the parser missed should cost a
+    # refused sweep, never a silently half-applied one.
+    check("an unknown gene is refused, not ignored", not ok3, str(problems3))
+
+    free = [n for n, g in m["genes"].items()
+            if not g["feeds"] and not g["derived_from"]]
+    ok4, _ = genes.check(m, free[:1])
+    check("an independent gene is allowed", ok4, str(free[:1]))
+
+
+def test_orbit_draw_is_deterministic_and_unprivileged():
+    """orbit.py must be replayable, identical within a pair, and privilege no angle."""
+    print("test_orbit_draw_is_deterministic_and_unprivileged")
+    sys.path.insert(0, HERE)
+    import orbit                                   # noqa: E402
+
+    a, b, c = orbit.draw(41), orbit.draw(41), orbit.draw(42)
+    check("same seed reproduces the draw", a == b)
+    check("different seed changes the draw", a != c)
+
+    # Both sides of a comparison must see the identical condition, or the pairwise
+    # judgement is measuring the camera rather than the model.
+    va = orbit.views(a, 5.6, 1.15)
+    vb = orbit.views(b, 5.6, 1.15)
+    check("a pair renders identical views", va == vb)
+
+    step = 360.0 / a["cells"]
+    gaps = sorted(round((a["bearings"][(i + 1) % a["cells"]] - a["bearings"][i]) % 360, 3)
+                  for i in range(a["cells"]))
+    check("bearings span the whole circle, evenly",
+          all(abs(g - step) < 0.01 for g in gaps), str(gaps))
+
+    # Elevation must actually vary, or the stimulus is a fixed rig with extra steps.
+    spread = max(a["elevations"]) - min(a["elevations"])
+    check("elevation varies within a wave", spread > 15.0, "%.1f deg" % spread)
+
+    # Every cell carries its own light yaw, so a back bearing is not judged unlit.
+    check("every cell carries a rig yaw", all("rig_yaw" in s for s in va))
+
+    # Framing must NOT be fitted to the candidate: a taller model must render taller,
+    # or the d26 "weak stature" signal is invisible to the judge.
+    tall = orbit.views(a, 5.6, 1.15)
+    check("framing is fixed, not normalised to the figure",
+          all(x["cam_loc"] == y["cam_loc"] for x, y in zip(va, tall)))
+
+    # No fixed-size or icon criterion may appear in the EXECUTABLE part of the module:
+    # the model's rendered size is unknown by rule and may change drastically.
+    #
+    # Comments and docstrings are stripped before checking, deliberately. Explaining why
+    # a criterion was removed is worth keeping - the note about two mismatched icon crops
+    # corrupting a judgement is the reason the contact sheet exists - and a test that
+    # punished the explanation would push that history out of the file. The law is about
+    # what the code does.
+    import io as _io
+    import tokenize as _tok
+
+    with open(os.path.join(HERE, "orbit.py"), encoding="utf-8") as fh:
+        toks = list(_tok.generate_tokens(_io.StringIO(fh.read()).readline))
+    code = " ".join(t.string for t in toks
+                    if t.type not in (_tok.COMMENT, _tok.STRING, _tok.NL, _tok.NEWLINE))
+    for banned in ("184", "icon", "unity", "px_min", "min_px"):
+        check("no '%s' criterion in orbit.py's code" % banned, banned not in code.lower())
+
+
 TESTS = [
+    test_genes_refuses_underivable_sweeps,
+    test_orbit_draw_is_deterministic_and_unprivileged,
     test_bootstrap_renders,
     test_variant_overrides_a_constant,
     test_patch_can_call_script_helpers,
