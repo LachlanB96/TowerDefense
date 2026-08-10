@@ -4486,14 +4486,90 @@ def build_rig():
     return cam
 
 
+def set_rig_yaw(deg):
+    """Rotate the whole light rig about world Z, in degrees.
+
+    The orbit stimulus (_tools/orbit.py) needs the lighting to follow each camera
+    bearing, or a back bearing renders an unlit silhouette and the comparison becomes
+    about lighting rather than about the model. The key/fill/rim/spill relationship is
+    tuned art direction, so the RIG is rotated as a unit rather than the key being
+    moved - the relationship survives, only the raking direction changes.
+
+    No-ops when nothing has asked for a yaw, so every existing named view renders
+    exactly as before.
+    """
+    if deg is None:
+        return
+    a = math.radians(deg)
+    ca, sa = math.cos(a), math.sin(a)
+    for ob in COL_RIG.objects:
+        if ob.type != 'LIGHT':
+            continue
+        if "_rig0" not in ob:
+            # Remember the authored position once, so repeated yaws compose from the
+            # original rather than accumulating drift across a multi-cell render.
+            ob["_rig0"] = list(ob.location)
+            ob["_rot0"] = list(ob.rotation_euler)
+        x0, y0, z0 = ob["_rig0"]
+        ob.location = (x0 * ca - y0 * sa, x0 * sa + y0 * ca, z0)
+        r0 = ob["_rot0"]
+        ob.rotation_euler = (r0[0], r0[1], r0[2] + a)
+
+
+def render_mask(name, cam_loc, target, res, lens):
+    """Write `<name>_mask.png`: a cheap RGBA silhouette of the figure alone.
+
+    WHY THIS EXISTS. measure.py used to derive the figure mask by comparing pixels to
+    the median of the four corner patches. That is only valid on an empty backdrop, and
+    this rig stands the model on a ground disc with `film_transparent = False`, so the
+    floor counted as figure: real renders measured 55.18% "figure coverage" with 45.2%
+    of the mask sitting in the bottom third of frame. Every silhouette number computed
+    from it was compressed toward a constant.
+
+    Hiding the ground changes bounce light, so this pass is NOT a substitute for the
+    real render and must never be used for photometry. It supplies a BOOLEAN GEOMETRIC
+    MASK only - which bounce light cannot affect - and every value, contrast and colour
+    statistic is still measured inside that mask on the real, ground-lit image.
+
+    Cheap on purpose: quarter resolution and the floor sample count. A silhouette does
+    not need samples, and this runs once per judged view.
+    """
+    r = SCENE.render
+    ground = bpy.data.objects.get("Ground")
+    prev = (r.film_transparent, r.image_settings.color_mode,
+            r.resolution_x, r.resolution_y, r.filepath,
+            getattr(SCENE.eevee, "taa_render_samples", None),
+            ground.hide_render if ground else None)
+    try:
+        if ground:
+            ground.hide_render = True
+        r.film_transparent = True
+        r.image_settings.color_mode = 'RGBA'
+        r.resolution_x, r.resolution_y = max(64, res[0] // 4), max(64, res[1] // 4)
+        if hasattr(SCENE.eevee, "taa_render_samples"):
+            SCENE.eevee.taa_render_samples = 8
+        r.filepath = os.path.join(RENDER_DIR, name + "_mask.png")
+        bpy.ops.render.render(write_still=True)
+    finally:
+        # Restore unconditionally. A half-restored scene would silently render every
+        # later view transparent, which is the kind of failure that costs a whole wave.
+        if ground:
+            ground.hide_render = prev[6]
+        (r.film_transparent, r.image_settings.color_mode,
+         r.resolution_x, r.resolution_y, r.filepath) = prev[:5]
+        if prev[5] is not None and hasattr(SCENE.eevee, "taa_render_samples"):
+            SCENE.eevee.taa_render_samples = prev[5]
+
+
 def render_view(name, cam_loc, target=(0, 0, 1.30), res=(900, 1300), lens=62,
-                samples=None):
+                samples=None, rig_yaw=None, mask=False):
     # A preview run renders a cheap subset rather than all of them. RENDER_ONLY
     # unset (the normal case) means "render everything", so a plain
-    # `blender -b -P blender_mage000.py -- render` is unaffected.
+    # `blender -b -P blender_evilMage000.py -- render` is unaffected.
     only = globals().get("RENDER_ONLY")
     if only is not None and name not in only:
         return
+    set_rig_yaw(rig_yaw)
     cam = SCENE.camera
     cam.location = cam_loc
     cam.rotation_euler = look_at_euler(cam_loc, target)
@@ -4516,6 +4592,10 @@ def render_view(name, cam_loc, target=(0, 0, 1.30), res=(900, 1300), lens=62,
     print("rendered %s  (%dx%d, %d samples)"
           % (SCENE.render.filepath, res[0], res[1],
              getattr(SCENE.eevee, "taa_render_samples", -1)))
+    # Optional companion silhouette. Rendered AFTER the real image so a failure here
+    # cannot cost the view itself.
+    if mask:
+        render_mask(name, cam_loc, target, res, lens)
 
 
 def export_fbx():
@@ -4587,6 +4667,32 @@ if DO_RENDER:
                 res=(184, 184), lens=62)
     render_view("icon_full_184", (-3.25, -4.05, 1.85), target=(0, 0, 1.30),
                 res=(184, 184), lens=52)
+
+    # ORBIT CELLS - the judged stimulus. Generated by _tools/orbit.py from a per-wave
+    # seed and delivered through the variant hook as EXTRA_VIEWS, so a plain CLI run
+    # renders nothing extra and every named view above is untouched. Additive on
+    # purpose: the old views keep working while the new stimulus is proven.
+    #
+    # Every cell carries its own rig_yaw so the lighting follows the bearing. The
+    # camera distance and aim height are per-ASSET constants, never fitted to the
+    # candidate: fitting each build to the frame would hide a change in proportion,
+    # which is the single thing most worth judging.
+    #
+    # This block, set_rig_yaw() and render_mask() were PORTED from main's
+    # blender_mage000.py on 2026-08-10. This file's ancestor (branch model/mage000)
+    # carries the accepted geometry but branched before the v4 orbit harness landed,
+    # so it could not render the judged stimulus at all - every wave would have died
+    # with "no .png was produced". Do not assume a script inherited from an older
+    # accepted branch is v4-ready just because it conforms; conformance is the hook
+    # marker, orbit-readiness is these three pieces.
+    for _spec in (globals().get("EXTRA_VIEWS") or []):
+        render_view(_spec["name"], tuple(_spec["cam_loc"]),
+                    target=tuple(_spec.get("target", (0, 0, 1.30))),
+                    res=tuple(_spec.get("res", (900, 1300))),
+                    lens=_spec.get("lens", 62),
+                    samples=_spec.get("samples"),
+                    rig_yaw=_spec.get("rig_yaw"),
+                    mask=_spec.get("mask", True))
 
 if DO_EXPORT:
     export_fbx()
