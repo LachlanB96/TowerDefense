@@ -729,14 +729,19 @@ def test_orbit_draw_is_deterministic_and_unprivileged():
     sys.path.insert(0, HERE)
     import orbit                                   # noqa: E402
 
-    a, b, c = orbit.draw(41), orbit.draw(41), orbit.draw(42)
+    # Framing goes into the draw so the elevation band is floored at the ground plane.
+    # These two numbers are the mage's per-asset constants and stand in for any asset.
+    DIST, AIM = 5.6, 1.15
+    a = orbit.draw(41, dist=DIST, aim_z=AIM)
+    b = orbit.draw(41, dist=DIST, aim_z=AIM)
+    c = orbit.draw(42, dist=DIST, aim_z=AIM)
     check("same seed reproduces the draw", a == b)
     check("different seed changes the draw", a != c)
 
     # Both sides of a comparison must see the identical condition, or the pairwise
     # judgement is measuring the camera rather than the model.
-    va = orbit.views(a, 5.6, 1.15)
-    vb = orbit.views(b, 5.6, 1.15)
+    va = orbit.views(a, DIST, AIM)
+    vb = orbit.views(b, DIST, AIM)
     check("a pair renders identical views", va == vb)
 
     step = 360.0 / a["cells"]
@@ -754,7 +759,7 @@ def test_orbit_draw_is_deterministic_and_unprivileged():
 
     # Framing must NOT be fitted to the candidate: a taller model must render taller,
     # or the d26 "weak stature" signal is invisible to the judge.
-    tall = orbit.views(a, 5.6, 1.15)
+    tall = orbit.views(a, DIST, AIM)
     check("framing is fixed, not normalised to the figure",
           all(x["cam_loc"] == y["cam_loc"] for x, y in zip(va, tall)))
 
@@ -775,6 +780,57 @@ def test_orbit_draw_is_deterministic_and_unprivileged():
                     if t.type not in (_tok.COMMENT, _tok.STRING, _tok.NL, _tok.NEWLINE))
     for banned in ("184", "icon", "unity", "px_min", "min_px"):
         check("no '%s' criterion in orbit.py's code" % banned, banned not in code.lower())
+
+
+def test_orbit_never_puts_the_camera_under_the_ground():
+    """No seed may draw a cell beneath the floor the asset stands on.
+
+    THE BUG THIS PINS. The camera sits at aim_z + dist*sin(elev), and the raw elevation
+    band reached -20 deg. On the mage's framing (dist 5.6, aim_z 1.15) anything below
+    -11.85 deg put the camera under a 16 m opaque ground disc, so the cell rendered flat
+    black. Measured across 2000 seeds: 42.8% carried at least one such cell.
+
+    It survived because every downstream check looked healthy. render_mask() hides the
+    ground before drawing the silhouette, so IoU and the inert chip were fine; and
+    preview.py only fails a build when NO png appears, and a black png is a png. The
+    cost was silent - a black cell is pixel-identical between champion and challenger,
+    so it cannot discriminate, and a sixth of the stimulus was spent on nothing.
+
+    Low cameras are NOT the bug and must survive: "a giant is seen from below" is a rule
+    of orbit.py. Only the physically impossible sub-floor region is excluded.
+    """
+    print("test_orbit_never_puts_the_camera_under_the_ground")
+    sys.path.insert(0, HERE)
+    import orbit
+
+    # Several asset framings, not just the mage's: the floor is derived, not tuned.
+    for dist, aim_z in ((5.6, 1.15), (4.0, 0.8), (12.0, 3.4), (2.2, 0.45)):
+        floor = aim_z * orbit.GROUND_CLEARANCE_FRAC
+        worst = None
+        for seed in range(400):
+            d = orbit.draw(seed, dist=dist, aim_z=aim_z)
+            v = orbit.views(d, dist, aim_z)          # raises if any cell is underground
+            lowest = min(s["cam_loc"][2] for s in v)
+            worst = lowest if worst is None or lowest < worst else worst
+        check("dist=%.1f aim_z=%.2f: 400 seeds all clear the ground (lowest z %.3f)"
+              % (dist, aim_z, worst), worst > floor, "floor %.3f" % floor)
+
+    # The floor must not have quietly become "no low cameras". A worm's-eye view -
+    # camera below the aim height, looking up - has to remain reachable.
+    lows = [min(s["cam_loc"][2] for s in orbit.views(orbit.draw(s, dist=5.6, aim_z=1.15),
+                                                     5.6, 1.15))
+            for s in range(400)]
+    check("low, looking-up cameras survive the floor",
+          min(lows) < 1.15 * 0.5, "lowest z over 400 seeds: %.3f" % min(lows))
+
+    # An unfloored draw fed to views() must be REFUSED, not silently rendered black.
+    bad = {"seed": -1, "cells": 1, "az0": 0.0, "bearings": [0.0],
+           "elevations": [-20.0], "rake_deg": 0.0}
+    try:
+        orbit.views(bad, 5.6, 1.15)
+        check("an underground cell is refused, not rendered", False, "no raise")
+    except ValueError as e:
+        check("an underground cell is refused, not rendered", "ground plane" in str(e))
 
 
 def test_next_run_dir_is_race_safe():
@@ -1011,7 +1067,11 @@ def test_scaffolded_asset_conforms():
         check("front view rendered", v["renders"] == ["v1/front.png"],
               str(v["renders"]))
 
-        cells = orbit.views(orbit.draw(7), 4.0, 0.8)[:2]
+        # Framing goes into the draw as well as into views(), or the band is not
+        # floored at the ground plane and a cell can be drawn under the floor. Seed 7
+        # at this framing is exactly such a case, which is how the guard found this
+        # call site: cell 2 sat at z=-0.132 and would have rendered black.
+        cells = orbit.views(orbit.draw(7, dist=4.0, aim_z=0.8), 4.0, 0.8)[:2]
         man2 = preview.run(asset=path,
                            variants=[{"label": "orbit",
                                       "vars": {"EXTRA_VIEWS": cells}}],
@@ -1031,6 +1091,7 @@ def test_scaffolded_asset_conforms():
 TESTS = [
     test_genes_refuses_underivable_sweeps,
     test_orbit_draw_is_deterministic_and_unprivileged,
+    test_orbit_never_puts_the_camera_under_the_ground,
     test_next_run_dir_is_race_safe,
     test_record_eras_and_panel_promote,
     test_refine_v4_ratchet_uses_current_era,

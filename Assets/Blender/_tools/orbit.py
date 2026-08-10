@@ -60,6 +60,37 @@ SHEET_COLS = 3            # 3x2 contact sheet
 # unlikely.
 ELEV_MIN, ELEV_MAX = -20.0, 70.0
 
+# The camera's height is aim_z + dist*sin(elev), so a low enough elevation puts it
+# UNDER the ground plane the asset stands on. The assets build that plane as a wide
+# opaque disc, so such a cell renders as a flat black frame.
+#
+# That failure is nastier than it sounds and is why this floor exists. A black cell
+# is pixel-IDENTICAL between a champion and its challenger, so it silently spends a
+# sixth of the stimulus on a cell that cannot discriminate. It also evades every
+# check downstream: render_mask() hides the ground before drawing the silhouette, so
+# IoU and the inert chip look healthy, and preview.py's "no .png was produced" guard
+# passes because a PNG *was* produced - it is merely black. Measured on the mage's
+# framing before this floor: 42.8% of seeds carried at least one dead cell.
+#
+# The floor is GEOMETRIC, not aesthetic: it is the elevation at which the camera sits
+# on the ground, and nothing more is excluded. Low, looking-up cameras survive intact,
+# which matters because "a giant is seen from below" is a rule of this module and not
+# a preference. Expressed as a fraction of the aim height so it scales with the asset
+# and introduces no absolute length; `fit` cancels out of the arithmetic entirely.
+GROUND_CLEARANCE_FRAC = 0.05
+
+
+def elevation_floor(dist, aim_z, clearance_frac=GROUND_CLEARANCE_FRAC):
+    """Lowest elevation in degrees that still leaves the camera above the ground.
+
+    Solves aim_z + dist*sin(e) >= clearance_frac*aim_z for e. Returns ELEV_MIN when
+    the framing cannot be known, so an uninformed caller keeps the old raw band.
+    """
+    if not dist or aim_z is None:
+        return ELEV_MIN
+    s = (aim_z * (clearance_frac - 1.0)) / float(dist)
+    return math.degrees(math.asin(max(-1.0, min(1.0, s))))
+
 # Extra rake, degrees, applied to the light rig ON TOP of following the camera.
 #
 # The rig follows each cell's bearing so every cell is lit comparably - otherwise a
@@ -80,14 +111,26 @@ CELL_RES = (600, 840)     # per cell; fidelity, not a criterion
 CELL_LENS = 62
 
 
-def draw(seed, cells=CELLS):
+def draw(seed, cells=CELLS, dist=None, aim_z=None):
     """The per-wave condition draw. Deterministic in `seed` - that is the whole point.
 
     Returns a dict that is safe to record verbatim on an attempt: replaying the seed
     reproduces the exact stimulus a verdict was formed against, which is what makes a
     past judgement re-checkable at all.
+
+    Pass the asset's `dist`/`aim_z` so the elevation band can be floored at the ground
+    plane (see GROUND_CLEARANCE_FRAC). Omitting them keeps the raw band and can draw a
+    camera underneath the floor, so callers that render should always pass them.
+
+    A seed alone no longer identifies a stimulus: the same seed draws different
+    elevations under different framing. The band actually used is therefore recorded in
+    the returned dict, which is what keeps a past verdict re-checkable. Records written
+    before 2026-08-11 carry no `elev_min` key and were drawn under the raw band.
     """
     rng = random.Random(seed)
+
+    lo = max(ELEV_MIN, elevation_floor(dist, aim_z)) if dist and aim_z is not None \
+        else ELEV_MIN
 
     # One azimuth offset for the whole wave, then evenly spaced bearings from it.
     # Even spacing over 360 is what guarantees no side of the model can hide.
@@ -97,7 +140,7 @@ def draw(seed, cells=CELLS):
     # Elevation is drawn per cell rather than once, so a single wave sees the model
     # from several heights. Sorted only for legible reporting; the pairing of a
     # bearing to an elevation stays as drawn.
-    elevs = [rng.uniform(ELEV_MIN, ELEV_MAX) for _ in range(cells)]
+    elevs = [rng.uniform(lo, ELEV_MAX) for _ in range(cells)]
 
     return {
         "seed": seed,
@@ -105,6 +148,8 @@ def draw(seed, cells=CELLS):
         "az0": round(az0, 3),
         "bearings": [round((az0 + i * step) % 360.0, 3) for i in range(cells)],
         "elevations": [round(e, 3) for e in elevs],
+        "elev_min": round(lo, 3),
+        "elev_max": ELEV_MAX,
         "rake_deg": round(rng.uniform(RAKE_MIN, RAKE_MAX), 3),
     }
 
@@ -116,17 +161,33 @@ def views(d, dist, aim_z, fit=1.0, res=CELL_RES, lens=CELL_LENS, prefix="orb"):
     a change in fit moves the camera without changing what "twice as tall" looks like.
     Both must be held constant across a comparison - see the module docstring.
     """
+    # Belt and braces to draw()'s elevation floor. That floor prevents the bad draw;
+    # this catches one that arrives anyway - a hand-edited record, a draw made before
+    # the floor existed, or a caller that did not pass its framing. Raising is the
+    # entire point: the failure being fixed here is a cell that renders black and then
+    # passes every check downstream, so a loud stop is strictly better than a wave that
+    # looks fine and cannot discriminate.
+    floor = aim_z * fit * GROUND_CLEARANCE_FRAC
+
     out = []
     for i, (az, el) in enumerate(zip(d["bearings"], d["elevations"])):
         a, e = math.radians(az), math.radians(el)
         r = dist * fit * math.cos(e)
+        z = aim_z * fit + dist * fit * math.sin(e)
+        if z <= floor:
+            raise ValueError(
+                "orbit cell %d of seed %s puts the camera at z=%.3f, on or under the "
+                "ground plane (clearance %.3f): it would render black and be identical "
+                "for every candidate. Elevation %.2f deg is below this framing's floor "
+                "of %.2f deg. Pass dist/aim_z to orbit.draw() so the band is floored."
+                % (i, d.get("seed"), z, floor, el, elevation_floor(dist, aim_z)))
         out.append({
             "name": "%s%d" % (prefix, i),
             # Blender is Z-up and these assets face -Y. Bearing 0 is therefore the
             # front, and bearings increase anticlockwise seen from above.
             "cam_loc": [round(r * math.sin(a), 4),
                         round(-r * math.cos(a), 4),
-                        round(aim_z * fit + dist * fit * math.sin(e), 4)],
+                        round(z, 4)],
             "target": [0.0, 0.0, round(aim_z * fit, 4)],
             "res": list(res),
             "lens": lens,

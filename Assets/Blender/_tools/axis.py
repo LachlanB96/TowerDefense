@@ -154,7 +154,10 @@ def main():
     wave = None
     if a.seed is not None:
         import orbit
-        d = orbit.draw(a.seed)
+        # Framing goes INTO the draw, not just into views(): the elevation band has to
+        # be floored at this asset's ground plane, or a cell can be drawn underneath the
+        # floor and render black. See orbit.GROUND_CLEARANCE_FRAC.
+        d = orbit.draw(a.seed, dist=a.dist, aim_z=a.aim_z)
         v = orbit.views(d, a.dist, a.aim_z)
         # One draw for the whole wave. Varying the condition between cells would make
         # the comparison about the camera instead of about the model.
