@@ -1,4 +1,550 @@
 <!doctype html>
+<!-- Gloomfell mission control (modev4).
+
+     One page for the whole fleet: fleet strip up top, the focused asset's
+     champion / design lanes / live render strip in the middle, and the chat
+     dock on the right. Served by _tools/serve.py, which copies this file into
+     the previews root at startup — RESTART THE SERVER after editing this file.
+
+     Data contract (all polled as static files; the server never computes):
+       /fleet.json                supervisor   fleet registry
+       /<asset>/pipeline.json     shepherd     designs, queue, staged, events, heartbeat
+       /<asset>/live.json         tap.py       run directories + shots
+       /<asset>/champion.json     record.py    current champion + provenance
+       /chat.jsonl + /feed.jsonl  page POST / supervisor   the conversation
+       POST /chat {text, asset?}  the user's one write door on this page
+
+     Missing files are normal (a zone shows its empty state); the error banner
+     is reserved for the server itself being unreachable. Schemas are pinned in
+     .claude/skills/blender-model-modev4/references/page.md — keep them in sync. -->
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gloomfell · mission control</title>
-<body>placeholder — Task 7 builds this page.</body>
+<style>
+  :root{
+    color-scheme: dark;
+    --bg:#12151c; --panel:#181c25; --panel2:#1e2331; --line:#2b3242;
+    --ink:#e3e7f0; --ink2:#a8b0c2; --mute:#6f7891;
+    --accent:#8e9bee; --ok:#5fbe99; --warn:#d2a05c; --dead:#d03b3b; --shelf:#9085e9;
+    --mono:ui-monospace,"Cascadia Mono",Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.5 -apple-system,"Segoe UI",system-ui,sans-serif}
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+  img{display:block}
+  .mono{font-family:var(--mono)}
+  .dim{color:var(--ink2)} .faint{color:var(--mute)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:6px}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  /* ---- fleet strip ---- */
+  header{position:sticky;top:0;z-index:5;background:var(--bg);
+         border-bottom:1px solid var(--line);padding:10px 16px;
+         display:flex;gap:12px;align-items:center;overflow-x:auto}
+  h1{font:600 13px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;
+     margin:0;color:var(--accent);white-space:nowrap}
+  #dot{width:8px;height:8px;border-radius:50%;background:var(--mute);flex:0 0 auto}
+  #dot.on{background:var(--ok)} #dot.err{background:var(--dead)}
+  .fcard{flex:0 0 auto;display:flex;flex-direction:column;gap:4px;text-align:left;
+         padding:8px 12px;border:1px solid var(--line);border-radius:6px;
+         background:var(--panel)}
+  .fcard[aria-current="true"]{border-color:var(--accent)}
+  .fcard .l1{display:flex;gap:8px;align-items:center}
+  .fcard .name{font:600 13px/1 var(--mono)}
+  .fcard .l2{display:flex;gap:10px;font:11px/1 var(--mono);color:var(--ink2)}
+  .pill{display:inline-flex;align-items:center;gap:5px;font:600 10px/1 var(--mono);
+        padding:3px 8px;border-radius:999px}
+  .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+  .st-run{color:var(--ok);background:color-mix(in srgb,var(--ok) 12%,transparent)}
+  .st-pause{color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,transparent)}
+  .st-stop,.st-unknown{color:var(--mute);background:var(--panel2)}
+  @media (prefers-reduced-motion:no-preference){
+    .st-run::before{animation:pulse 2.4s ease-in-out infinite}
+    @keyframes pulse{50%{opacity:.35}}
+  }
+  .hb-ok{color:var(--ok)} .hb-warn{color:var(--warn)} .hb-stale{color:var(--dead);font-weight:600}
+  .banner{display:none;background:color-mix(in srgb,var(--dead) 16%,var(--bg));
+          color:var(--ink);padding:6px 16px;font:12px var(--mono)}
+  .banner.on{display:block}
+
+  /* ---- layout ---- */
+  #wrap{display:grid;grid-template-columns:1fr 340px;gap:0;align-items:start}
+  main{padding:14px 16px 60px;min-width:0}
+  section{margin-bottom:14px}
+  section>h2{font:600 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;
+             color:var(--mute);margin:0 0 8px}
+  .empty{color:var(--mute);font-size:12px;padding:14px;text-align:center}
+
+  /* ---- champion ---- */
+  #champ .body{display:flex;gap:14px;padding:12px;align-items:flex-start}
+  #champ img{max-height:300px;max-width:min(440px,40vw);border-radius:4px;
+             background:#0c0e13;border:1px solid var(--line);cursor:zoom-in}
+  #champ .meta{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--ink2)}
+
+  /* ---- designs ---- */
+  .staged{border:1px solid var(--warn);border-radius:6px;background:var(--panel);
+          padding:10px 12px;margin-bottom:8px;font-size:12px}
+  .staged b{color:var(--warn)}
+  .lane{padding:10px 12px;margin-bottom:8px}
+  .lane .head{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .lane .id{font:600 13px/1 var(--mono)}
+  .lane .sum{color:var(--ink2);font-size:12px;flex:1 1 200px;overflow:hidden;
+             text-overflow:ellipsis;white-space:nowrap}
+  .chip{display:inline-flex;align-items:center;gap:4px;font:400 10px/1 var(--mono);
+        color:var(--ink2);background:var(--panel2);border:1px solid var(--line);
+        padding:3px 7px;border-radius:4px;white-space:nowrap}
+  .chip.amber{color:var(--warn)}
+  .chip.origin-agent{color:var(--shelf)}
+  .m{display:inline-block;font:600 11px/1 var(--mono);padding:3px 6px;border-radius:4px;
+     background:var(--panel2)}
+  .m.pos{color:var(--ok)} .m.neg{color:var(--dead)} .m.mid{color:var(--ink2)}
+  .qrow{display:flex;gap:8px;align-items:center;padding:3px 0;font-size:12px}
+  #events{font:11px/1.7 var(--mono);color:var(--ink2);padding:8px 12px;
+          max-height:180px;overflow-y:auto}
+  #events .at{color:var(--mute);margin-right:8px}
+
+  /* ---- live runs ---- */
+  .run{border:1px solid var(--line);border-radius:4px;background:var(--panel);
+       margin-bottom:8px;overflow:hidden}
+  .run.unclaimed{opacity:.72;border-style:dashed}
+  .rhead{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;padding:6px 10px;
+         background:var(--panel2);border-bottom:1px solid var(--line);
+         font:11px/1.4 var(--mono)}
+  .rn{color:var(--accent);font-weight:700}
+  .tag{color:var(--ok)} .untag{color:var(--mute);font-style:italic}
+  .seed{color:var(--ink2)} .when{margin-left:auto;color:var(--mute)}
+  .shots{display:flex;gap:8px;padding:8px 10px;overflow-x:auto}
+  .shot{flex:0 0 auto;text-align:center}
+  .shot img{height:120px;width:auto;border-radius:3px;background:#0c0e13;
+            border:1px solid var(--line);cursor:zoom-in}
+  .shot span{display:block;font:10px/1.6 var(--mono);color:var(--mute);max-width:150px;
+             overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  /* ---- chat dock ---- */
+  #chat{position:sticky;top:57px;height:calc(100vh - 57px);display:flex;
+        flex-direction:column;border-left:1px solid var(--line);background:var(--panel)}
+  #chat .bar{display:flex;gap:8px;align-items:center;padding:8px 12px;
+             border-bottom:1px solid var(--line);font:600 11px/1 var(--mono);
+             letter-spacing:.1em;text-transform:uppercase;color:var(--mute)}
+  #chat .bar button{margin-left:auto;color:var(--mute);font-size:14px}
+  #msgs{flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+  .msg{max-width:88%;padding:7px 10px;border-radius:8px;font-size:12.5px;
+       white-space:pre-wrap;overflow-wrap:break-word}
+  .msg .who{display:block;font:10px/1.6 var(--mono);color:var(--mute)}
+  .msg.user{align-self:flex-end;background:color-mix(in srgb,var(--accent) 16%,var(--panel2))}
+  .msg.supervisor{align-self:flex-start;background:var(--panel2)}
+  .msg.undelivered{align-self:flex-end;background:color-mix(in srgb,var(--dead) 18%,var(--panel2));
+                   color:var(--warn);font-size:11px}
+  #chat form{display:flex;gap:6px;padding:10px 12px 4px;border-top:1px solid var(--line)}
+  #chat-in{flex:1;background:var(--bg);color:var(--ink);border:1px solid var(--line);
+           border-radius:6px;padding:8px 10px;font:inherit;font-size:13px}
+  #chat-send{background:var(--panel2);border:1px solid var(--line);border-radius:6px;
+             padding:8px 12px;color:var(--accent);font-weight:600}
+  #chat .opts{display:flex;gap:8px;align-items:center;padding:2px 12px;font-size:11px;
+              color:var(--mute)}
+  #verbs{padding:6px 12px 12px;font:10px/1.7 var(--mono);color:var(--mute);
+         border-top:1px dashed var(--line)}
+  body.nochat #chat{display:none}
+  body.nochat #wrap{grid-template-columns:1fr}
+
+  @media (max-width:1100px){
+    #wrap{grid-template-columns:1fr}
+    #chat{position:fixed;left:0;right:0;bottom:0;top:auto;height:44vh;z-index:8;
+          border-top:1px solid var(--line)}
+    main{padding-bottom:46vh}
+    body.nochat main{padding-bottom:60px}
+  }
+
+  /* ---- zoom overlay ---- */
+  #big{position:fixed;inset:0;background:#080a0ee6;display:none;z-index:20;
+       align-items:center;justify-content:center;cursor:zoom-out}
+  #big img{max-width:96vw;max-height:92vh;border-radius:4px}
+  #big div{position:fixed;bottom:14px;left:0;right:0;text-align:center;
+           font:11px var(--mono);color:var(--ink2)}
+</style>
+
+<header>
+  <h1>Gloomfell · mission control</h1>
+  <span id="dot" title="server connection"></span>
+  <div id="fleet" style="display:flex;gap:10px;align-items:stretch"></div>
+</header>
+<div id="net" class="banner">server unreachable — showing the last good state</div>
+
+<div id="wrap">
+<main>
+  <section id="champ" class="card"><h2 style="padding:10px 12px 0">Champion</h2>
+    <div class="body" id="champ-body"></div></section>
+  <section id="designs-sec"><h2>Designs</h2><div id="staged"></div><div id="designs"></div>
+    <div id="queue" class="card" style="padding:8px 12px"></div>
+    <div id="events" class="card"></div></section>
+  <section id="runs-sec"><h2>Live renders</h2><div id="runs"></div></section>
+</main>
+
+<aside id="chat" aria-label="chat with the supervisor">
+  <div class="bar">Chat<button id="chat-hide" title="hide chat">✕</button></div>
+  <div id="msgs"></div>
+  <form id="chat-form">
+    <input id="chat-in" autocomplete="off"
+           placeholder="tell the workflow… (Enter to send)">
+    <button id="chat-send" type="submit">Send</button>
+  </form>
+  <label class="opts"><input type="checkbox" id="chat-scope"> <span id="scope-label">to this asset</span></label>
+  <div id="verbs">stop · pause &lt;asset&gt; · resume &lt;asset&gt; · status ·
+    add design &lt;asset&gt;: &lt;text&gt; · new &lt;hero|npc|tower&gt; [name]: &lt;desc&gt; ·
+    new N npcs · makers &lt;asset&gt; N · promote &lt;design&gt; · finish &lt;asset&gt;</div>
+</aside>
+</div>
+
+<div id="big"><img alt=""><div></div></div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const q = p => p + (p.includes('?') ? '&' : '?') + 't=' + Date.now();  // JSON only — never images
+function h(tag, attrs, ...kids) {           // tiny element builder — no innerHTML with data
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === 'class') el.className = v;
+    else if (k === 'text') el.textContent = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined) el.setAttribute(k, v);
+  }
+  for (const k of kids) if (k) el.appendChild(typeof k === 'string' ? document.createTextNode(k) : k);
+  return el;
+}
+function fmtRel(iso) {
+  const t = Date.parse(iso); if (!Number.isFinite(t)) return null;
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 60) return Math.round(s) + 's';
+  if (s < 3600) return Math.round(s / 60) + 'm';
+  if (s < 86400) return (s / 3600).toFixed(1).replace('.0', '') + 'h';
+  return new Date(t).toLocaleDateString();
+}
+function timeEl(iso) {
+  if (!iso) return h('span', { class: 'when', text: '' });
+  const el = h('time', { class: 'when', datetime: iso, 'data-ts': iso,
+                         title: new Date(iso).toLocaleString() });
+  el.textContent = fmtRel(iso) || iso;
+  return el;
+}
+function refreshTimes() {
+  for (const el of document.querySelectorAll('[data-ts]')) {
+    const rel = fmtRel(el.dataset.ts);
+    if (rel) el.textContent = rel;
+  }
+}
+function hbAge(iso) { const t = Date.parse(iso); return Number.isFinite(t) ? (Date.now() - t) / 1000 : null; }
+
+const S = {
+  focused: new URLSearchParams(location.search).get('asset') || null,
+  fleet: null, pipes: new Map(), live: null, champion: null, chat: [],
+  sigs: {}, failures: 0, tick: 0, pendingRows: [],
+};
+
+/* ---------------- fetch cycle ---------------- */
+async function jget(url) {
+  const r = await fetch(q(url), { cache: 'no-store' });
+  return r.ok ? r.json() : null;                 // 404 = absent state, not an error
+}
+async function tget(url) {
+  const r = await fetch(q(url), { cache: 'no-store' });
+  return r.ok ? r.text() : null;
+}
+function parseJsonl(text) {
+  return (text || '').split('\n').filter(l => l.trim()).map(l => {
+    try { return JSON.parse(l); } catch (e) { return null; }
+  }).filter(Boolean);
+}
+function mergeChat(chatText, feedText) {
+  const lines = [...parseJsonl(chatText), ...parseJsonl(feedText)];
+  lines.sort((a, b) => {
+    const ka = (a.at || '') + (a.from === 'user' ? '0' : '1');
+    const kb = (b.at || '') + (b.from === 'user' ? '0' : '1');
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
+  return lines;
+}
+
+async function tick() {
+  S.tick++;
+  const slow = S.tick % 5 === 1;                  // fleet + champion cadence
+  try {
+    if (slow || !S.fleet) {
+      S.fleet = await jget('/fleet.json');
+      for (const a of (S.fleet?.assets || []))
+        if (a.asset !== S.focused)
+          S.pipes.set(a.asset, await jget(`/${a.asset}/pipeline.json`));
+    }
+    if (!S.focused && S.fleet?.assets?.length) S.focused = S.fleet.assets[0].asset;
+    if (S.focused) {
+      S.pipes.set(S.focused, await jget(`/${S.focused}/pipeline.json`));
+      S.live = await jget(`/${S.focused}/live.json`);
+      if (slow || !S.champion) S.champion = await jget(`/${S.focused}/champion.json`);
+    }
+    S.chat = mergeChat(await tget('/chat.jsonl'), await tget('/feed.jsonl'));
+    S.failures = 0;
+    $('dot').className = 'on';
+    $('net').classList.remove('on');
+  } catch (e) {
+    S.failures++;
+    if (S.failures >= 3) { $('dot').className = 'err'; $('net').classList.add('on'); }
+    return;                                       // keep the last good state
+  }
+  render();
+  refreshTimes();
+}
+
+function focusAsset(asset) {
+  if (asset === S.focused) return;
+  S.focused = asset; S.live = null; S.champion = null;
+  history.replaceState(null, '', '?asset=' + encodeURIComponent(asset));
+  S.sigs = {}; S.tick = 0;                        // force full refetch + rerender
+  tick();
+}
+
+/* ---------------- render ---------------- */
+function sigGuard(key, value) {
+  const s = JSON.stringify(value ?? null);
+  if (S.sigs[key] === s) return false;
+  S.sigs[key] = s;
+  return true;
+}
+function render() {
+  renderFleet(); renderChampion(); renderDesigns(); renderRuns(); renderChat();
+}
+
+function renderFleet() {
+  const assets = S.fleet?.assets || [];
+  const hb = assets.map(a => {
+    const p = S.pipes.get(a.asset);
+    return p?.heartbeat || null;
+  });
+  if (!sigGuard('fleet', [assets, hb, S.focused])) return;
+  const host = $('fleet');
+  host.textContent = '';
+  if (!assets.length) {
+    host.appendChild(h('span', { class: 'faint', text: 'no fleet running — waiting for the supervisor' }));
+    return;
+  }
+  for (const a of assets) {
+    const p = S.pipes.get(a.asset);
+    const age = p?.heartbeat ? hbAge(p.heartbeat) : null;
+    const hbCls = a.state !== 'run' || age == null ? 'faint'
+                : age < 90 ? 'hb-ok' : age < 300 ? 'hb-warn' : 'hb-stale';
+    const hbTxt = age == null ? 'hb —'
+                : 'hb ' + (age < 90 ? Math.round(age) + 's'
+                          : age < 5400 ? Math.round(age / 60) + 'm'
+                          : (age / 3600).toFixed(1) + 'h')
+                  + (age >= 300 && a.state === 'run' ? ' · stuck?' : '');
+    host.appendChild(h('button', { class: 'fcard', 'aria-current': String(a.asset === S.focused),
+                                   onclick: () => focusAsset(a.asset) },
+      h('span', { class: 'l1' },
+        h('span', { class: 'name', text: a.asset }),
+        h('span', { class: 'pill st-' + (['run', 'pause', 'stop'].includes(a.state) ? a.state : 'unknown'),
+                    text: a.state || '?' })),
+      h('span', { class: 'l2' },
+        h('span', { text: `mk ${a.makers ?? '—'}` }),
+        h('span', { text: `q ${a.queue ?? '—'}` }),
+        h('span', { text: `✓ ${a.accepted ?? '—'}` }),
+        a.staged ? h('span', { class: 'chip amber', text: `staged ${a.staged}` }) : null,
+        h('span', { class: hbCls, text: hbTxt }))));
+  }
+}
+
+function zoom(src, caption) {
+  $('big').style.display = 'flex';
+  $('big').querySelector('img').src = src;
+  $('big').querySelector('div').textContent = caption || '';
+}
+
+function renderChampion() {
+  const c = S.champion;
+  if (!sigGuard('champ', [c, S.focused])) return;
+  const host = $('champ-body');
+  host.textContent = '';
+  if (!c || !S.focused) {
+    host.appendChild(h('div', { class: 'empty', text: 'no champion yet — nothing has been promoted for this asset' }));
+    return;
+  }
+  const runDir = 'run-' + String(c.run).padStart(3, '0');
+  if (c.sheet) {
+    const src = `/${S.focused}/${runDir}/${c.sheet}`;
+    host.appendChild(h('img', { src, alt: 'champion contact sheet',
+      onclick: () => zoom(src, `${S.focused} champion · run ${c.run} cell ${c.cell}`) }));
+  }
+  host.appendChild(h('div', { class: 'meta' },
+    h('span', { class: 'mono', text: `run ${c.run} · cell ${c.cell} · ${c.label ?? ''}` }),
+    h('span', {}, 'promoted by ', h('b', { text: c.by || '?' }), ' · ', timeEl(c.at)),
+    c.quote ? h('span', { class: 'faint', text: c.quote }) : null,
+    c.seed != null ? h('span', { class: 'faint mono', text: 'seed ' + c.seed }) : null));
+}
+
+function marginChip(v) {
+  const cls = v >= 2 ? 'pos' : v <= -2 ? 'neg' : 'mid';
+  return h('span', { class: 'm ' + cls, text: (v > 0 ? '+' : '') + v });
+}
+
+function renderDesigns() {
+  const p = S.pipes.get(S.focused);
+  if (!sigGuard('designs', [p, S.focused])) return;
+  const staged = $('staged'), lanes = $('designs'), queue = $('queue'), events = $('events');
+  staged.textContent = lanes.textContent = queue.textContent = events.textContent = '';
+  if (!p) {
+    lanes.appendChild(h('div', { class: 'empty card',
+      text: 'no pipeline.json — the shepherd for this asset is not running' }));
+    queue.style.display = events.style.display = 'none';
+    return;
+  }
+  queue.style.display = events.style.display = '';
+  for (const s of (p.staged || [])) {
+    staged.appendChild(h('div', { class: 'staged' },
+      h('b', { text: `⚑ ${s.design} · panel accepted, waiting for you` }), ' — ',
+      `run ${s.run} cell ${s.cell}, margins ${((s.margins) || []).map(m => (m > 0 ? '+' : '') + m).join('/')}`,
+      s.chips?.length ? ` · chips: ${s.chips.join(', ')}` : '',
+      h('div', { class: 'faint', text: `say "promote ${s.design}" in chat, or file a directive from the gallery` })));
+  }
+  const ds = p.designs || [];
+  if (!ds.length && !(p.staged || []).length)
+    lanes.appendChild(h('div', { class: 'empty card', text: 'no designs in flight' }));
+  for (const d of ds) {
+    lanes.appendChild(h('div', { class: 'lane card' },
+      h('div', { class: 'head' },
+        h('span', { class: 'id', text: d.id }),
+        h('span', { class: 'chip origin-' + (d.origin || 'agent'),
+                    text: d.origin === 'user' ? 'yours' : 'agent-authored' }),
+        d.status ? h('span', { class: 'chip', text: d.status }) : null,
+        d.attempts ? h('span', { class: 'chip', text: 'a' + d.attempts }) : null,
+        h('span', { class: 'sum', title: d.summary || '', text: d.summary || '' }),
+        ...(d.last_margins || []).map(marginChip),
+        ...((d.chips || []).map(c => h('span', { class: 'chip amber', text: c }))))));
+  }
+  const qs = p.queue || [];
+  queue.appendChild(h('div', { class: 'faint mono', text: `queue · ${qs.length} waiting` }));
+  for (const d of qs) {
+    queue.appendChild(h('div', { class: 'qrow' },
+      h('span', { class: 'chip', text: d.id }),
+      h('span', { class: 'chip origin-' + (d.origin || 'agent'),
+                  text: d.origin === 'user' ? 'yours' : 'agent' }),
+      h('span', { class: 'dim', text: d.summary || '' })));
+  }
+  const evs = [...(p.events || [])].reverse().slice(0, 15);
+  for (const e of evs) {
+    events.appendChild(h('div', {},
+      h('span', { class: 'at', text: (e.at || '').replace('T', ' ').slice(5, 16) }),
+      e.text || ''));
+  }
+  if (!evs.length) events.appendChild(h('div', { class: 'faint', text: 'no events yet' }));
+}
+
+function renderRuns() {
+  const L = S.live;
+  if (!sigGuard('runs', [L?.stamped, L?.runs?.length, S.focused])) return;
+  const host = $('runs');
+  host.textContent = '';
+  if (!L || !L.runs) {
+    host.appendChild(h('div', { class: 'empty card',
+      text: `no live feed — is the tap running?  python Assets/Blender/_tools/tap.py ${S.focused || '<asset>'}` }));
+    return;
+  }
+  for (const r of L.runs.slice(0, 20)) {
+    const el = h('section', { class: 'run' + (r.claimed ? '' : ' unclaimed') });
+    const shots = r.variants.flatMap(v => v.shots);
+    el.appendChild(h('div', { class: 'rhead' },
+      h('span', { class: 'rn', text: 'run-' + r.run }),
+      r.claimed ? h('span', { class: 'tag', text: r.tag }) : h('span', { class: 'untag', text: 'unclaimed' }),
+      r.seed != null ? h('span', { class: 'seed', text: 'seed ' + r.seed }) : null,
+      h('span', { class: 'seed', text: shots.length + ' shot' + (shots.length === 1 ? '' : 's') }),
+      r.done === false ? h('span', { class: 'tag', text: 'rendering…' }) : null,
+      r.audit ? h('span', { class: 'seed', text: 'audit ' + r.audit }) : null,
+      h('span', { class: 'when', text: r.started || '' })));
+    if (!shots.length) {
+      el.appendChild(h('div', { class: 'empty', text: 'no images on disk for this run' }));
+    } else {
+      const strip = h('div', { class: 'shots' });
+      for (const pth of shots) {
+        const src = `/${S.focused}/${pth}`;
+        strip.appendChild(h('div', { class: 'shot' },
+          h('img', { src, loading: 'lazy', alt: pth,
+                     onclick: () => zoom(src, `run-${r.run} · ${pth}`) }),
+          h('span', { text: pth.split('/').pop() })));
+      }
+      el.appendChild(strip);
+    }
+    host.appendChild(el);
+  }
+}
+
+/* ---------------- chat ---------------- */
+function chatPinned() {
+  const m = $('msgs');
+  return m.scrollHeight - m.scrollTop - m.clientHeight < 40;
+}
+function renderChat() {
+  const sig = [S.chat.length, S.chat[S.chat.length - 1]?.at, S.pendingRows.length];
+  if (!sigGuard('chat', sig)) return;
+  const m = $('msgs');
+  const pin = chatPinned();
+  m.textContent = '';
+  if (!S.chat.length)
+    m.appendChild(h('div', { class: 'empty', text: 'say something — the supervisor is listening' }));
+  for (const line of S.chat.slice(-200)) {
+    const who = line.from === 'user' ? 'user' : 'supervisor';
+    m.appendChild(h('div', { class: 'msg ' + who },
+      h('span', { class: 'who' },
+        (who === 'user' ? 'you' : 'supervisor')
+        + (line.asset ? ' · ' + line.asset : '') + ' · ', timeEl(line.at)),
+      line.text || ''));
+  }
+  for (const row of S.pendingRows) m.appendChild(row);
+  if (pin) m.scrollTop = m.scrollHeight;
+}
+async function sendChat(ev) {
+  ev.preventDefault();
+  const input = $('chat-in');
+  const text = input.value.trim();
+  if (!text) return;
+  const body = { text };
+  if ($('chat-scope').checked && S.focused) body.asset = S.focused;
+  try {
+    const r = await fetch('/chat', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    input.value = '';
+    tick();                                        // show the line immediately
+  } catch (e) {
+    const row = h('div', { class: 'msg undelivered', text: '⚠ not delivered — server down? ' + text });
+    S.pendingRows.push(row);
+    $('msgs').appendChild(row);
+    $('msgs').scrollTop = $('msgs').scrollHeight;
+    setTimeout(() => {
+      S.pendingRows = S.pendingRows.filter(x => x !== row);
+      row.remove();
+    }, 6000);
+  }
+}
+$('chat-form').addEventListener('submit', sendChat);
+$('chat-hide').addEventListener('click', () => {
+  document.body.classList.add('nochat');
+  try { localStorage.setItem('gf-v4-chat', 'hidden'); } catch (e) {}
+});
+try {
+  if (localStorage.getItem('gf-v4-chat') === 'hidden') document.body.classList.add('nochat');
+} catch (e) {}
+document.body.addEventListener('dblclick', ev => {   // double-click anywhere on the header re-opens chat
+  if (ev.target.closest('header')) {
+    document.body.classList.remove('nochat');
+    try { localStorage.setItem('gf-v4-chat', ''); } catch (e) {}
+  }
+});
+
+$('big').onclick = () => { $('big').style.display = 'none'; };
+addEventListener('keydown', e => { if (e.key === 'Escape') $('big').style.display = 'none'; });
+
+setInterval(() => {
+  const label = $('scope-label');
+  label.textContent = 'to ' + (S.focused || 'this asset');
+}, 2000);
+tick();
+setInterval(tick, 1000);
+</script>
