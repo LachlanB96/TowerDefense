@@ -966,6 +966,68 @@ def test_tap_publishes_multiple_assets():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_scaffolded_asset_conforms():
+    """A scaffolded script must be harness-drivable and orbit-ready from birth.
+
+    Genesis (modev4) trusts this: the generated script renders under
+    preview.py, its genes map cleanly, and an orbit cell renders BOTH the view
+    and its _mask.png companion (chips and measure.py need the mask).
+    """
+    print("test_scaffolded_asset_conforms")
+    sys.path.insert(0, HERE)
+    import genes
+    import orbit
+    import preview
+    import scaffold
+
+    tmp = tempfile.mkdtemp(prefix="gf_scaffold_")
+    try:
+        path = scaffold.scaffold("scafftest", dist=4.0, aim_z=0.8, out_dir=tmp)
+        check("generated file is where scaffold says", os.path.exists(path), path)
+        src = open(path, encoding="utf-8").read()
+        check("hook marker present", preview.HOOK_MARKER in src)
+        check("save/export behind flags",
+              'DO_SAVE' in src and 'DO_EXPORT' in src and '_flag(' in src)
+
+        m = genes.build_map(path)
+        check("gene map conforming", m["conforming"], str(m["hook_line"]))
+        check("gene map found tunables", m["count"] >= 5, str(m["count"]))
+        check("no derived genes in the template", m["derived_count"] == 0,
+              str([n for n, g in m["genes"].items() if g["derived_from"]]))
+
+        refused = False
+        try:
+            scaffold.scaffold("scafftest", out_dir=tmp)
+        except SystemExit:
+            refused = True
+        check("refuses to overwrite without force", refused)
+
+        root = os.path.join(tmp, "previews")
+        man = preview.run(asset=path, variants=[{"label": "baseline"}],
+                          views=["front"], root=root)
+        v = man["variants"][0]
+        check("scaffolded asset builds and renders", v["exit"] == 0,
+              v["stderr_tail"][:400])
+        check("front view rendered", v["renders"] == ["v1/front.png"],
+              str(v["renders"]))
+
+        cells = orbit.views(orbit.draw(7), 4.0, 0.8)[:2]
+        man2 = preview.run(asset=path,
+                           variants=[{"label": "orbit",
+                                      "vars": {"EXTRA_VIEWS": cells}}],
+                           views=["orb0", "orb1"], root=root)
+        v2 = man2["variants"][0]
+        check("orbit cells render", v2["exit"] == 0, v2["stderr_tail"][:400])
+        run_dir = os.path.join(root, "scafftest",
+                               "run-%03d" % man2["run"], "v1")
+        check("orbit view + mask companion on disk",
+              os.path.exists(os.path.join(run_dir, "orb0.png"))
+              and os.path.exists(os.path.join(run_dir, "orb0_mask.png")),
+              str(os.listdir(run_dir) if os.path.isdir(run_dir) else "missing"))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 TESTS = [
     test_genes_refuses_underivable_sweeps,
     test_orbit_draw_is_deterministic_and_unprivileged,
@@ -985,6 +1047,7 @@ TESTS = [
     test_chat_endpoint_and_v4_page,
     test_gallery_server_contract,
     test_knight_preview_is_non_destructive,
+    test_scaffolded_asset_conforms,
 ]
 
 
