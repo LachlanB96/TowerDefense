@@ -741,10 +741,55 @@ def test_next_run_dir_is_race_safe():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_record_eras_and_panel_promote():
+    """eras() groups a design's waves by script_sha; promote() accepts by=panel.
+
+    The v4 ratchet is only comparable within one script_sha era (a bake changes
+    the geometry cell 1 reproduces), so the grouping itself deserves a test.
+    Wave rows are written directly as JSONL rather than through open_attempt(),
+    which would demand a real manifest on disk for every row.
+    """
+    print("test_record_eras_and_panel_promote")
+    sys.path.insert(0, HERE)
+    import record
+
+    root = tempfile.mkdtemp(prefix="gf_record_")
+    try:
+        p = os.path.join(root, "era_asset", "attempts.jsonl")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        rows = [
+            {"kind": "wave", "design": "d01", "attempt": 1, "run": 10, "script_sha": "aaa"},
+            {"kind": "wave", "design": "d01", "attempt": 2, "run": 11, "script_sha": "aaa"},
+            {"kind": "wave", "design": "d01", "attempt": 3, "run": 12, "script_sha": "bbb"},
+            {"kind": "wave", "design": "d02", "attempt": 1, "run": 13, "script_sha": "bbb"},
+            {"kind": "wave", "design": "d01", "attempt": 4, "run": 14, "script_sha": "bbb"},
+        ]
+        with open(p, "w", encoding="utf-8") as fh:
+            for r in rows:
+                fh.write(json.dumps(r) + "\n")
+        got = record.eras("era_asset", "d01", root=root)
+        check("two eras for d01",
+              [e["script_sha"] for e in got] == ["aaa", "bbb"], str(got))
+        check("attempts grouped in order",
+              [e["attempts"] for e in got] == [[1, 2], [3, 4]], str(got))
+        check("other designs' waves ignored",
+              all(3 not in e["attempts"] or e["script_sha"] == "bbb" for e in got))
+
+        refused = False
+        try:
+            record.promote("era_asset", 10, 1, by="verifier", root=root)
+        except SystemExit:
+            refused = True
+        check("promote refuses an unknown authority", refused)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 TESTS = [
     test_genes_refuses_underivable_sweeps,
     test_orbit_draw_is_deterministic_and_unprivileged,
     test_next_run_dir_is_race_safe,
+    test_record_eras_and_panel_promote,
     test_bootstrap_renders,
     test_variant_overrides_a_constant,
     test_patch_can_call_script_helpers,

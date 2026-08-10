@@ -159,6 +159,26 @@ def origin_of(asset, design, run, root=None):
     return (int(run), 1), warn
 
 
+def eras(asset, design, root=None):
+    """A design's waves grouped into script_sha eras, oldest first.
+
+    An era is a maximal run of consecutive attempts sharing a script_sha. The
+    v4 ratchet (vs-incumbent margins) is only comparable within one era: every
+    bake changes the geometry that cell 1 reproduces, so margins from different
+    eras measure against different incumbents and must never be pooled.
+    """
+    waves = sorted([a for a in read_attempts(asset, root)
+                    if a.get("kind") == "wave" and a.get("design") == design],
+                   key=lambda w: w.get("attempt", 0))
+    out = []
+    for w in waves:
+        sha = w.get("script_sha")
+        if not out or out[-1]["script_sha"] != sha:
+            out.append({"script_sha": sha, "attempts": []})
+        out[-1]["attempts"].append(w.get("attempt"))
+    return out
+
+
 def record_verdict(asset, run, cell, prefer, margin, vs="incumbent", note="",
                    suggestion="", flip=None, judge="", root=None, source="judge",
                    against=None, seed=None):
@@ -207,7 +227,14 @@ def record_verdict(asset, run, cell, prefer, margin, vs="incumbent", note="",
 
 
 def promote(asset, run, cell, by="user", quote="", root=None):
-    """Make a cell the incumbent. Only ever called for a human decision."""
+    """Make a cell the incumbent.
+
+    Called for a human decision, or - under modev4 - for a panel accept
+    (by="panel"). The user's directive channel always outranks a panel verdict;
+    see docs/superpowers/specs/2026-08-10-blender-model-modev4-design.md, §7.
+    """
+    if by not in ("user", "panel"):
+        raise SystemExit("promote by must be user or panel, not %r" % by)
     m = manifest_for(asset, run, root)
     if not m:
         raise SystemExit("no manifest for run %s" % run)
