@@ -358,6 +358,49 @@ def run_audit(asset_name):
     return lines[-1].strip() if lines else "audit produced no verdict"
 
 
+def warm_render_pipeline(script, spec, views, timeout):
+    """Render one throwaway cell so every real cell of a wave starts equally warm.
+
+    WHY THIS EXISTS - measured 2026-08-11, and it silently corrupted verdicts.
+
+    Each cell is its own Blender process, so the state that matters is the machine's:
+    the GPU driver's on-disk shader cache. The FIRST concurrency batch of a wave hits
+    that cache cold and renders differently from the rest of its own wave. Measured on
+    evilMage000 run 19 vs an identical re-render (same wave file, no seed re-derivation,
+    same script_sha): cells v1 and v3 - the first two launched at jobs=2 - differed by
+    426k-435k pixels at max delta 185-232 of 255, while all six later cells were
+    BIT-IDENTICAL. The renderer is otherwise perfectly deterministic, so this is not
+    sampling noise.
+
+    It is severe rather than untidy because **cell 1 is always the incumbent baseline**.
+    The artefact therefore lands precisely on the reference that every chip measures
+    against (`_iou_vs_base`, the inert gate, the INV chips) and that every judge sees as
+    the champion. It produced a physically impossible reading in the wild: a clause that
+    only SHORTENS blades topping out at z <= 0.76 appeared to brighten the torso band by
+    |dL| p50 0.728.
+
+    One cheap render ahead of the pool populates the cache, so the wave's own cells are
+    all on the same footing. Cost is a few seconds per wave against the cost of a wave
+    whose baseline is wrong, which is every verdict in it.
+
+    Deliberately NOT a fix by re-rendering the whole wave twice and keeping the second:
+    that doubles GPU time on every wave forever, where this pays once.
+    """
+    tmp = tempfile.mkdtemp(prefix="gf_warm_")
+    try:
+        # One view is enough to compile the shaders; the pixels are thrown away. Keep
+        # the same script and the same variant so the warmed shaders are the ones the
+        # real cells will use.
+        warm_views = list(views)[:1] if views else None
+        build_variant(script, spec, tmp, warm_views, 0.05, timeout)
+    except Exception as exc:                                # noqa: BLE001
+        # A warmup failure must never fail the wave - the wave is still renderable,
+        # just possibly cold. Say so rather than dying.
+        print("  (warmup skipped: %r)" % exc)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def build_variant(script, spec, out_dir, views, sample_scale, timeout):
     """Run one Blender process. Returns the finished variant record fields."""
     os.makedirs(out_dir, exist_ok=True)
@@ -525,6 +568,10 @@ def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
     write_manifest(run_dir, asset_base, manifest)
     write_asset_index(root)
     print("run %d -> %s" % (run_n, run_dir))
+
+    # Warm the shader cache BEFORE the pool, so cell 1 - always the incumbent baseline -
+    # is not the one cell rendered cold. See warm_render_pipeline().
+    warm_render_pipeline(script, variants[0], views, timeout)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(jobs, len(variants))) as pool:
         futures = {}
