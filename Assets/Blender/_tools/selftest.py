@@ -937,12 +937,42 @@ def test_refine_v4_ratchet_uses_current_era():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_tap_publishes_multiple_assets():
+    """One tap process must be able to follow the whole fleet."""
+    print("test_tap_publishes_multiple_assets")
+    root = tempfile.mkdtemp(prefix="gf_tap_")
+    try:
+        for asset in ("fleet_a", "fleet_b"):
+            rdir = os.path.join(root, asset, "run-001")
+            os.makedirs(rdir, exist_ok=True)
+            with open(os.path.join(rdir, "manifest.json"), "w", encoding="utf-8") as fh:
+                json.dump({"asset": asset, "run": 1, "started": "2026-08-10T00:00:00",
+                           "done": True, "tag": "t", "seed": 1, "audit": None,
+                           "variants": [{"n": 1, "label": "x"}]}, fh)
+        proc = subprocess.run(
+            [sys.executable, os.path.join(HERE, "tap.py"),
+             "fleet_a", "fleet_b", "--once", "--root", root],
+            capture_output=True, text=True, timeout=60)
+        check("tap exited 0", proc.returncode == 0, proc.stderr[:300])
+        for asset in ("fleet_a", "fleet_b"):
+            lp = os.path.join(root, asset, "live.json")
+            check("live.json published for " + asset, os.path.exists(lp))
+            if os.path.exists(lp):
+                data = _read_json(lp)
+                check(asset + " payload names its asset and run",
+                      data.get("asset") == asset and data["runs"]
+                      and data["runs"][0]["run"] == 1, str(data)[:200])
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 TESTS = [
     test_genes_refuses_underivable_sweeps,
     test_orbit_draw_is_deterministic_and_unprivileged,
     test_next_run_dir_is_race_safe,
     test_record_eras_and_panel_promote,
     test_refine_v4_ratchet_uses_current_era,
+    test_tap_publishes_multiple_assets,
     test_bootstrap_renders,
     test_variant_overrides_a_constant,
     test_patch_can_call_script_helpers,

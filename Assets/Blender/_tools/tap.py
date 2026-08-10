@@ -1,7 +1,12 @@
 """Watch the previews root and publish a small live.json for the live page.
 
-    python Assets/Blender/_tools/tap.py mage000            # follow one asset
-    python Assets/Blender/_tools/tap.py mage000 --once     # one snapshot, then exit
+    python Assets/Blender/_tools/tap.py mage000              # follow one asset
+    python Assets/Blender/_tools/tap.py mage000 knight000    # follow the fleet
+    python Assets/Blender/_tools/tap.py mage000 --once       # one snapshot, then exit
+
+One process follows the whole fleet (modev4 runs several assets at once); the
+supervisor restarts it when the active-asset set changes. Each asset publishes
+to its own <asset>/live.json exactly as before.
 
 Runs in SYSTEM Python as its OWN PROCESS, deliberately.
 
@@ -139,33 +144,40 @@ def publish(payload, out_path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("asset")
+    ap.add_argument("assets", nargs="+")
     ap.add_argument("--root", help="previews root (default: the repo's _previews~)")
     ap.add_argument("--once", action="store_true", help="one snapshot, then exit")
     ap.add_argument("--keep", type=int, default=KEEP_RUNS)
     a = ap.parse_args()
 
     root = os.path.abspath(a.root) if a.root else PREVIEW_ROOT
-    out = os.path.join(root, a.asset, "live.json")
+
+    def out_path(asset):
+        return os.path.join(root, asset, "live.json")
 
     if a.once:
-        p = scan(root, a.asset, a.keep)
-        publish(p, out)
-        print("%s  %d runs (%d unclaimed) -> %s"
-              % (a.asset, p["total_runs"], p.get("unclaimed_runs", 0), out))
+        for asset in a.assets:
+            p = scan(root, asset, a.keep)
+            publish(p, out_path(asset))
+            print("%s  %d runs (%d unclaimed) -> %s"
+                  % (asset, p["total_runs"], p.get("unclaimed_runs", 0),
+                     out_path(asset)))
         return 0
 
-    print("tapping %s -> %s   (ctrl-c to stop)" % (a.asset, out))
-    last = None
+    print("tapping %s   (ctrl-c to stop)" % ", ".join(a.assets))
+    last = {}
     while True:
-        p = scan(root, a.asset, a.keep)
-        # Cheap change detection: only republish when something actually moved, so the
-        # page's poll is nearly always a 304-shaped no-op from the browser's cache.
-        key = json.dumps(p["runs"], separators=(",", ":"))
-        if key != last:
-            publish(p, out)
-            last = key
-        busy = any(not r["done"] for r in p["runs"][:3])
+        busy = False
+        for asset in a.assets:
+            p = scan(root, asset, a.keep)
+            # Cheap change detection: only republish when something actually moved,
+            # so the page's poll is nearly always a 304-shaped no-op from the
+            # browser's cache.
+            key = json.dumps(p["runs"], separators=(",", ":"))
+            if key != last.get(asset):
+                publish(p, out_path(asset))
+                last[asset] = key
+            busy = busy or any(not r["done"] for r in p["runs"][:3])
         time.sleep(BUSY_S if busy else IDLE_S)
 
 
