@@ -18,7 +18,7 @@ Legibility rules this rebuild is built around (the reason it exists):
      light. Every plate boundary is outlined in gold trim, so the internal lines
      survive downscaling the way an inked drawing does.
   3. DARK RECESSES. Mail voiders, plate undersides and the helmet interior use a
-     near-black material. Without them the red eye glow has nothing to glow against.
+     near-black material. Without them the blue eye glow has nothing to glow against.
 
 Run headless:   blender -b -P Assets/Blender/blender_knight000.py
 Run in-session: exec(compile(open(PATH).read(), PATH, "exec"))
@@ -198,18 +198,103 @@ M_RUBY    = make_material("KnightRuby", (0.185, 0.006, 0.022, 1.0), 0.0, 0.120,
 M_CAPE    = make_material("KnightCape",      (0.038, 0.070, 0.330, 1.0), 0.0, 0.640, sheen=0.55)
 M_CAPE_IN = make_material("KnightCapeLining",(0.013, 0.024, 0.105, 1.0), 0.0, 0.720, sheen=0.35)
 
+# The eyes burn BLUE. (The hero doc still describes a red helmet glow; the eyes
+# are an explicit override of that - every other red element on him stays red.)
+#
 # Emission strengths are tuned for a render with NO bloom pass. Anything above
-# ~15 just clips to white and the red is lost - the glow has to come from a
+# ~15 just clips to white and the colour is lost - the glow has to come from a
 # saturated colour against a dark interior, not from raw intensity.
 # AgX desaturates bright emitters toward white, so cranking strength makes the
-# eyes PALER, not redder. Low strength + a fully saturated colour against the
-# black helmet interior is what keeps them burning red.
-M_EYE     = make_material("KnightEyeGlow", (1.0, 0.02, 0.01, 1.0), 0.0, 0.4,
-                          emission=(1.0, 0.025, 0.008, 1.0), emission_strength=3.0)
-M_EYE_CORE = make_material("KnightEyeCore", (1.0, 0.20, 0.06, 1.0), 0.0, 0.3,
-                           emission=(1.0, 0.30, 0.08, 1.0), emission_strength=7.0)
-M_EYE_DIM = make_material("KnightEyeWash", (0.35, 0.02, 0.01, 1.0), 0.0, 0.7,
-                          emission=(1.0, 0.09, 0.035, 1.0), emission_strength=1.4)
+# eyes PALER, not bluer. Low strength + a fully saturated colour against the
+# black helmet interior is what keeps them burning blue.
+#
+# BLUE DESATURATES FAR EARLIER THAN RED DID. The ~5 ceiling noted above was
+# measured on the old red eyes; blue starts washing out around 1.5. The red set
+# ran at 3.0/7.0/1.4 and a straight recolour at those strengths came out pale
+# icy white-lavender: the centre of each slit was literally white, and blue only
+# survived at the thin outboard tip of the wedge where the emitter is dimmest.
+# The diagnostic is that inversion - the BRIGHTER the pixel, the LESS blue it
+# was. So the whole set now runs near 1, and the near-black helmet interior
+# supplies the contrast instead of intensity. Keep the ordering
+# core > slit > wash, and if these ever need adjusting, move them together and
+# keep them low; reaching for strength is what produces the white blob.
+# DO NOT ROTATE THE HUE TOWARD AZURE TO BUY BRIGHTNESS EITHER. Tried and
+# rejected. The reasoning is seductive: perceived luminance is
+# 0.2126*R + 0.7152*G + 0.0722*B, so blue is the weakest channel there is and
+# green carries ~10x its weight, meaning a greener blue (0.115 -> 0.340) is
+# measurably ~10% brighter at icon size for free, with no strength change.
+# It also costs 24% of the SATURATION of the brightest eye pixels, which come
+# out pale sky-blue and nearly bleached - the exact washed-out look that
+# strength 3.0 produced, just reached through colour instead of intensity.
+#
+# The lesson, which applies to any future attempt on these materials:
+# LUMINANCE IS NOT THE METRIC. Saturation against the near-black interior IS
+# the effect. A smaller area of deep saturated blue reads as something burning
+# inside the helmet; a larger area of pale blue reads as tinted glass. When the
+# eyes need more presence, buy it with AREA at this saturation, never by making
+# the blue lighter - by strength or by hue.
+M_EYE     = make_material("KnightEyeGlow", (0.012, 0.100, 1.0, 1.0), 0.0, 0.4,
+                          emission=(0.010, 0.115, 1.0, 1.0), emission_strength=0.9)
+# Core: the small gem at the deep end of each slit. Nothing else in the model
+# uses this material, so it can be tuned without touching the slit or the wash.
+#
+# It used to render as a near-WHITE dot, and on a hollow helmet a white dot
+# reads as a SPECULAR CATCHLIGHT - light glinting off a wet eyeball. There is
+# no eyeball. It made the slit read as a cartoon eye with a highlight instead of
+# as something burning in an empty helm, and it was the least saturated thing
+# left in the eye. Two separate mechanisms were whitening it; both are fixed.
+#
+# 1. THE EMISSION WAS A LIGHTER AZURE, NOT A HOTTER BLUE. At (0.045,0.360,1.0)
+#    x 1.2 its red and green radiance were ~6x and ~4x the slit's, while its
+#    blue was only 1.33x. So the "hot centre" was bought almost entirely in the
+#    two channels that turn blue into white, and AgX finished the job: it
+#    compresses the above-1.0 blue far harder than a mid-range green, which
+#    pulls the three channels together on exactly the brightest pixels.
+#    It is now (0.008,0.090,1.0) - a DEEPER blue than the slit's own
+#    (0.010,0.115,1.0). At strength 1.2 against the slit's 0.9 that puts its red
+#    and green radiance within ~5% of the slit's and lands the whole 33% surplus
+#    in BLUE. That is the only honest way to make a pixel hotter here: add the
+#    surplus to the channel that is already dominant. Adding it to the others is
+#    what the rejected hue rotation did, and it cost 24% of the saturation.
+#
+# 2. IT WAS ALSO LIT PAINT WITH A GLOSS HIGHLIGHT. The base colour was a bright
+#    (0.050,0.320,1.0) blue at roughness 0.3 - a glossy, flat-faceted ball
+#    sitting in the mouth of the aperture facing the key light. Part of that
+#    white dot was never emission at all: it was a mirror highlight plus lit
+#    diffuse, i.e. a literal catchlight. This is the same failure written up
+#    under M_EYE_DIM below, where a 0.35-albedo wash turned out to be lit blue
+#    paint rather than glow. Near-black base and roughness 0.85 mean the gem's
+#    screen brightness is now its own emission and nothing else, and its facets
+#    can no longer throw a highlight.
+#
+# Strength stays 1.2 (7.0 originally, briefly 4.0) and must never go up - the
+# lead over M_EYE's 0.9 is what makes this a hot centre, and now that the hue is
+# no longer doing that job it is the only lead it needs.
+M_EYE_CORE = make_material("KnightEyeCore", (0.004, 0.010, 0.045, 1.0), 0.0, 0.85,
+                           emission=(0.008, 0.090, 1.0, 1.0), emission_strength=1.2)
+# Halo around each slit: gives the aperture depth behind the pupils, and -
+# since it covers several times the area a slit does - it is what carries the
+# blue down to icon size. Must stay WELL below M_EYE: it sits directly behind
+# the slits, so anything close to their level swallows them and the face reads
+# as one uniform glow.
+#
+# THE BASE COLOUR HAS TO BE NEAR-BLACK, and this is not cosmetic. It was 0.35
+# blue while the wash sat buried inside Helmet_Void where nothing could light
+# it. Moved out to the mouth of the aperture it faces the key light, and a
+# 0.35-albedo panel lit head-on completely drowns its own emission: dropping
+# the strength from 0.20 to 0.07 changed the render by nothing visible, because
+# what was on screen was never the glow - it was lit blue paint. That is rule 4
+# from the other side: the interior must be near-black not only so the slits
+# have something to burn against, but so this surface's own brightness is
+# emission and nothing else, and therefore actually controllable.
+#
+# 0.13 was landed by eye against the 184 px icon, from above: 0.22 still turned
+# the crossbar into a lit visor band with the slits floating on it, which is the
+# "uniformly glowing face" failure. At 0.13 the slot reads as a deep navy
+# HOLLOW, the slits are unmistakably the brightest thing in it, and the blue
+# still survives the downscale. Move it down, never up.
+M_EYE_DIM = make_material("KnightEyeWash", (0.005, 0.008, 0.028, 1.0), 0.0, 0.7,
+                          emission=(0.015, 0.130, 1.0, 1.0), emission_strength=0.13)
 M_PAGE    = make_material("TomePage",      (0.620, 0.585, 0.495, 1.0), 0.0, 0.820)
 M_PAGEGLOW= make_material("TomeGlow",      (1.0, 0.22, 0.09, 1.0), 0.0, 0.5,
                           emission=(1.0, 0.24, 0.08, 1.0), emission_strength=5.0)
@@ -1826,17 +1911,47 @@ def build_helmet():
     # overhangs the slot, so deeply recessed eyes are shaded out at exactly the
     # angle the player actually sees - and they are his strongest identifier.
     # Angular SLITS, not ellipsoids. A soft round glow reads as a cartoon eye
-    # however red it is; a hard-edged wedge canted down toward the nasal gap
+    # however blue it is; a hard-edged wedge canted down toward the nasal gap
     # reads as a scowl. The Y-rotation drops each slit's inner end.
     for side, tag in ((-1, "R"), (1, "L")):
         # A tapered, faceted WEDGE - deep at the nose end, drawn to a point
         # outboard. A flat box reads as a rectangle painted on the visor, which
         # is why the eyes looked like stickers rather than something burning.
+        #
+        # SIZED FOR THE DOWNSCALE, and area is the ONLY honest lever left for
+        # that. Emission strength washes the blue out (see M_EYE) and so does
+        # greening the hue, so the way to put more blue through a 184 px
+        # downscale is more pixels at the SAME deep saturation. Grown ~28% in
+        # projected area: +8% along the axis, +18% across it.
+        #
+        # dx runs along the slit's own canted axis, POSITIVE INBOARD - so
+        # +0.032 is the blunt nasal end and negative dx is the outboard point.
+        # Three things bound this table, and all three are load-bearing:
+        #
+        #   1. THE NASAL END NEVER MOVES. The slits reach further inboard
+        #      (~22 mm from the centreline) than the wash pockets do (~26 mm,
+        #      set by HALO_T0), so it is the SLITS that bound the dark bar over
+        #      the nasal stem - the bar that makes these read as two eyes and
+        #      not one band at icon size. Growth goes outboard only. Anything
+        #      added at +dx is spent closing that gap.
+        #   2. The outboard tip stops just short of the wash pocket, which
+        #      reaches 40 mm along the same axis. At 37 mm the slit still sits
+        #      inside its own halo, so the halo keeps framing it.
+        #   3. The 30 deg cant means length also buys HEIGHT: every mm outboard
+        #      lifts the tip 0.5 mm toward the top of the aperture, which sits
+        #      only 28 mm above EYE_Z (Cut_EyeSlot is scale/2). At 37 mm the tip
+        #      crests ~1.848 against a 1.852 ceiling. That 4 mm is the whole
+        #      remaining budget - this is why the axis cannot simply be grown
+        #      further, and why the rest of the area had to come from height.
+        #
+        # Heights stay proportioned so it remains a tapered SLIT: still ~3:1
+        # long to tall, still blunt-nose-to-outboard-point, still hard-edged and
+        # faceted. It must not become a lozenge.
         rings = []
-        for (dx, hw, hh) in ((0.032, 0.0032, 0.0072),
-                             (0.013, 0.0050, 0.0098),
-                             (-0.011, 0.0042, 0.0072),
-                             (-0.032, 0.0008, 0.0012)):
+        for (dx, hw, hh) in ((0.032, 0.0035, 0.0084),
+                             (0.013, 0.0055, 0.0116),
+                             (-0.011, 0.0046, 0.0086),
+                             (-0.037, 0.0009, 0.0013)):
             rings.append([Vector((dx * -side,
                                   hw * sin(2 * pi * k / 8),
                                   hh * cos(2 * pi * k / 8))) for k in range(8)])
@@ -1844,14 +1959,179 @@ def build_helmet():
                  cap_start=True, cap_end=True, smooth=False)
         e.location = Vector((side * 0.050, HELM_CY - 0.138, EYE_Z + 0.004))
         e.rotation_euler = (0, radians(-30 * side), 0)
-        # White-hot core at the deep end, so the glow has a centre.
+        # The hot HEART of the slit, at its deep nasal end - not a bead stuck on
+        # the eye, which is what it had become. Two things made it read as a
+        # discrete dot with its own edge rather than as a graded centre:
+        #
+        #   - it was placed in hand-picked WORLD coordinates while the slit runs
+        #     along its own axis canted 30 deg, so it sat ~3 mm ABOVE that axis,
+        #     off-centre in the wedge. It is now derived by transforming a
+        #     station on the SLIT'S OWN axis (cdx) through the same rotation and
+        #     offset the slit itself uses, so it cannot drift off centre again.
+        #   - it stood 2.4 mm proud of the slit's face on a 5.5 mm radius, so
+        #     nearly half the ball was outside the wedge, presenting a full round
+        #     silhouette. Smaller (4.8 mm) and pushed back until only ~1.3 mm
+        #     emerges: the sphere now breaks the slit's surface almost
+        #     tangentially, so the patch fades into the slit at its rim instead
+        #     of ending on a hard round edge, and it cannot bulge the wedge out
+        #     of shape. The slit stays an angular wedge with a hot heart in it.
+        #
+        # The remaining step across that rim is a BRIGHTNESS step in one hue
+        # (blue 1.2 vs 0.9) rather than a colour step, which is what turns it
+        # from a foreign dot into the bright centre of the same flame.
+        cdx, ca = 0.016 * -side, radians(-30 * side)
         add_gem("Eye_Core_%s" % tag,
-                Vector((side * 0.036, HELM_CY - 0.140, EYE_Z - 0.001)),
-                0.0055, 1, mat=M_EYE_CORE)
-    # A much dimmer wash further back in the skull so the slot has depth behind
-    # the pupils instead of going flat black either side of them.
-    add_sphere("Eye_InnerGlow", (0.0, HELM_CY - 0.052, EYE_Z + 0.002), 1.0,
-               scale=(0.072, 0.030, 0.018), mat=M_EYE_DIM, u=16, v=10)
+                Vector((side * 0.050 + cdx * cos(ca),
+                        HELM_CY - 0.1396,
+                        EYE_Z + 0.004 - cdx * sin(ca))),
+                0.0048, 1, mat=M_EYE_CORE)
+    # The wash: a dim blue HALO around each slit, so that at icon size the eyes
+    # are two blue-lit pockets in a black slot instead of one black smudge.
+    #
+    # WHY IT EXISTS. Two 65 mm slits are far too little area to survive being
+    # downscaled to a 184 px icon - the whole aperture averaged out to one
+    # undifferentiated dark mark and the eyes, his strongest identifier,
+    # contributed nothing at that size. The lever is AREA, not brightness:
+    # every attempt to fix this with emission strength makes the blue PALER
+    # (see the note on M_EYE), so the glow is instead given somewhere large
+    # enough to register a few pixels of blue.
+    #
+    # Its predecessor was an ellipsoid at y = HELM_CY - 0.052, which was
+    # entirely INSIDE Helmet_Void and therefore invisible in every render ever
+    # made of this model. It was dead geometry; this replaces it.
+    #
+    # DO NOT LINE THE WHOLE CROSSBAR. That was tried and rejected: a single
+    # lens spanning the full width of the eye slot makes the knight read as
+    # wearing TINTED VISOR GLASS - a filled, glazed slot rather than a hollow
+    # helmet with something burning inside it - and it flattens the contrast
+    # the slits need, so the eyes become a visor. Dimming a full-width panel
+    # does not rescue it; a dim panel is still a panel. The extent is the
+    # thing that matters. Each halo is therefore only ~15% longer than its own
+    # slit and dies out well before the outboard ends of the crossbar, leaving
+    # ~35 mm of black at each end, ~53 mm between the two pockets (see HALO_T0),
+    # and the whole nasal stem of the T untouched. Black slot, two lit pockets,
+    # hard slits burning at their centres.
+    #
+    # THE CONSTRAINT that shapes it. Helmet_Void's front surface crowds forward
+    # toward the centre of the face (y = -0.153 at x = 0, falling away to
+    # -0.104 by x = 0.10), and the slits sit at a flat y = -0.144. So their
+    # inboard ends are already slightly buried in the void, and anything laid
+    # in front of the void eats more of them. Hence the 1 mm stand-off, and
+    # hence following the void's own curvature rather than being a flat patch:
+    # it keeps the burial to about a millimetre, and the pocket falls away with
+    # the skull so it reads as a hollow rather than as paint on the visor.
+    #
+    # Each halo is built on the slit's OWN axis - the slits are canted 30 deg,
+    # inboard end low - so the pocket sits square around the slit instead of
+    # boxing it off-angle. Its OUTLINE now follows the slit as well as its axis
+    # does. It used to be an even ellipse - widest at the middle, tapering
+    # equally to both ends. An even ellipse is a lozenge, a lozenge has no
+    # corners, and with no corners there is nothing in the halo for the eye to
+    # read a cant off: the pocket sat behind the slit as a soft symmetric blob
+    # and FOUGHT the scowl the canted wedge was drawing. The outline is now the
+    # slit's own wedge scaled up - blunt and tall at the nasal end, widest just
+    # inboard of centre where the slit itself is widest, then falling away in
+    # straight segments to a point outboard. The straight segments are half the
+    # point: they give the halo hard corners, so it reads as light spilling out
+    # around an angular slit rather than as a soft round eye behind one.
+    #
+    # TWO EYES, NOT ONE BAND - what HALO_T0 is for. At full resolution the two
+    # pockets are obviously separate, and at 184 px they were not: they merged
+    # into a single continuous blue swash running under the brow, which reads as
+    # a blue eyebrow rather than as a pair of eyes. Measured against the old red
+    # build, which got this right, the difference is entirely in the few pixels
+    # over the NASAL STEM of the T. Red had three genuinely black pixels there;
+    # blue had one dim navy one, because the halo's nasal tail reached 11 mm from
+    # the centreline - 8 mm further inboard than the slit it is supposed to be
+    # haloing (the slit's own inboard extreme is 18.7 mm). Those 8 mm are what
+    # closed the gap. The two-eye read is what makes him a FACE at icon size, and
+    # it is worth more than the area the tail contributed, so the tail goes.
+    #
+    # The tail is removed by trimming the pocket along its own axis from the
+    # NASAL end only, never from the outboard end - the ~35 mm of black at each
+    # end of the crossbar is load-bearing and must not be eaten. Note that the
+    # shape parameter u still runs the full -1..1 while only the axis parameter t
+    # is trimmed: the accepted angular outline is therefore reproduced in full,
+    # compressed along its axis, rather than being cut off partway. Cutting it
+    # off would leave the blunt wall at whatever width the profile happened to
+    # have there - near its widest - and would both destroy the wedge and hand
+    # back most of the separation the trim just bought.
+    #
+    # Built as closed shells (front skin + a back skin buried inside the void)
+    # rather than open sheets with a Solidify: the audit counts boundary edges,
+    # and an open sheet would add a fresh "open meshes" failure. The name has
+    # to keep the Eye_InnerGlow prefix - that is what puts it in the audit's
+    # FLOATERS_OK list, since a glow is allowed to hang in the air.
+    VA, VB, VC = 0.139, 0.150, 0.172        # Helmet_Void's radii
+    VZ = 1.790                              # ...and its centre height
+    PROUD = 0.0010                          # stand-off from the void surface
+    THICK = 0.0050                          # shell depth, all of it hidden behind
+    HALO_L = 0.040                          # half-length, along the slit's axis
+    HALO_W = 0.016                          # half-width across it, at its widest
+    # Where the pocket's NASAL end sits on that axis, in the same -1..+1 units.
+    # -1.0 is the untrimmed length; every step toward 0 pulls the nasal end
+    # outboard and widens the black bar over the nasal stem. At -0.55 the pocket
+    # stops 26 mm from the centreline instead of 11 mm, so the two pockets are
+    # ~53 mm apart instead of ~22 mm - three or four solid dark pixels once the
+    # render is downscaled to 184 px, which is what separates the two eye marks.
+    # Costs ~22% of the halo's length; the outboard tip does not move.
+    HALO_T0 = -0.55
+    NT, NW = 15, 7
+    CANT = radians(30.0)     # must match the slits' own Y-rotation, set above
+
+    # Half-width across the pocket's axis, as a fraction of HALO_W, sampled
+    # ALONG that axis: t = -1 is the nasal (deep) end, t = +1 the outboard tip.
+    # Deliberately ASYMMETRIC and piecewise-LINEAR, mirroring the slit's own
+    # ring table a few lines up (half-heights 0.0072 / 0.0098 / 0.0072 / 0.0012,
+    # nose to tip). Breakpoints sit on exact NT sample positions so the corners
+    # stay crisp rather than being rounded off by the sampling. The outboard
+    # value is small but never zero - a ring of zero width collapses the last
+    # few quads of the loft into degenerate faces.
+    HALO_PROFILE = [(-1.000, 0.56),   # nasal end - blunt, the deep end of the wedge
+                    (-0.714, 0.99),
+                    (-0.286, 1.00),   # widest just inboard of centre, as the slit is
+                    (0.286, 0.63),
+                    (0.714, 0.29),
+                    (1.000, 0.09)]    # outboard - drawn to a point, not a round cap
+
+    def _wash_half_width(t):
+        """Fraction of HALO_W at position t along the pocket's axis."""
+        for (t0, f0), (t1, f1) in zip(HALO_PROFILE, HALO_PROFILE[1:]):
+            if t0 <= t <= t1:
+                return lerp(f0, f1, (t - t0) / (t1 - t0))
+        return HALO_PROFILE[-1][1]
+
+    def _wash_y(x, z, back):
+        k = 1.0 - (x / VA) ** 2 - ((z - VZ) / VC) ** 2
+        depth = VB * math.sqrt(max(0.0, k))
+        return HELM_CY - depth + (THICK - PROUD if back else -PROUD)
+
+    for side, tag in ((-1, "R"), (1, "L")):
+        cx, cz = side * 0.050, EYE_Z + 0.004     # the slit's own centre
+        # Derived from CANT rather than written as 0.866 / 0.5, so the pocket
+        # provably shares the slits' angle instead of merely happening to.
+        ax, az = side * cos(CANT), sin(CANT)     # along it, outboard and up
+        px, pz = -side * sin(CANT), cos(CANT)    # across it
+        rings = []
+        for i in range(NW):
+            w = lerp(-1.0, 1.0, i / (NW - 1.0))
+            front, back = [], []
+            for j in range(NT):
+                f = j / (NT - 1.0)
+                # Two parameters, deliberately: u picks the OUTLINE (always the
+                # full accepted wedge, so its corners keep landing on exact
+                # sample positions), t picks the POSITION along the axis (trimmed
+                # at the nasal end by HALO_T0). Same shape, shorter reach inboard.
+                u = lerp(-1.0, 1.0, f)
+                t = lerp(HALO_T0, 1.0, f)
+                hw = HALO_W * _wash_half_width(u)
+                x = cx + ax * HALO_L * t + px * hw * w
+                z = cz + az * HALO_L * t + pz * hw * w
+                front.append(Vector((x, _wash_y(x, z, False), z)))
+                back.append(Vector((x, _wash_y(x, z, True), z)))
+            rings.append(front + back[::-1])
+        loft("Eye_InnerGlow_%s" % tag, rings, mat=M_EYE_DIM, closed=True,
+             cap_start=True, cap_end=True)
 
     build_helmet_trim()
 
@@ -2537,6 +2817,12 @@ def build_knight():
     add_empty("Attach_Ground", (0.0, 0.0, 0.0), size=0.25)
 
 
+# Radius of the rig ground disc, in metres. Was a bare 16.0 inside the rig builder,
+# which made it an implicit free parameter. It is a gene now, and above the hook so a
+# variant can sweep it. Enlarged 16 -> 60: at 16 m the rim entered frame as a hard
+# horizontal edge from most orbit bearings, which the two front cameras never showed.
+GROUND_R = 60.0
+
 # --- variant hook -------------------------------------------------------------
 # A runner (_tools/preview.py) pre-seeds VARIANT in this namespace before
 # exec'ing the file. Entries are applied after every default above is set and
@@ -2610,7 +2896,7 @@ def build_rig():
     # the aura ring, grounds the sabatons with a contact shadow, and gives the
     # cape something to reflect into.
     floor_mat = make_material("RigFloor", (0.020, 0.024, 0.034, 1.0), 0.0, 0.42)
-    add_cyl("Ground", (0.0, 0.0, -0.004), 16.0, 16.0, 0.008,
+    add_cyl("Ground", (0.0, 0.0, -0.004), GROUND_R, GROUND_R, 0.008,
             mat=floor_mat, segs=64, coll=COL_RIG)
 
     cam_data = bpy.data.cameras.new("Cam")
@@ -2683,14 +2969,77 @@ def add_glare():
         print("glare setup skipped:", exc)
 
 
+def set_rig_yaw(deg):
+    """Rotate the whole light rig about world Z, in degrees. No-op when unset.
+
+    The orbit stimulus needs lighting to follow each camera bearing, or a back bearing
+    renders an unlit silhouette and the comparison becomes about lighting rather than
+    the model. The rig is rotated as a unit so its tuned key/fill/rim relationship
+    survives; only the raking direction changes.
+    """
+    if deg is None:
+        return
+    a = math.radians(deg)
+    ca, sa = math.cos(a), math.sin(a)
+    for ob in COL_RIG.objects:
+        if ob.type != 'LIGHT':
+            continue
+        if "_rig0" not in ob:
+            # Remember the authored pose once, so repeated yaws compose from the
+            # original instead of accumulating drift across a multi-cell render.
+            ob["_rig0"] = list(ob.location)
+            ob["_rot0"] = list(ob.rotation_euler)
+        x0, y0, z0 = ob["_rig0"]
+        ob.location = (x0 * ca - y0 * sa, x0 * sa + y0 * ca, z0)
+        r0 = ob["_rot0"]
+        ob.rotation_euler = (r0[0], r0[1], r0[2] + a)
+
+
+def render_mask(name, cam_loc, target, res, lens):
+    """Write `<name>_mask.png`: a cheap RGBA silhouette of the figure alone.
+
+    The corner-estimated mask measure.py used to derive is only valid on an empty
+    backdrop, and this rig stands the model on a ground disc with film_transparent off,
+    so the floor counted as figure. Hiding the ground changes bounce light, so this pass
+    supplies a BOOLEAN GEOMETRIC MASK only - never photometry, which is still measured
+    inside this mask on the real, ground-lit image.
+    """
+    r = SCENE.render
+    ground = bpy.data.objects.get("Ground")
+    prev = (r.film_transparent, r.image_settings.color_mode,
+            r.resolution_x, r.resolution_y, r.filepath,
+            getattr(SCENE.eevee, "taa_render_samples", None),
+            ground.hide_render if ground else None)
+    try:
+        if ground:
+            ground.hide_render = True
+        r.film_transparent = True
+        r.image_settings.color_mode = 'RGBA'
+        r.resolution_x, r.resolution_y = max(64, res[0] // 4), max(64, res[1] // 4)
+        if hasattr(SCENE.eevee, "taa_render_samples"):
+            SCENE.eevee.taa_render_samples = 8
+        r.filepath = os.path.join(RENDER_DIR, name + "_mask.png")
+        bpy.ops.render.render(write_still=True)
+    finally:
+        # Restore unconditionally: a half-restored scene renders every later view
+        # transparent, which would cost a whole wave.
+        if ground:
+            ground.hide_render = prev[6]
+        (r.film_transparent, r.image_settings.color_mode,
+         r.resolution_x, r.resolution_y, r.filepath) = prev[:5]
+        if prev[5] is not None and hasattr(SCENE.eevee, "taa_render_samples"):
+            SCENE.eevee.taa_render_samples = prev[5]
+
+
 def render_view(name, cam_loc, target=(0, 0, 1.05), res=(900, 1250), lens=62,
-                samples=None):
+                samples=None, rig_yaw=None, mask=False):
     # A preview run renders a cheap subset rather than all ten views. RENDER_ONLY
     # unset (the normal case) means "render everything", so a plain
     # `blender -b -P blender_knight000.py -- render` is unaffected.
     only = globals().get("RENDER_ONLY")
     if only is not None and name not in only:
         return
+    set_rig_yaw(rig_yaw)
     cam = SCENE.camera
     cam.location = cam_loc
     cam.rotation_euler = look_at_euler(cam_loc, target)
@@ -2709,6 +3058,10 @@ def render_view(name, cam_loc, target=(0, 0, 1.05), res=(900, 1250), lens=62,
     SCENE.render.filepath = os.path.join(RENDER_DIR, name + ".png")
     bpy.ops.render.render(write_still=True)
     print("rendered", SCENE.render.filepath)
+    # Optional companion silhouette. Rendered AFTER the real image so a failure here
+    # cannot cost the view itself.
+    if mask:
+        render_mask(name, cam_loc, target, res, lens)
 
 
 
@@ -3275,6 +3628,18 @@ if DO_RENDER:
                 res=(184, 184), lens=62)
     render_view("icon_full_184", (-2.95, -3.70, 1.65), target=(0, 0, 1.10),
                 res=(184, 184), lens=48)
+
+    # ORBIT CELLS - the judged stimulus, generated by _tools/orbit.py from a per-wave
+    # seed and delivered through the variant hook as EXTRA_VIEWS. Additive: a plain CLI
+    # run renders nothing extra and every named view above is untouched.
+    for _spec in (globals().get("EXTRA_VIEWS") or []):
+        render_view(_spec["name"], tuple(_spec["cam_loc"]),
+                    target=tuple(_spec.get("target", (0, 0, 1.05))),
+                    res=tuple(_spec.get("res", (900, 1250))),
+                    lens=_spec.get("lens", 62),
+                    samples=_spec.get("samples"),
+                    rig_yaw=_spec.get("rig_yaw"),
+                    mask=_spec.get("mask", True))
 
 if DO_EXPORT:
     export_fbx(ARMATURE)
