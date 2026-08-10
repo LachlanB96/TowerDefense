@@ -27,7 +27,8 @@ d26 is how we learned the narrower skirt was worth having.
 ---
 
     INV-1  He carries his own weight.
-      check      torso apex within 40 mm of hip centre in the ground plane
+      check      apex-over-base offset, MEASURED AS A CHANGE FROM THE INCUMBENT,
+                 within 0.04 of figure height  (_tools/chips.py)
       broken-by  d26 (panel 204/300, reverted by the user 2026-08-02)
       why        "We dont want to give the character this weak stature, and the
                  physics of the lean is wrong."  Two independent designers reached
@@ -35,7 +36,7 @@ d26 is how we learned the narrower skirt was worth having.
                  character violation regardless.
 
     INV-2  The staff is a straight line and so is he.
-      check      spine axis within 3 degrees of the up axis
+      check      silhouette axis, AS A CHANGE FROM THE INCUMBENT, within 3 degrees
       broken-by  d17 (superseded by d26; same failure, earlier)
 
     INV-3  The gem is the brightest thing on him.
@@ -62,6 +63,27 @@ d26 is how we learned the narrower skirt was worth having.
                  rendered size is unknown and may change drastically.
 
 ---
+
+## Known limit of the current checks — found by running them, 2026-08-10
+
+**INV-1 and INV-2 are measured relative to the incumbent, not absolutely, and that is
+a workaround rather than the right answer.**
+
+Measured absolutely from a silhouette they fired on the *accepted champion*: 21° of
+lean and 0.385 of figure height in the `orb3` cell. The model is not leaning. The
+silhouette includes the **staff, held out to one side**, so from a high bearing the
+topmost region of the outline is the gem rather than his head — and "apex offset from
+the feet" then reports a held prop as a lean.
+
+Taking the delta against the incumbent cancels the prop, because the prop is in both
+images, and it matches how every other decision here is made. But it means these two
+invariants can only catch a change, never an inherited violation: if a lean ever landed,
+subsequent candidates would measure clean against it.
+
+**The real fix is a 3D measurement out of the build** — the spine axis and the mass
+distribution are properties of the geometry, not of a picture, and the asset script
+could emit them as a small JSON beside the render. Recorded here rather than faked in
+the checker.
 
 ## Open — the user has not ruled on these
 

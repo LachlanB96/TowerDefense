@@ -105,6 +105,38 @@ aspirational. `axis.py` is not written yet; until it is, expand the row by hand.
 
 ---
 
+## Running a wave — two commands
+
+```bash
+# 1. expand the row and draw the wave's viewing condition
+python Assets/Blender/_tools/axis.py <asset> row.json --seed <n> --out wave.json
+
+# 2. render, sheet and chip, in one pass
+python Assets/Blender/_tools/preview.py <asset> --variants wave.json \
+       --views orb0,orb1,orb2,orb3,orb4,orb5 --samples 0.3 --tag <who>
+```
+
+**Do not pass `--seed` to `preview.py`.** The draw travels inside `wave.json`; passing
+it again is a second chance to typo it, and a typo there produces a manifest claiming a
+stimulus the images were never rendered under — silently, permanently, since the seed is
+the only thing that makes a verdict replayable. `preview.py` refuses a `--seed` that
+disagrees with the wave file rather than picking one.
+
+Contact sheets and chips run automatically. Both used to be separate manual commands and
+both were skipped on the first real run: an unrun chip is indistinguishable from a clean
+one.
+
+Measured cost: 4 cells × 6 orbit views ≈ 36 s wall under the 2-slot cap at `--samples 0.35`.
+
+### Naming a gene you are not sure of
+
+```bash
+python Assets/Blender/_tools/genes.py <asset> --find BRIM    # list candidates
+```
+
+A refusal now suggests near-matches. Do not route around a refusal by hand-writing a
+`patch` — that bypasses the check entirely, which is the cheap wrong move under pressure.
+
 ## The judged stimulus
 
 `_tools/orbit.py` draws the viewing condition from a seed:
@@ -186,11 +218,39 @@ language ("in the `front` view"). Test the frame too.
 **Regenerated per session, never appended.** Capped. A grow-only file inlined into every
 brief is the largest recurring cost this project has measured.
 
-## Invariants
+## Invariants and chips
 
 `Assets/Blender/_chars/<asset>.invariants.md` — who the character is, as chips that
 block automatic promotion and never disqualify before rendering. Read it; do not extend
 it without the user. Vetoes go to `rulings.jsonl`, never into that file.
+
+`_tools/chips.py` runs automatically and measures against the **in-wave baseline**, not
+against an absolute. Two chips worth understanding:
+
+- **`inert`** — the candidate's silhouette IoU against the baseline stays above 0.995 in
+  every view, so it barely reached the outline. Expected for a surface or colour change;
+  if the row meant to alter the shape, it did not. This is the cheapest guard in the
+  system: an inert pair is exactly where a forced-choice judge confabulates a preference
+  out of render noise. **Found by running the loop** — a 2.3× sweep of `HAT_OVAL` moved
+  the outline by 0.001 across five builds and would have consumed five judge calls.
+- **`INV-1` / `INV-2`** (weight, lean) — measured as a *change* from the incumbent.
+  Absolutely they were wrong: the silhouette includes the staff held out to one side, so
+  from a high bearing the outline's top is the gem rather than his head, and the check
+  fired 21° of lean on the champion. The delta cancels the prop. The real fix is a 3D
+  measurement out of the build; that gap is recorded in the invariants file.
+
+## First-run findings, mage000
+
+The orbit's first wave produced two things the old two-camera rig could not have:
+
+1. **There is no aura.** Three independent judges, unprompted: *"there is no visible dark
+   aura at all, just shiny cloth."* The user's brief has been "more aura" for five passes.
+2. **The hat swallows the figure from every raised bearing** — *"the silhouette reads as a
+   mushroom rather than a robed figure"* — and the beard-against-void face, the design's
+   best idea, *"is only legible from the single straight-on front view."*
+
+Both are silhouette-and-proportion problems on the crown. Work there before adding
+anything new.
 
 ---
 

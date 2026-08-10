@@ -438,7 +438,8 @@ def build_variant(script, spec, out_dir, views, sample_scale, timeout):
 
 
 def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
-        jobs=MAX_JOBS, root=None, all_views=False, audit=False, tag=None, seed=None):
+        jobs=MAX_JOBS, root=None, all_views=False, audit=False, tag=None, seed=None,
+        wave=None, sheet=False, chips_vs=None):
     """Build every variant in parallel. Returns the completed manifest."""
     script, asset_name = resolve_asset(asset)
     # Before anything: no Blender launched, no run directory allocated, nothing
@@ -481,10 +482,20 @@ def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
         # stimulus the judgement was formed against.
         "tag": tag,
         "seed": seed,
+        # The full drawn condition, not just its seed, so a verdict can be replayed
+        # without re-deriving anything.
+        "wave": wave,
         "variants": [
             {
                 "n": i + 1,
                 "label": v.get("label", "v%d" % (i + 1)),
+                # Which clauses are ON in this cell. Without it, attributability - the
+                # entire reason axis.py exists - survives only as an English label.
+                "clauses": v.get("_clauses"),
+                # Always present, filled in later when a wave produced them. A field
+                # that appears only sometimes is one every reader has to guess about.
+                "sheet": None,
+                "chips": None,
                 "diff": diffs[i],
                 "renders": [],
                 "exit": None,          # null == still building
@@ -516,6 +527,43 @@ def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
             # Rewritten on every completion so the gallery fills in as it goes.
             write_manifest(run_dir, asset_base, manifest)
 
+    # Contact sheet per cell, and chips against the baseline cell.
+    #
+    # Both used to be separate manual invocations and both were skipped on the first
+    # real run of the loop. That is the whole argument for doing them here: an unrun
+    # chip is indistinguishable from a clean one, and handing a judge six loose PNGs
+    # instead of one sheet is exactly the mismatched-pair failure the sheet exists to
+    # prevent. Neither can fail the run - presentation and measurement must never cost
+    # a build that already succeeded.
+    if wave:
+        sys.path.insert(0, HERE)
+        try:
+            import orbit as _orbit
+            for v in manifest["variants"]:
+                vd = os.path.join(run_dir, "v%d" % v["n"])
+                if os.path.isdir(vd) and _orbit.sheet(vd, os.path.join(vd, "_sheet.png")):
+                    v["sheet"] = "v%d/_sheet.png" % v["n"]
+        except Exception as e:
+            print("  sheet: skipped (%s)" % e)
+        try:
+            import chips as _chips
+            # axis.py always emits the all-clauses-off cell first, so v1 is the
+            # in-wave baseline every other cell is measured against.
+            base_dir = os.path.join(run_dir, "v1")
+            base = _chips.measure(base_dir)
+            for v in manifest["variants"]:
+                vd = os.path.join(run_dir, "v%d" % v["n"])
+                if v["n"] == 1 or not os.path.isdir(vd):
+                    continue
+                meas = _chips.measure(vd)
+                if "error" not in meas:
+                    meas["_iou_vs_base"] = _chips.iou_vs(vd, base_dir)
+                v["chips"] = _chips.chips(meas, base)
+                for c in v["chips"]:
+                    print("  v%d [%s] %s" % (v["n"], c["chip"], c["detail"][:88]))
+        except Exception as e:
+            print("  chips: skipped (%s)" % e)
+
     if audit:
         # Run level, not per variant - see the schema note above.
         manifest["audit"] = run_audit(asset_name)
@@ -527,11 +575,22 @@ def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
 
 
 def load_variants(path):
+    """Read a variants file. Accepts a bare list, or axis.py's {wave, cells} envelope.
+
+    Returns (cells, wave). `wave` carries the orbit draw that produced the EXTRA_VIEWS
+    baked into the cells, so the seed no longer has to be re-typed on the command line -
+    which was a real hazard: a typo produced a manifest claiming one stimulus while the
+    images were rendered under another, silently, and the seed is the only thing that
+    makes a verdict replayable.
+    """
     with open(path, encoding="utf-8") as fh:
         data = json.load(fh)
+    if isinstance(data, dict) and "cells" in data:
+        return data["cells"], data.get("wave")
     if not isinstance(data, list):
-        raise SystemExit("%s must contain a JSON list of variant objects." % path)
-    return data
+        raise SystemExit("%s must contain a JSON list of variant objects, or an "
+                         "axis.py {wave, cells} object." % path)
+    return data, None
 
 
 def main():
@@ -559,9 +618,22 @@ def main():
     if not os.path.exists(BLENDER):
         raise SystemExit("Blender not found at %s (set GLOOMFELL_BLENDER)" % BLENDER)
 
+    cells, wave = load_variants(a.variants) if a.variants else (None, None)
+    seed = a.seed
+    if wave:
+        # The wave file is authoritative: it is what the images were actually rendered
+        # under. A --seed that disagrees is a typo, and a typo here is unrecoverable
+        # after the fact, so refuse rather than pick one.
+        if seed is not None and seed != wave.get("seed"):
+            raise SystemExit(
+                "--seed %s disagrees with the wave file's seed %s. The wave file is what "
+                "the cells were built from; drop --seed, or regenerate the wave."
+                % (seed, wave.get("seed")))
+        seed = wave.get("seed")
+
     manifest = run(
         asset=a.asset,
-        variants=load_variants(a.variants) if a.variants else None,
+        variants=cells,
         views=a.views.split(",") if a.views else None,
         all_views=a.all_views,
         sample_scale=a.samples,
@@ -569,7 +641,8 @@ def main():
         audit=a.audit,
         root=os.path.abspath(a.root) if a.root else None,
         tag=a.tag,
-        seed=a.seed,
+        seed=seed,
+        wave=wave,
     )
     failed = [v for v in manifest["variants"] if v["exit"] != 0]
     return 1 if failed else 0

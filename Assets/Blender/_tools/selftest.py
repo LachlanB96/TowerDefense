@@ -269,9 +269,21 @@ def _read_json(path):
 # Sourced from index.html: card() reads n, label, diff, exit, stderr_tail,
 # renders and seconds; tick() reads asset, run, started, done and audit;
 # renderRun()/renderLive() read variants.
+# v3 additions, and why each is on the record rather than derived later:
+#   clauses - which clauses of a factored row are ON in this cell. Without it,
+#             attributability survives only as an English label, and "nobody could say
+#             which half failed" is the exact failure axis.py exists to prevent.
+#   sheet   - the contact sheet a judge was actually shown.
+#   chips   - measured invariant flags. An unrun chip is indistinguishable from a clean
+#             one, so their absence has to be visible.
+# Always present, may be null: a field that appears only sometimes is a field the
+# gallery has to guess about.
 GALLERY_VARIANT_FIELDS = {"n", "label", "diff", "renders", "exit", "seconds",
-                          "stderr_tail"}
-GALLERY_MANIFEST_FIELDS = {"asset", "run", "started", "done", "audit", "variants"}
+                          "stderr_tail", "clauses", "sheet", "chips"}
+# tag/seed/wave: who rendered this and under which drawn stimulus. Attribution used to
+# be self-reported and 405 of 407 runs on disk carry none.
+GALLERY_MANIFEST_FIELDS = {"asset", "run", "started", "done", "audit", "variants",
+                           "tag", "seed", "wave"}
 
 
 def _assert_gallery_contract(root, manifest):

@@ -38,6 +38,7 @@ whatever it likes. `check()` says so in its refusal message rather than dead-end
 
 import argparse
 import ast
+import difflib
 import json
 import os
 import sys
@@ -163,10 +164,16 @@ def check(gene_map, names):
     for name in names:
         g = gene_map["genes"].get(name)
         if g is None:
+            # Suggest real names. Observed cost of not doing this: a refused row forces a
+            # separate query against 182 tunables, and the cheap way out under pressure
+            # is a hand-written `patch`, which bypasses this check entirely.
+            near = difflib.get_close_matches(name, list(gene_map["genes"]), 5, 0.4)
             problems.append(
                 "%s: not in the gene map. Refusing rather than guessing - if this is a "
                 "real module-level tunable the parser missed it, and a sweep that "
-                "half-applies is worse than one that does not run." % name)
+                "half-applies is worse than one that does not run.%s"
+                % (name, ("  Did you mean: %s?" % ", ".join(near)) if near else
+                   "  Run `genes.py <asset> --find <substring>` to list candidates."))
             continue
         if g["derived_from"]:
             problems.append(
@@ -225,6 +232,7 @@ def main():
     ap.add_argument("asset", help="asset name (mage000) or a path to the script")
     ap.add_argument("--json", help="write the machine-readable map here")
     ap.add_argument("--check", help="comma-separated gene names to validate for sweeping")
+    ap.add_argument("--find", help="list genes whose name contains this substring")
     a = ap.parse_args()
 
     path = script_path(a.asset)
@@ -237,6 +245,18 @@ def main():
     if a.json:
         with open(a.json, "w", encoding="utf-8") as fh:   # utf-8: Windows defaults cp1252
             json.dump(m, fh, indent=2)
+
+    if a.find:
+        hits = [(g["line"], n, g) for n, g in m["genes"].items()
+                if a.find.lower() in n.lower()]
+        for line, n, g in sorted(hits):
+            flag = ("DERIVED" if g["derived_from"] else
+                    "FEEDER" if g["feeds"] else "free")
+            print("  line %-5d %-24s %-8s %-10s %s"
+                  % (line, n, flag, g["current"], g["range"] or ""))
+        if not hits:
+            print("  no gene name contains %r" % a.find)
+        return 0
 
     if a.check:
         ok, problems = check(m, [n.strip() for n in a.check.split(",") if n.strip()])
