@@ -439,7 +439,7 @@ def build_variant(script, spec, out_dir, views, sample_scale, timeout):
 
 def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
         jobs=MAX_JOBS, root=None, all_views=False, audit=False, tag=None, seed=None,
-        wave=None, sheet=False, chips_vs=None):
+        wave=None, design=None):
     """Build every variant in parallel. Returns the completed manifest."""
     script, asset_name = resolve_asset(asset)
     # Before anything: no Blender launched, no run directory allocated, nothing
@@ -482,6 +482,13 @@ def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
         # stimulus the judgement was formed against.
         "tag": tag,
         "seed": seed,
+        # Hash of the asset script this wave was built from. Cell 1 of a wave is the
+        # design's untouched baseline, so it reproduces the ORIGIN inside this wave's own
+        # draw - but only while the script itself is unchanged. When it changes, that
+        # equivalence quietly stops holding and the ratchet would compare two different
+        # models and call the difference progress. Recording the hash makes the moment
+        # detectable instead of silent.
+        "script_sha": _script_sha(script),
         # The full drawn condition, not just its seed, so a verdict can be replayed
         # without re-deriving anything.
         "wave": wave,
@@ -564,6 +571,18 @@ def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
         except Exception as e:
             print("  chips: skipped (%s)" % e)
 
+    # Open the durable record for this wave, from the manifest, before anything judges
+    # it. The first real run of the loop wrote no record at all; an attempt that dies
+    # before judging must still leave a line, or an abandoned wave is indistinguishable
+    # from one that never happened.
+    if wave and design:
+        try:
+            import record as _rec
+            _rec.open_attempt(asset_name, run_n, design, root=root)
+            print("  recorded: design %s" % design)
+        except Exception as e:
+            print("  record: skipped (%s)" % e)
+
     if audit:
         # Run level, not per variant - see the schema note above.
         manifest["audit"] = run_audit(asset_name)
@@ -572,6 +591,16 @@ def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
     manifest["done"] = True
     write_manifest(run_dir, asset_base, manifest)
     return manifest
+
+
+def _script_sha(path):
+    """Short sha256 of the asset script, or None if it cannot be read."""
+    import hashlib
+    try:
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()[:12]
+    except OSError:
+        return None
 
 
 def load_variants(path):
@@ -611,6 +640,7 @@ def main():
     ap.add_argument("--root", help="preview output root (default: the repo's _previews~)")
     ap.add_argument("--tag", help="who is rendering this; stamped into manifest.json "
                                   "so the run is attributable without self-reporting")
+    ap.add_argument("--design", help="design id; opens a record line for this wave")
     ap.add_argument("--seed", type=int, help="orbit stimulus seed; stamped into "
                                              "manifest.json so a verdict is replayable")
     a = ap.parse_args()
@@ -643,6 +673,7 @@ def main():
         tag=a.tag,
         seed=seed,
         wave=wave,
+        design=a.design,
     )
     failed = [v for v in manifest["variants"] if v["exit"] != 0]
     return 1 if failed else 0

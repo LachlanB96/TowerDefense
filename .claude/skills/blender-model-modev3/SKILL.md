@@ -105,15 +105,27 @@ aspirational. `axis.py` is not written yet; until it is, expand the row by hand.
 
 ---
 
-## Running a wave — two commands
+## The cycle, end to end
 
 ```bash
-# 1. expand the row and draw the wave's viewing condition
+# 1. expand the row and draw this wave's viewing condition
 python Assets/Blender/_tools/axis.py <asset> row.json --seed <n> --out wave.json
 
-# 2. render, sheet and chip, in one pass
+# 2. render, sheet, chip and record, in one pass
 python Assets/Blender/_tools/preview.py <asset> --variants wave.json \
-       --views orb0,orb1,orb2,orb3,orb4,orb5 --samples 0.3 --tag <who>
+       --views orb0,orb1,orb2,orb3,orb4,orb5 --samples 0.3 --tag <who> --design d01
+
+# 3. blind brief for one cell (repeat per cell; --incumbent RUN:CELL --vs origin
+#    for the ratchet comparison)
+python Assets/Blender/_tools/judge.py <asset> --run <N> --cell 3 \
+       --summary-file <asset>/summary.txt
+
+# 4. record what the judge answered, in PRESENTATION terms; the tool decodes it
+python Assets/Blender/_tools/judge.py <asset> --run <N> --cell 3 \
+       --answer B --margin 2 --suggestion "..." --judge j1
+
+# 5. what to do next
+python Assets/Blender/_tools/refine.py <asset> --design d01
 ```
 
 **Do not pass `--seed` to `preview.py`.** The draw travels inside `wave.json`; passing
@@ -168,14 +180,68 @@ and no margin, which made every claim about judging quality unfalsifiable.
 
 ### The judge
 
-Blind pairwise, candidate against champion. **PREFER + MARGIN 0–3.** No rubric, no
-checklist, no rules — it judges on its own taste, and it is given the character summary
-and nothing else. This scale is the one thing in the whole system with a passing
-calibration probe behind it; two absolute scales collapsed before it. **Do not regress
-it to scores, and do not add criteria to its brief.**
+Blind pairwise, candidate against champion. **PREFER + MARGIN 0–3**, then one sentence
+each of WORKS, PROBLEMS and **SUGGESTION**. No rubric, no checklist, no rules — it judges
+on its own taste, given the character summary and nothing else. This scale is the one
+thing in the system with a passing calibration probe behind it; two absolute scales
+collapsed before it. **Do not regress it to scores, and do not add criteria to its brief.**
 
-Flip A/B order per pair and record the flip. The judge **ranks and never promotes** —
-the user promotes.
+`judge.py` derives the A/B flip from `sha256(seed:cell)` and decodes the answer back to
+challenger/incumbent before recording, so A/B never reaches the record. A hand-flip that
+is done but not written down silently inverts the verdict.
+
+The judge **ranks and never promotes.** The user promotes.
+
+## The refinement loop — critique becomes the next build
+
+**This is the part the pipeline exists for.** A judge that produces a critique nobody
+consumes is an expensive way to generate prose.
+
+```bash
+python Assets/Blender/_tools/refine.py <asset> --design d01
+```
+
+It reads `attempts.jsonl` and returns a **policy** plus every suggestion verbatim:
+
+| Call | When | What you do |
+|---|---|---|
+| **refine** | still climbing, or oscillating but not stalled | same design, next attempt, carrying at most the top three points |
+| **redesign** | 3 attempts running have failed to beat the design's own best | keep what landed, open a NEW design |
+| **abandon** | vs-origin ≤ −2 after the grace window | the *idea* is wrong, not the execution. Stop spending renders on it |
+| **report** | attempt 8 | ask the user; a rule exists to stop a design running forever, not to kill one they still want |
+
+Those four thresholds are **guesses**, named as constants in `refine.py` so they can be
+argued with. Nothing has tuned them from outcomes yet.
+
+### The two margin series, and why there are two
+
+**`vs incumbent` decides acceptance. `vs origin` measures progress.** They are not the
+same number and confusing them is how a design walks in circles while every individual
+comparison looks like a win — each attempt is judged against a *moving* incumbent, so a
+run of +1s says only that each step beat the step before it.
+
+So **judge the best cell of each wave twice**: once against the champion (the accept
+decision) and once against the design's first baseline, which never moves. The second is
+the ratchet, and it is the only series `refine.py` reads when deciding policy.
+
+### Consuming the critique
+
+Synthesis is a language task and is yours, not a tool's — but three rules are not
+negotiable:
+
+1. **A point two or more judges raise outranks one only a single judge raises.**
+2. **Take at most three points.** v2 measured 6.8 mandatory blockers per attempt against
+   a brief that said *make one change*. That is incoherent and it is most of why designs
+   stalled. Everything else goes in the log, not in the build.
+3. **You may contest a point with a measurement.** Judges see images and cannot inspect
+   the model. Five modellers contested a unanimous instruction with data and all five
+   were right. Contest on a measurement, never on an opinion.
+
+**Why this lives here and not in an orchestrator.** v2 had this loop and v3's first draft
+deleted it along with the tier that happened to house it. That was a mistake: the fleet
+was bad because several agents edited one 3,216-line script at once and re-derived their
+world at every context boundary — *not* because critique was fed back. One maker consumes
+its own judges perfectly well, and needs no extra tier to do it.
 
 ---
 
