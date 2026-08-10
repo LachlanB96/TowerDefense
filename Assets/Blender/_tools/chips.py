@@ -152,6 +152,74 @@ def iou_vs(view_dir, base_dir):
     return out
 
 
+# Luma weights and the noise floor are measure.py's, deliberately: two "did this change"
+# numbers computed with different thresholds are not comparable, and silently mixing them
+# is how a metric stops meaning anything.
+LUMA = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+DIFF_L = 0.02             # |dL| above this is a real change; below it is EEVEE noise
+
+# Share of FIGURE pixels that must move beyond that floor for a pair to be judgeable at
+# all. Below this a forced-choice judge really is picking out of noise, which is the
+# failure the inert chip exists to prevent. Above it the judge can see something, whether
+# or not the outline moved.
+INERT_VISIBLE_PCT = 0.25
+
+
+def changed_vs(view_dir, base_dir, thresh=DIFF_L):
+    """Per-view share of figure pixels whose luma differs from the incumbent's.
+
+    WHY THIS EXISTS. The inert chip's own purpose is to avoid spending judges on a pair
+    "a forced-choice judge will confabulate a preference out of", but it was measured
+    ONLY as silhouette IoU - a shape measure, computed from the masks. A material,
+    colour or emission change moves no vertex, so it scores IoU 1.0000 and was flagged
+    inert no matter how plainly visible it was. Two real designs died on that: a beard
+    interior to the outline, and a tarnish design measured at 1.37% of figure pixels
+    shifted by up to 0.445 of local luma - which is not noise by any reading.
+
+    Silhouette IoU stays: it is still the honest "did the SHAPE change" measure. This
+    adds the missing half, "would a judge see anything at all", measured on the beauty
+    renders inside the figure mask rather than on the masks themselves.
+    """
+    def _mask_at(d, name, wh):
+        """The figure mask for one view, resized to the beauty render's resolution.
+
+        render_mask() writes masks at QUARTER resolution deliberately - a silhouette
+        needs no samples. So the mask never matches the beauty render's shape, and a
+        naive shape check silently skips every view and reports nothing changed. Nearest
+        neighbour, because this is a boolean region and must not be interpolated into
+        grey.
+        """
+        p = os.path.join(d, name + "_mask.png")
+        if not os.path.exists(p):
+            return None
+        im = Image.open(p)
+        if "A" not in im.getbands():
+            return None
+        a = im.getchannel("A")
+        if a.size != wh:
+            a = a.resize(wh, Image.NEAREST)
+        return np.asarray(a, dtype=np.float32) / 255.0 > MASK_A
+
+    out = {}
+    for k in sorted(set(masks_in(view_dir)) & set(masks_in(base_dir))):
+        pa = os.path.join(view_dir, k + ".png")
+        pb = os.path.join(base_dir, k + ".png")
+        if not (os.path.exists(pa) and os.path.exists(pb)):
+            continue
+        ia, ib = Image.open(pa).convert("RGB"), Image.open(pb).convert("RGB")
+        if ia.size != ib.size:
+            continue
+        A = np.asarray(ia, dtype=np.float32) / 255.0
+        B = np.asarray(ib, dtype=np.float32) / 255.0
+        fa, fb = _mask_at(view_dir, k, ia.size), _mask_at(base_dir, k, ib.size)
+        if fa is None or fb is None:
+            continue
+        fig = np.logical_or(fa, fb)
+        moved = (np.abs((B @ LUMA) - (A @ LUMA)) > thresh) & fig
+        out[k] = round(100.0 * float(moved.sum()) / max(1, int(fig.sum())), 3)
+    return out
+
+
 def measure(view_dir):
     """Per-view invariant measurements for one candidate."""
     masks = masks_in(view_dir)
@@ -228,15 +296,37 @@ def chips(meas, base=None):
         iou = meas.get("_iou_vs_base") or {}
         if iou:
             worst_shape = min(iou.values())
-            if worst_shape > INERT_IOU_MIN:
+            # A pair is inert only if it moved NEITHER the outline NOR the pixels. The
+            # shape test alone was wrong by construction for material, colour and
+            # emission designs: they move no vertex, score IoU 1.0000, and were bounced
+            # before any judge saw them however visible they were. See changed_vs().
+            vis = meas.get("_changed_vs_base") or {}
+            most_visible = max(vis.values()) if vis else None
+            if worst_shape > INERT_IOU_MIN and (most_visible is None
+                                                or most_visible <= INERT_VISIBLE_PCT):
+                seen = ("" if most_visible is None else
+                        ", and only %.2f%% of figure pixels move beyond the noise floor"
+                        % most_visible)
                 out.append({"chip": "inert",
                             "detail": "silhouette IoU against the incumbent is %.4f at "
-                                      "worst across %d views - this change barely "
+                                      "worst across %d views%s - this change barely "
                                       "reaches the outline. Expected for a surface or "
                                       "colour change; if it was meant to alter the "
                                       "shape, it did not."
-                                      % (worst_shape, len(iou)),
+                                      % (worst_shape, len(iou), seen),
                             "blocks_auto": True})
+            elif worst_shape > INERT_IOU_MIN:
+                # Visible but shape-neutral. Say so explicitly rather than staying
+                # silent: the panel should know the outline did not move, and the
+                # shepherd must NOT bounce this as inert.
+                out.append({"chip": "surface-only",
+                            "detail": "the outline is unchanged (worst silhouette IoU "
+                                      "%.4f) but %.2f%% of figure pixels move beyond "
+                                      "the noise floor at worst - a material, colour or "
+                                      "emission change. Judgeable: do NOT bounce as "
+                                      "inert."
+                                      % (worst_shape, most_visible),
+                            "blocks_auto": False})
 
     if not base or "views" not in base:
         out.append({"chip": "no-baseline",
@@ -281,6 +371,9 @@ def main():
     base = measure(a.baseline) if a.baseline else None
     if a.baseline and "error" not in meas:
         meas["_iou_vs_base"] = iou_vs(a.view_dir, a.baseline)
+        # The other half of "is this pair judgeable": shape may be untouched while the
+        # pixels plainly moved. See changed_vs().
+        meas["_changed_vs_base"] = changed_vs(a.view_dir, a.baseline)
     got = chips(meas, base)
 
     packet = {"asset": a.asset, "dir": os.path.abspath(a.view_dir),
