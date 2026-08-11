@@ -36,6 +36,27 @@ BLENDER = os.environ.get(
     r"C:\Program Files\Blender Foundation\Blender 5.1\blender.exe",
 )
 
+# ESCAPE HATCH FOR THE OPENGL DRIVER FAULT. Unset by default, which leaves Blender on
+# its own default backend (OpenGL here). Set GLOOMFELL_GPU_BACKEND=vulkan to render
+# EEVEE through Vulkan instead - it does not load nvoglv64.dll at all, which is the DLL
+# that faulted on 2026-08-11 (EXCEPTION_ACCESS_VIOLATION, in Blender's own crash file).
+#
+# MEASURED before offering it, on this asset, same two orbit cells, warm:
+#   opengl  7.8-8.1 s      vulkan  14.2-14.4 s      -> Vulkan is ~1.8x slower
+#   pixels differ on 2.3% of the frame, max delta 24/255, mean |d| ~1.0
+#
+# That second line is why this is NOT the default: it is well above the 1-2/255
+# shader-rounding signature, so switching backends MOVES THE BASELINE. Every stored
+# champion and every past verdict was rendered under OpenGL, and a cross-backend
+# comparison measures the backend as well as the model. If you switch, re-render the
+# champion first and treat it as a new baseline era - the same discipline as a bake.
+#
+# Order of remedies, cheapest first: update the GPU driver (the fault is IN the driver,
+# and OpenGL on Windows ships as part of it - there is no separate GL package); then
+# RENDER_SLOTS=1, already the default below; then this.
+GPU_BACKEND = os.environ.get("GLOOMFELL_GPU_BACKEND", "").strip().lower()
+BACKEND_ARGS = ["--gpu-backend", GPU_BACKEND] if GPU_BACKEND in ("opengl", "vulkan") else []
+
 # What a comparison actually needs: a hero angle, a clean front, and the
 # legibility check. The full ten-view set is opt-in via --all-views.
 DEFAULT_VIEWS = ["hero_34", "front", "icon_184"]
@@ -441,7 +462,7 @@ def build_variant(script, spec, out_dir, views, sample_scale, timeout):
     try:
         with render_slot(timeout):
             proc = subprocess.run(
-                [BLENDER, "-b", "-P", BUILD_ONE, "--",
+                [BLENDER] + BACKEND_ARGS + ["-b", "-P", BUILD_ONE, "--",
                  "--script", script, "--variant", vpath, "--out", out_dir],
                 capture_output=True, text=True, timeout=timeout,
             )
