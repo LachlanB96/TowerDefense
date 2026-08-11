@@ -23,8 +23,15 @@ import json
 import os
 import sys
 
-import numpy as np
-from PIL import Image
+# MUST precede the numpy import - see the same block in chips.py. OpenBLAS sizes a
+# thread-buffer pool per process from the core count (36 here) and reads these only at
+# load time; a dozen concurrent tool processes exhausted its allocator with 10.8 GB of
+# RAM free. This work is per-frame means and masks, so BLAS threading buys nothing.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
+import numpy as np                                              # noqa: E402
+from PIL import Image                                           # noqa: E402
 
 DIFF_L = 0.02        # |dL| above this counts as a changed pixel (below is EEVEE noise)
 BG_TOL = 0.06        # distance from corner-estimated background that counts as figure

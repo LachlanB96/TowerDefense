@@ -35,8 +35,20 @@ import json
 import os
 import sys
 
-import numpy as np
-from PIL import Image
+# MUST precede the numpy import: OpenBLAS sizes a thread-buffer pool per process from
+# the CPU's core count, and reads these only at load time.
+#
+# Measured 2026-08-11: this machine has 36 logical processors, and with a dozen tool
+# processes alive at once OpenBLAS died with "Memory allocation still failed after 10
+# retries" while 10.8 GB of RAM sat free. It was never short of memory - it was short of
+# whatever backs 36 thread pools times a dozen processes. The arrays here are single
+# render frames and the work is means and boolean masks, so extra BLAS threads buy
+# nothing and cost a hard failure. setdefault, so an operator can still override.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
+import numpy as np                                              # noqa: E402
+from PIL import Image                                           # noqa: E402
 
 try:
     from scipy import ndimage
@@ -217,6 +229,65 @@ def changed_vs(view_dir, base_dir, thresh=DIFF_L):
         fig = np.logical_or(fa, fb)
         moved = (np.abs((B @ LUMA) - (A @ LUMA)) > thresh) & fig
         out[k] = round(100.0 * float(moved.sum()) / max(1, int(fig.sum())), 3)
+    return out
+
+
+# How far a cell's mean luma may sit from its own view-column's median before the frame
+# is called corrupt. CALIBRATED, not guessed: across four real waves - including
+# high-variation geometry ones - the worst LEGITIMATE deviation measured 1.7%
+# (run-020 1.4%, run-029 1.7%, run-036 0.1%, run-022 0.9%), while the two known-corrupt
+# frames measured 14% and 211%. 6% sits ~3.5x above the worst honest cell and ~2.3x
+# below the mildest corruption.
+FRAME_OUTLIER_PCT = 0.06
+
+
+def frame_integrity(run_dir, prefix="orb"):
+    """Find frames the GPU corrupted, without needing a reference build.
+
+    WHY THIS EXISTS. A driver fault does not always crash. Measured on run 37: cell v6
+    rendered, exited 0, and produced a plausible-looking `surface-only 95.72%` - but two
+    of its six frames were garbage, with figure mean luma 0.3495 against a column median
+    of 0.1123, roughly triple, from a clause that was a provable no-op. The loud failure
+    beside it (exit 11, EXCEPTION_ACCESS_VIOLATION) was already caught by preview.py. THIS
+    one is silent, renders, exits clean, yields a believable number, and is invisible to
+    every other instrument here - it was only caught because that cell happened to be an
+    exact duplicate of another and someone thought to cross-check.
+
+    The trick is that no reference build is needed. Every cell in a wave is the same model
+    under the same camera, differing only by its clauses, so each VIEW COLUMN is a tight
+    distribution - honest cells land within ~2% of their column median even when the
+    clauses change geometry substantially. A corrupt frame is a gross outlier against its
+    own column, so the wave validates itself.
+    """
+    cells = sorted((d for d in os.listdir(run_dir)
+                    if d.startswith("v") and os.path.isdir(os.path.join(run_dir, d))),
+                   key=lambda s: int(s[1:]) if s[1:].isdigit() else 0)
+    views = sorted({f[:-4] for c in cells for f in os.listdir(os.path.join(run_dir, c))
+                    if f.startswith(prefix) and f.endswith(".png")
+                    and not f.endswith("_mask.png")})
+    out = []
+    for v in views:
+        vals = {}
+        for c in cells:
+            p = os.path.join(run_dir, c, v + ".png")
+            if not os.path.exists(p):
+                continue
+            # Deliberately cheap: PIL's own luma, then an 8x box reduce, and no float
+            # matmul. A whole wave is 48 frames and the full-resolution RGB matmul
+            # exhausted BLAS's allocator. The mean of a box-reduced image is the mean of
+            # the original, and the weights only have to be CONSISTENT across cells for
+            # an outlier test - they are not compared to anything outside this function.
+            im = Image.open(p).convert("L")
+            im = im.reduce(8) if min(im.size) >= 8 else im
+            vals[c] = float(np.asarray(im, dtype=np.float32).mean()) / 255.0
+        if len(vals) < 3:            # too few to form a column median worth trusting
+            continue
+        med = float(np.median(list(vals.values())))
+        for c, x in sorted(vals.items()):
+            dev = abs(x - med) / max(med, 1e-6)
+            if dev > FRAME_OUTLIER_PCT:
+                out.append({"cell": c, "view": v, "mean": round(x, 4),
+                            "column_median": round(med, 4), "deviation": round(dev, 4)})
     return out
 
 

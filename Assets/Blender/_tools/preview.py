@@ -61,7 +61,26 @@ STDERR_TAIL_LINES = 20
 # throughput was never worth the risk of taking the desktop down.
 #
 # Set GLOOMFELL_RENDER_SLOTS=1 if it ever recurs, or 3+ on a machine with headroom.
-RENDER_SLOTS = int(os.environ.get("GLOOMFELL_RENDER_SLOTS", "2"))
+#
+# 2026-08-11: IT RECURRED, AND THE DEFAULT IS NOW 1. Blender's own crash report
+# (%TEMP%\blender.crash.txt) records EXCEPTION_ACCESS_VIOLATION in nvoglv64.dll - the
+# NVIDIA OpenGL driver - during a four-maker fleet run. Note Windows logged NOTHING:
+# no Application error, no TDR event, no driver reset. Blender catches the fault and
+# writes its own file, so the event log is not where this shows up. Look for
+# blender.crash.txt before concluding a wave died of anything else.
+#
+# The measurements say serialising is nearly free here, because concurrency was never
+# where the time went. Per cell on this rig: ~5.2 s Blender startup + model build,
+# ~6.9 s for the first render (shader compilation), then only ~1.3 s per extra
+# view+mask. A 6-view cell is ~18.7 s and an 8-cell wave ~150 s. Sample count barely
+# registers - x0.5 and x0.25 timed identically - so turning quality DOWN buys nothing
+# and costs fidelity. The GPU is not short of memory either: peak VRAM over idle is
+# ~200 MB against 16 GB, and peak host RSS is ~877 MB per Blender.
+#
+# So the trade is: one live GPU context instead of two, for roughly one extra minute
+# per wave, against a driver fault that takes the whole desktop with it. Raise it back
+# with GLOOMFELL_RENDER_SLOTS=2 on a machine that proves stable.
+RENDER_SLOTS = int(os.environ.get("GLOOMFELL_RENDER_SLOTS", "1"))
 
 
 @contextlib.contextmanager
@@ -634,6 +653,18 @@ def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
                 v["chips"] = _chips.chips(meas, base)
                 for c in v["chips"]:
                     print("  v%d [%s] %s" % (v["n"], c["chip"], c["detail"][:88]))
+
+            # Wave-level integrity. A driver fault does not always crash: it can render a
+            # garbage frame that exits 0 and yields a believable number. Every cell here
+            # is the same model under the same camera, so each view column is a tight
+            # distribution and a corrupt frame is a gross outlier against its own column.
+            # Loud on purpose - a silent corruption gets believed.
+            bad = _chips.frame_integrity(run_dir)
+            manifest["integrity"] = bad
+            for b in bad:
+                print("  !! CORRUPT FRAME %s/%s  mean %.4f vs column median %.4f (%.0f%% off)"
+                      % (b["cell"], b["view"], b["mean"], b["column_median"],
+                         100 * b["deviation"]))
         except Exception as e:
             print("  chips: skipped (%s)" % e)
 
