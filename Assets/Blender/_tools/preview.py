@@ -582,6 +582,8 @@ def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
         # models and call the difference progress. Recording the hash makes the moment
         # detectable instead of silent.
         "script_sha": _script_sha(script),
+        # What rendered it, not just what was rendered. See render_env().
+        "render_env": render_env(),
         # The full drawn condition, not just its seed, so a verdict can be replayed
         # without re-deriving anything.
         "wave": wave,
@@ -709,6 +711,43 @@ def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
     manifest["done"] = True
     write_manifest(run_dir, asset_base, manifest)
     return manifest
+
+
+_RENDER_ENV = None
+
+
+def render_env():
+    """Identify the thing that turned the script into pixels, not just the script.
+
+    A manifest already records `script_sha` and the orbit draw, so a verdict can be
+    replayed against the same code and the same cameras. That is not sufficient: the
+    RENDERER is an input too, and when it changes underneath a project every stored
+    champion silently belongs to an older era.
+
+    Measured 2026-08-11 on this asset: merely switching Blender's GPU backend from
+    OpenGL to Vulkan moved 2.3% of frame pixels by up to 24/255 - far above the 1-2/255
+    shader-compilation rounding that a real no-op produces. A driver update is the same
+    class of change to the same layer, so it can move the baseline the same way. Stamped
+    here so a cross-era comparison is DETECTABLE instead of being read as a design
+    difference, which is exactly the mistake the seed-replay rule exists to prevent.
+
+    Best-effort and cached: never fail a render over a missing nvidia-smi.
+    """
+    global _RENDER_ENV
+    if _RENDER_ENV is None:
+        drv = None
+        try:
+            p = subprocess.run(["nvidia-smi", "--query-gpu=driver_version,name",
+                                "--format=csv,noheader"],
+                               capture_output=True, text=True, timeout=15)
+            if p.returncode == 0 and p.stdout.strip():
+                drv = p.stdout.strip().splitlines()[0].strip()
+        except Exception:                                   # noqa: BLE001
+            pass
+        _RENDER_ENV = {"gpu": drv,
+                       "gpu_backend": GPU_BACKEND or "default",
+                       "blender": os.path.basename(os.path.dirname(BLENDER))}
+    return _RENDER_ENV
 
 
 def _script_sha(path):
