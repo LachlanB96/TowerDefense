@@ -411,6 +411,35 @@ section.zone > h2 {
 #d-chart .series-lbl { font: 10px/1 var(--mono); fill: var(--ink2); }
 
 /* ======================== LIVE (task T9) =============================== */
+#live-bar { position: sticky; top: calc(var(--bar-h) + 74px); z-index: 4;
+            display: flex; gap: var(--sp3); align-items: center; flex-wrap: wrap;
+            padding: var(--sp2) var(--sp3); background: var(--s1);
+            border: 1px solid var(--line); border-radius: var(--r2);
+            margin-bottom: var(--sp3); font-size: 12px; }
+#live-bar .togg { display: inline-flex; gap: 6px; align-items: center; color: var(--ink2);
+                  cursor: pointer; user-select: none; }
+#live-bar .exp { margin-left: auto; color: var(--ink3); font-size: 11px; }
+.lrun { border: 1px solid var(--line); border-radius: var(--r2); background: var(--s1);
+        margin-bottom: var(--sp2); overflow: hidden; }
+.lrun.unclaimed { opacity: .68; border-style: dashed; }
+.lrun .rhead { display: flex; gap: var(--sp3); align-items: baseline; flex-wrap: wrap;
+               padding: 6px var(--sp3); background: var(--s2);
+               border-bottom: 1px solid var(--line); font: 11px/1.5 var(--mono); }
+.lrun .rn { color: var(--accent); font-weight: 700; }
+.lrun .attr { color: var(--ok); font-weight: 600; }
+.lrun .untag { color: var(--ink3); font-style: italic; }
+.lrun .shots { display: flex; gap: var(--sp2); padding: var(--sp2) var(--sp3);
+               overflow-x: auto; }
+.lrun .shot { flex: 0 0 auto; text-align: center; }
+.lrun .shot img { height: 118px; width: auto; border-radius: var(--r1);
+                  background: #0b0c10; border: 1px solid var(--line); cursor: zoom-in; }
+.lrun .shot span { display: block; font: 10px/1.7 var(--mono); color: var(--ink3);
+                   max-width: 150px; overflow: hidden; text-overflow: ellipsis;
+                   white-space: nowrap; }
+#live-more { display: block; margin: var(--sp3) auto; padding: 8px 18px;
+             border: 1px solid var(--line); border-radius: var(--r2);
+             color: var(--accent); background: var(--s1); font-size: 12px; }
+
 /* ====================== COMPARE (task T10) ============================= */
 /* ======================= VIEWER (task T5) ============================== */
 dialog { border: none; background: transparent; padding: 0; }
@@ -600,6 +629,7 @@ function applyRoute() {
     S.champion = S.control = S.live = S.attempts = null;
     S.attemptsSig = null; S.compare = null; S.compareText = null;
     S.marks = new Map(); S.dirs = new Map(); S.seen = null;
+    S.liveCap = 20;
     S.sigs = {};
   }
   if (next.view !== was.view || next.tab !== was.tab) S.viewKind = null;  // rebuild scaffold
@@ -1608,11 +1638,105 @@ function renderDossier() {
   }
   body.appendChild(zone);
 }
+/* ============================= live tab ================================
+   The tap's raw feed, made legible: claimed runs carry their design/attempt
+   (joined from attempts.jsonl — the tap itself doesn't know), unclaimed runs
+   stay visible but dashed (rendered and never attributed is the thing this
+   feed exists to surface). Newest 20, Load more, never all 400+. */
+function liveFilters() {
+  try { return JSON.parse(lsGet('gf-live-filter') || '{}') || {}; } catch (e) { return {}; }
+}
+function setLiveFilter(k, v) {
+  const f = liveFilters(); f[k] = v;
+  lsSet('gf-live-filter', JSON.stringify(f));
+  S.sigs = {}; render();
+}
 function renderLive() {
-  const host = $('tab-live');
-  if (!sig('live-stub', 1)) return;
-  host.textContent = '';
-  host.appendChild(h('div', { class: 'card empty', text: 'live feed — task T9' }));
+  const R = S.route, host = $('tab-live');
+  const L = S.live;
+  if (!host.children.length) {
+    const f = liveFilters();
+    host.appendChild(h('div', { id: 'live-bar' },
+      h('span', { class: 'chip num', id: 'lb-total' }),
+      h('span', { class: 'chip num', id: 'lb-unclaimed' }),
+      h('span', { class: 'chip num', id: 'lb-stamp' }),
+      h('label', { class: 'togg' },
+        (() => { const c = h('input', { type: 'checkbox' });
+                 c.checked = !!f.claimed;
+                 c.addEventListener('change', () => setLiveFilter('claimed', c.checked));
+                 return c; })(),
+        'claimed only'),
+      h('label', { class: 'togg' },
+        (() => { const c = h('input', { type: 'checkbox' });
+                 c.checked = !!f.failures;
+                 c.addEventListener('change', () => setLiveFilter('failures', c.checked));
+                 return c; })(),
+        'failures only'),
+      h('span', { class: 'exp', text: 'unclaimed = rendered, never attributed to an attempt' })));
+    host.appendChild(h('div', { id: 'live-runs' }));
+  }
+  const runsHost = $('live-runs');
+  if (!L || !Array.isArray(L.runs)) {
+    if (!sig('live', 'absent')) return;
+    $('lb-total').textContent = 'runs —';
+    $('lb-unclaimed').textContent = 'unclaimed —';
+    $('lb-stamp').textContent = 'no feed';
+    runsHost.textContent = '';
+    runsHost.appendChild(h('div', { class: 'card empty' },
+      'no live feed — is the tap running?',
+      h('span', { class: 'cmd', text: `python Assets/Blender/_tools/tap.py ${R.asset}` })));
+    return;
+  }
+  const f = liveFilters();
+  let runs = L.runs;
+  if (f.claimed) runs = runs.filter(r => r.claimed);
+  if (f.failures) runs = runs.filter(r => (r.variants || []).some(v => v.exit !== 0 && v.exit !== null));
+  const cap = S.liveCap || 20;
+  const shown = runs.slice(0, cap);
+  if (!sig('live', [L.stamped, runs.length, cap, f, S.attempts?.byRun.size])) return;
+  $('lb-total').textContent = 'runs ' + (L.total_runs ?? runs.length);
+  $('lb-unclaimed').textContent = 'unclaimed ' + (L.unclaimed_runs ?? '—');
+  $('lb-stamp').textContent = (L.stamped || '').replace('T', ' ').slice(5);
+  runsHost.textContent = '';
+  if (!shown.length)
+    runsHost.appendChild(h('div', { class: 'card empty',
+      text: runs.length ? '' : 'nothing matches the filters — un-tick them to see all runs' }));
+  for (const r of shown) {
+    const el = h('section', { class: 'lrun' + (r.claimed ? '' : ' unclaimed') });
+    const who = S.attempts?.byRun.get(r.run);
+    const shots = (r.variants || []).flatMap(v => v.shots || []);
+    el.appendChild(h('div', { class: 'rhead' },
+      h('span', { class: 'rn', text: 'run-' + r.run }),
+      r.claimed
+        ? h('span', { class: 'attr', text: (r.tag ? r.tag + ' · ' : '')
+            + (who ? `${who.design} a${who.attempt}` : 'claimed') })
+        : h('span', { class: 'untag', text: 'unclaimed' }),
+      r.seed != null ? h('span', { class: 'dim num', text: 'seed ' + r.seed }) : null,
+      h('span', { class: 'dim num', text: shots.length + ' shot' + (shots.length === 1 ? '' : 's') }),
+      r.done === false ? h('span', { class: 'attr', text: 'rendering…' }) : null,
+      r.audit ? h('span', { class: 'chip', text: 'audit ' + String(r.audit).slice(0, 30) }) : null,
+      h('span', { style: 'margin-left:auto' }, timeEl(r.started))));
+    if (!shots.length) {
+      el.appendChild(h('div', { class: 'empty', text: 'no images on disk for this run' }));
+    } else {
+      const strip = h('div', { class: 'shots' });
+      const items = shots.map(p => ({ src: `/${R.asset}/${p}`,
+        caption: `run-${r.run} · ${p.split('/').slice(-2).join('/')}` }));
+      shots.forEach((p, i) => {
+        strip.appendChild(h('div', { class: 'shot' },
+          h('button', { class: 'imgbtn', 'aria-label': 'enlarge ' + p,
+            onclick: () => openViewer(items, i) },
+            h('img', { src: `/${R.asset}/${p}`, loading: 'lazy', alt: p })),
+          h('span', { text: p.split('/').pop() })));
+      });
+      el.appendChild(strip);
+    }
+    runsHost.appendChild(el);
+  }
+  if (runs.length > cap)
+    runsHost.appendChild(h('button', { id: 'live-more',
+      text: `Load ${Math.min(30, runs.length - cap)} more (${runs.length - cap} older)`,
+      onclick: () => { S.liveCap = cap + 30; S.sigs = {}; render(); } }));
 }
 function renderCompare() {
   const host = $('tab-compare');
