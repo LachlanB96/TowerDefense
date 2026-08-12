@@ -50,7 +50,8 @@
   --dead:  #d05656;  /* failures, stale, abandoned      */
   --shelf: #9085e9;  /* shelved / agent-origin tint     */
   --pend:  #8a93a6;  /* in-flight / unknown             */
-  --accent:#6b96f2;  /* interactive, focus, NEW, charts */
+  --accent:#6b96f2;  /* interactive, focus, NEW */
+  --chart: #668ff0;  /* data marks only — validated against --s1 (dataviz six checks) */
   --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
   --r1: 4px; --r2: 6px; --r3: 10px;
   --sp1: 4px; --sp2: 8px; --sp3: 12px; --sp4: 16px; --sp5: 24px;
@@ -290,6 +291,74 @@ section.zone > h2 {
             padding: 10px 14px; font-size: 12px; color: var(--ink3); }
 
 /* ===================== WAR ROOM (task T7) ============================== */
+#z-needs .card { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.staged-e { display: flex; gap: var(--sp3); padding: var(--sp3); align-items: flex-start; }
+.staged-e + .staged-e { border-top: 1px solid var(--line); }
+.staged-e .imgbtn img { width: 132px; height: 99px; object-fit: cover; }
+.staged-e .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.staged-e .l1 { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; }
+.staged-e .id { font: 600 13px/1 var(--mono); color: var(--warn); }
+.promote-btn {
+  align-self: flex-start; font: 600 12px/1 "Segoe UI", system-ui, sans-serif;
+  color: var(--bg); background: var(--warn); border-radius: var(--r1);
+  padding: 8px 14px;
+}
+.promote-btn:hover { filter: brightness(1.1); }
+.ghost-btn { font-size: 11px; color: var(--ink2); border: 1px solid var(--line);
+             border-radius: var(--r1); padding: 6px 10px; }
+.champ-body { display: flex; gap: var(--sp4); padding: var(--sp3); align-items: flex-start; }
+.champ-body .imgbtn img { max-height: 260px; max-width: min(420px, 38vw); }
+.champ-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
+.champ-meta .quote { color: var(--ink2); background: var(--s2); border-left: 2px solid var(--line2);
+                     padding: 8px 10px; border-radius: var(--r1); font-size: 12px; }
+.lineage { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.lineage .imgbtn img { width: 44px; height: 58px; object-fit: cover; opacity: .75; }
+.lineage .imgbtn.cur img { opacity: 1; border-color: var(--ok); border-width: 2px; }
+.row { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; }
+.dlane { padding: var(--sp3); margin-bottom: var(--sp2); display: block; width: 100%;
+         text-align: left; }
+.dlane:hover { background: var(--s2); }
+.dlane .head { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; }
+.dlane .id { font: 600 13px/1 var(--mono); }
+.dlane .sum { color: var(--ink2); font-size: 12px; flex: 1 1 240px; overflow: hidden;
+              text-overflow: ellipsis; white-space: nowrap; }
+.dlane .body { display: flex; gap: var(--sp3); margin-top: var(--sp2); align-items: center;
+               flex-wrap: wrap; }
+.thumb-rail { display: flex; gap: 6px; align-items: center; }
+.thumb-rail .cellwrap { position: relative; }
+.thumb-rail img, .thumb-rail .noimg { width: 64px; height: 84px; object-fit: cover;
+  border-radius: var(--r1); background: #0b0c10; border: 2px solid var(--line); }
+.thumb-rail .b-ok img { border-color: var(--ok); }
+.thumb-rail .b-bad img { border-color: var(--dead); }
+.thumb-rail .anum { position: absolute; left: 3px; bottom: 3px; font: 600 9px/1 var(--mono);
+  color: var(--ink2); background: #000c; border-radius: 3px; padding: 2px 4px; }
+.thumb-rail .newflag { position: absolute; top: 3px; right: 3px; }
+.ratchet { display: flex; flex-direction: column; gap: 3px; min-width: 150px; }
+.ratchet .lbl { font: 10px/1 var(--mono); color: var(--ink3); letter-spacing: .06em; }
+.ratchet .val { display: flex; gap: 8px; align-items: baseline; }
+.ratchet .val b { font: 600 15px/1 var(--mono); }
+.ratchet .r-pos { color: var(--ok); } .ratchet .r-neg { color: var(--dead); }
+.ratchet .r-mid { color: var(--ink2); }
+.spark polyline { fill: none; stroke: var(--chart); stroke-width: 2; }
+.spark .zero { stroke: var(--line2); stroke-width: 1; }
+.spark circle { fill: var(--chart); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp3); }
+@media (max-width: 1500px) { .grid2 { grid-template-columns: 1fr; } }
+.qrow { display: flex; gap: var(--sp2); align-items: center; padding: 7px 12px;
+        border-bottom: 1px solid var(--line); font-size: 12px; }
+.qrow:last-child { border-bottom: none; }
+.qrow .sum2 { color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#ov-events { font: 11px/1.8 var(--mono); color: var(--ink2); padding: var(--sp2) var(--sp3);
+             max-height: 240px; overflow-y: auto; }
+#ov-events .at { color: var(--ink3); margin-right: 8px; }
+#ov-dials { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap;
+            padding: 10px var(--sp3); font-size: 12px; }
+#ov-dials .note2 { color: var(--ink3); font-size: 11px; overflow: hidden;
+                   text-overflow: ellipsis; white-space: nowrap; max-width: 52ch; }
+.zonehead { display: flex; gap: var(--sp2); align-items: baseline; }
+.zonehead h2 { flex: 1; }
+.zonehead button { font-size: 11px; color: var(--accent); }
+
 /* ====================== DOSSIER (task T8) ============================== */
 /* ======================== LIVE (task T9) =============================== */
 /* ====================== COMPARE (task T10) ============================= */
@@ -929,7 +998,8 @@ function renderAssetView() {
         h('span', { class: 'spacer' }),
         h('span', { id: 'seen-wrap', hidden: 'hidden' },
           h('span', { id: 'wh-new', class: 'newdot' }),
-          h('button', { id: 'seen-btn', text: 'mark seen' }))),
+          h('button', { id: 'seen-btn', text: 'mark seen',
+            onclick: () => { commitSeen(); S.sigs = {}; render(); } }))),
       h('nav', { id: 'tabs', role: 'tablist', 'aria-label': 'war room views' }));
     main.appendChild(head);
     main.appendChild(h('div', { id: 'tab-overview', role: 'tabpanel' }));
@@ -975,11 +1045,285 @@ function renderWarHead() {
   $('wh-note').textContent = p?.note || fleetRow?.note || '';
   $('wh-note').title = $('wh-note').textContent;
 }
+function renderSeenPill() {
+  const n = newCount();
+  if (!sig('seenpill', n)) return;
+  const wrap = $('seen-wrap');
+  if (!wrap) return;
+  wrap.hidden = !n;
+  if (n) {
+    $('wh-new').textContent = n + ' new'
+      + (S.seen?.t ? ' since ' + (fmtRel(S.seen.t) || '') + ' ago' : '');
+    announce('new', n + ' new attempts since your last look');
+  }
+}
+/* ------------------------ overview components ------------------------ */
+function bands() {                          // the user's dials, with the documented defaults
+  return { accept: S.control?.accept_margin ?? 2, reject: S.control?.reject_margin ?? -2 };
+}
+function marginChip(v, title) {
+  const b = bands();
+  const cls = v >= b.accept ? 'pos' : v <= b.reject ? 'neg' : 'mid';
+  return h('span', { class: 'm num ' + cls, title: title || 'panel margin (toward the challenger)',
+                     text: (v > 0 ? '+' : '') + v });
+}
+function sparkline(series) {                // single series — no legend; the aria-label names it
+  if (!series || series.length < 2) return null;
+  const W = 132, H = 30, PAD = 4;
+  const vals = series.map(p => p.mean);
+  const max = Math.max(...vals, 0), min = Math.min(...vals, 0);
+  const span = (max - min) || 1;
+  const x = i => PAD + i * (W - 2 * PAD) / (series.length - 1);
+  const y = v => H - PAD - (v - min) / span * (H - 2 * PAD);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'spark');
+  svg.setAttribute('width', W); svg.setAttribute('height', H);
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', 'margin vs origin across attempts: ' + vals.map(v => (v > 0 ? '+' : '') + v).join(', '));
+  if (min < 0 && max > 0) {                 // zero reference — polarity data needs its baseline
+    const z = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    z.setAttribute('class', 'zero');
+    z.setAttribute('x1', 0); z.setAttribute('x2', W);
+    z.setAttribute('y1', y(0)); z.setAttribute('y2', y(0));
+    svg.appendChild(z);
+  }
+  const pl = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  pl.setAttribute('points', series.map((p, i) => `${x(i).toFixed(1)},${y(p.mean).toFixed(1)}`).join(' '));
+  svg.appendChild(pl);
+  const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  dot.setAttribute('cx', x(series.length - 1)); dot.setAttribute('cy', y(vals[vals.length - 1]));
+  dot.setAttribute('r', 3);
+  svg.appendChild(dot);
+  const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+  t.textContent = 'vs origin: ' + series.map(p => `a${p.attempt} ${(p.mean > 0 ? '+' : '') + p.mean}`).join(' · ');
+  svg.appendChild(t);
+  return svg;
+}
+function ratchetBlock(attempts) {
+  const series = marginSeries(attempts || [], 'origin');
+  const wrap = h('span', { class: 'ratchet' });
+  wrap.appendChild(h('span', { class: 'lbl', text: 'RATCHET · VS ORIGIN' }));
+  if (!series.length) {
+    wrap.appendChild(h('span', { class: 'faint', style: 'font-size:11px',
+      text: 'no origin series recorded' }));
+    return wrap;
+  }
+  const last = series[series.length - 1].mean;
+  const b = bands();
+  const cls = last >= b.accept ? 'r-pos' : last <= b.reject ? 'r-neg' : 'r-mid';
+  const val = h('span', { class: 'val' },
+    h('b', { class: cls + ' num', text: (last > 0 ? '+' : '') + last }));
+  const sp = sparkline(series);
+  if (sp) val.appendChild(sp);
+  wrap.appendChild(val);
+  return wrap;
+}
+function stagedAttemptRow(s) {              // the attempts.jsonl row behind a staged card
+  const hit = S.attempts?.byRun.get(s.run);
+  if (!hit) return null;
+  const list = S.attempts.designs.get(hit.design) || [];
+  return list.find(a => a.run === s.run) || null;
+}
+function markButtons(a) {                   // star/cross — pipeline-visible taste signals
+  if (!a) return null;
+  const cur = S.marks.get(rowKey(a));
+  const wrap = h('span', { class: 'row', role: 'group', 'aria-label': 'your reaction' });
+  wrap.appendChild(h('button', { class: 'reactbtn ' + (cur === 'star' ? 'starred' : 'faint'),
+    'aria-pressed': String(cur === 'star'), title: 'star — tell the pipeline you like this',
+    onclick: async e => { e.stopPropagation(); if (await sendSignal(a, 'star')) { S.sigs = {}; render(); } },
+    text: cur === 'star' ? '★ starred' : '☆' }));
+  wrap.appendChild(h('button', { class: 'reactbtn ' + (cur === 'cross' ? 'crossed' : 'faint'),
+    'aria-pressed': String(cur === 'cross'), title: 'cross — tell the pipeline you dislike this',
+    onclick: async e => { e.stopPropagation(); if (await sendSignal(a, 'cross')) { S.sigs = {}; render(); } },
+    text: cur === 'cross' ? '✗ crossed' : '✗' }));
+  return wrap;
+}
 function renderOverview() {
-  const host = $('tab-overview');
-  if (!sig('ov-stub', 1)) return;
-  host.textContent = '';
-  host.appendChild(h('div', { class: 'card empty', text: 'war room overview — task T7' }));
+  const R = S.route, host = $('tab-overview');
+  if (!host.children.length) {
+    host.appendChild(h('section', { class: 'zone', id: 'z-needs', hidden: 'hidden' },
+      h('h2', { text: 'Needs you' }), h('div', { class: 'card', id: 'ov-needs' })));
+    host.appendChild(h('section', { class: 'zone' },
+      h('h2', { text: 'Champion' }), h('div', { class: 'card', id: 'ov-champ' })));
+    host.appendChild(h('section', { class: 'zone' },
+      h('div', { class: 'zonehead' }, h('h2', { text: 'Designs in flight' }),
+        h('span', { id: 'ov-makers', class: 'row' })),
+      h('div', { id: 'ov-designs' })));
+    host.appendChild(h('div', { class: 'grid2' },
+      h('section', { class: 'zone' },
+        h('div', { class: 'zonehead' }, h('h2', { text: 'Queue' }),
+          h('button', { text: '+ add design', onclick: () =>
+            prefillChat('add design ' + S.route.asset + ': ') })),
+        h('div', { class: 'card', id: 'ov-queue' })),
+      h('section', { class: 'zone' },
+        h('h2', { text: 'Events' }), h('div', { class: 'card', id: 'ov-events' }))));
+    host.appendChild(h('section', { class: 'zone' },
+      h('h2', { text: 'Dials (control.json — read-only)' }),
+      h('div', { class: 'card', id: 'ov-dials' })));
+  }
+  const p = S.pipes.get(R.asset);
+  renderSeenPill();
+  /* --- needs you (staged) --- */
+  const staged = p?.staged || [];
+  if (sig('ov-needs', [staged, staged.map(s => S.marks.get(rowKey(stagedAttemptRow(s) || {})))])) {
+    $('z-needs').hidden = !staged.length;
+    const el = $('ov-needs');
+    el.textContent = '';
+    for (const s of staged) {
+      const img = h('img', { alt: s.design + ' staged contact sheet', loading: 'lazy' });
+      const src = `/${R.asset}/${runDir(s.run)}/${cellDir(s.cell)}/_sheet.png`;
+      imgFallback(img, [src, `/${R.asset}/${runDir(s.run)}/${cellDir(s.cell)}/hero_34.png`], 'no sheet');
+      const aRow = stagedAttemptRow(s);
+      el.appendChild(h('div', { class: 'staged-e' },
+        h('button', { class: 'imgbtn', 'aria-label': 'enlarge staged sheet',
+          onclick: () => openViewer([{ src, caption: `${s.design} · run ${s.run} cell ${s.cell}` }], 0) }, img),
+        h('div', { class: 'body' },
+          h('div', { class: 'l1' },
+            h('span', { class: 'id', text: '⚑ ' + s.design }),
+            h('span', { text: 'panel accepted — waiting for you' }),
+            ...(s.margins || []).map(m => marginChip(m)),
+            ...((s.chips || []).map(c => h('span', { class: 'chip amber', text: c }))),
+            timeEl(s.at)),
+          h('div', { class: 'faint', text: `run ${s.run} · cell ${s.cell} — Promote pre-fills the chat; Enter sends it` }),
+          h('div', { class: 'row' },
+            h('button', { class: 'promote-btn', text: 'Promote ' + s.design,
+              onclick: () => prefillChat('promote ' + s.design) }),
+            h('button', { class: 'ghost-btn', text: 'discuss in chat',
+              onclick: () => prefillChat(s.design + ': ') }),
+            markButtons(aRow)))));
+    }
+  }
+  /* --- champion + lineage --- */
+  const c = S.champion, promos = S.attempts?.promos || [];
+  if (sig('ov-champ', [c, promos.length])) {
+    const el = $('ov-champ');
+    el.textContent = '';
+    if (!c) {
+      el.appendChild(h('div', { class: 'empty',
+        text: 'no champion yet — nothing has been promoted for this asset' }));
+    } else {
+      const src = `/${R.asset}/${runDir(c.run)}/${c.sheet}`;
+      const lineageItems = promos.map(pr => ({
+        src: `/${R.asset}/${runDir(pr.run)}/${cellDir(pr.cell ?? 1)}/_sheet.png`,
+        caption: `promotion · run ${pr.run} cell ${pr.cell}` }));
+      const items = [{ src, caption: `champion · run ${c.run} cell ${c.cell}` },
+                     ...lineageItems.filter(i => i.src !== src)];
+      const img = h('img', { alt: 'champion contact sheet' });
+      imgFallback(img, [src], 'champion sheet missing');
+      el.appendChild(h('div', { class: 'champ-body' },
+        h('button', { class: 'imgbtn', 'aria-label': 'enlarge champion',
+          onclick: () => openViewer(items, 0) }, img),
+        h('div', { class: 'champ-meta' },
+          h('div', { class: 'row' },
+            h('span', { class: 'chip' }, h('b', { class: 'num', text: 'run ' + c.run + ' · cell ' + c.cell })),
+            h('span', { class: 'chip', text: c.label || '' }),
+            c.seed != null ? h('span', { class: 'chip num', text: 'seed ' + c.seed }) : null),
+          h('div', { class: 'row dim' }, 'promoted by ', h('b', { text: c.by || '?' }), ' · ', timeEl(c.at)),
+          c.quote ? h('div', { class: 'quote', text: c.quote }) : null,
+          promos.length > 1 ? h('div', { class: 'lineage' },
+            h('span', { class: 'faint', style: 'font-size:10px', text: 'LINEAGE' }),
+            ...promos.map(pr => {
+              const isCur = pr.run === c.run && pr.cell === c.cell;
+              const im = h('img', { alt: '', loading: 'lazy' });
+              imgFallback(im, [`/${R.asset}/${runDir(pr.run)}/${cellDir(pr.cell ?? 1)}/_sheet.png`,
+                               `/${R.asset}/${runDir(pr.run)}/v1/_sheet.png`], 'r' + pr.run);
+              return h('button', { class: 'imgbtn' + (isCur ? ' cur' : ''),
+                title: `run ${pr.run} cell ${pr.cell}` + (isCur ? ' (current)' : ''),
+                onclick: () => openViewer(items, isCur ? 0 : Math.max(0, items.findIndex(x => x.caption.includes('run ' + pr.run)))) }, im);
+            })) : null)));
+    }
+  }
+  /* --- makers --- */
+  const makers = p?.makers || [];
+  if (sig('ov-makers', makers)) {
+    const el = $('ov-makers');
+    el.textContent = '';
+    for (const m of makers)
+      el.appendChild(h('span', { class: 'chip' },
+        h('b', { text: m.id || '?' }), ' · ' + (m.design || '—')
+        + (m.attempt ? ' a' + m.attempt : '') + ' · ' + (m.status || '')));
+  }
+  /* --- design board --- */
+  const designs = p?.designs || [];
+  const dSig = designs.map(d => {
+    const atts = S.attempts?.designs.get(d.id) || [];
+    return [d, atts.map(a => [rowKey(a), verdictSig(a), isNewRow(a)])];
+  });
+  if (sig('ov-designs', dSig)) {
+    const el = $('ov-designs');
+    el.textContent = '';
+    if (!designs.length && !staged.length)
+      el.appendChild(h('div', { class: 'card empty', text: 'no designs in flight — the queue below feeds this board' }));
+    for (const d of designs) {
+      const atts = S.attempts?.designs.get(d.id) || [];
+      const rail = h('span', { class: 'thumb-rail' });
+      for (const a of atts.slice(-8)) {
+        const inc = signedMean(a.verdicts.filter(v => v.vs !== 'origin'));
+        const b = bands();
+        const cls = inc == null ? '' : inc >= b.accept ? 'b-ok' : inc <= b.reject ? 'b-bad' : '';
+        const im = h('img', { alt: `attempt ${a.attempt}`, loading: 'lazy' });
+        imgFallback(im, thumbSrcs(R.asset, a.run, judgedCell(a)), 'building…');
+        const cell = h('span', { class: 'cellwrap ' + cls }, im,
+          h('span', { class: 'anum', text: 'a' + (a.attempt ?? '?') }));
+        if (isNewRow(a)) cell.appendChild(h('span', { class: 'newdot newflag', text: '' }));
+        rail.appendChild(cell);
+      }
+      el.appendChild(h('button', { class: 'dlane card',
+        'aria-label': `open design ${d.id} dossier`,
+        onclick: () => nav(`#/a/${R.asset}/d/${d.id}`) },
+        h('span', { class: 'head' },
+          h('span', { class: 'id', text: d.id }),
+          h('span', { class: 'chip origin-' + (d.origin === 'user' ? 'user' : 'agent'),
+                      text: d.origin === 'user' ? 'yours' : 'agent-authored' }),
+          d.status ? h('span', { class: 'chip', title: 'shepherd status (verbatim)', text: String(d.status).slice(0, 48) }) : null,
+          d.attempts ? h('span', { class: 'chip num', text: 'a' + d.attempts }) : null,
+          h('span', { class: 'sum', title: d.summary || '', text: d.summary || '' }),
+          ...(d.last_margins || []).map(m => marginChip(m, 'latest panel margins vs incumbent')),
+          ...((d.chips || []).map(ch => h('span', { class: 'chip amber', text: ch })))),
+        h('span', { class: 'body' }, rail, ratchetBlock(atts))));
+    }
+  }
+  /* --- queue --- */
+  const queue = p?.queue || [];
+  if (sig('ov-queue', queue)) {
+    const el = $('ov-queue');
+    el.textContent = '';
+    if (!queue.length) el.appendChild(h('div', { class: 'empty', text: 'queue is empty — agents will refill it' }));
+    for (const d of queue)
+      el.appendChild(h('div', { class: 'qrow' },
+        h('span', { class: 'chip' }, h('b', { text: d.id })),
+        h('span', { class: 'chip origin-' + (d.origin === 'user' ? 'user' : 'agent'),
+                    text: d.origin === 'user' ? 'yours' : 'agent' }),
+        h('span', { class: 'sum2', title: d.summary || '', text: d.summary || '' })));
+  }
+  /* --- events --- */
+  const events = p?.events || [];
+  if (sig('ov-events', events)) {
+    const el = $('ov-events');
+    el.textContent = '';
+    const evs = [...events].reverse().slice(0, 15);
+    if (!evs.length) el.appendChild(h('div', { class: 'faint', text: 'no events yet' }));
+    for (const e of evs)
+      el.appendChild(h('div', {},
+        h('span', { class: 'at', text: (e.at || '').replace('T', ' ').slice(5, 16) }),
+        e.text || ''));
+  }
+  /* --- dials --- */
+  const ctl = S.control;
+  if (sig('ov-dials', ctl)) {
+    const el = $('ov-dials');
+    el.textContent = '';
+    if (!ctl) { el.appendChild(h('span', { class: 'faint', text: 'no control.json for this asset' })); }
+    else {
+      const note = (ctl.notes || [])[ctl.notes?.length - 1] || '';
+      el.appendChild(h('span', { class: 'chip', text: 'state ' }, h('b', { text: ctl.state || '?' })));
+      el.appendChild(h('span', { class: 'chip num' }, 'makers ', h('b', { text: String(ctl.makers ?? '—') })));
+      el.appendChild(h('span', { class: 'chip num' }, 'panel ', h('b', { text: (ctl.panel ?? '—') + ' → ' + (ctl.escalate_to ?? '—') })));
+      el.appendChild(h('span', { class: 'chip num' }, 'accept ≥ ', h('b', { text: '+' + (ctl.accept_margin ?? 2) })));
+      el.appendChild(h('span', { class: 'chip num' }, 'reject ≤ ', h('b', { text: String(ctl.reject_margin ?? -2) })));
+      if (note) el.appendChild(h('span', { class: 'note2', title: note, text: '“' + note + '”' }));
+    }
+  }
 }
 function renderLive() {
   const host = $('tab-live');
