@@ -563,8 +563,10 @@ def test_gallery_server_contract():
         root_resp = _wait_for_server(base)
         root_body = root_resp.read().decode("utf-8")
         check("GET / is 200", root_resp.status == 200)
-        check("GET / body contains the gallery page's title marker",
-              "<title>Gloomfell · preview gallery</title>" in root_body,
+        # index.html is a redirect stub since the suite (2026-08-12): the body
+        # must both name itself and point at /v4.html, or old bookmarks strand.
+        check("GET / body is the suite redirect stub",
+              "<title>Gloomfell → suite</title>" in root_body and "/v4.html" in root_body,
               root_body[:200])
         check("GET / carries Cache-Control: no-store",
               root_resp.headers.get("Cache-Control") == "no-store")
