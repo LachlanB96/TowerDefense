@@ -263,6 +263,48 @@ section.zone > h2 {
 /* ======================== LIVE (task T9) =============================== */
 /* ====================== COMPARE (task T10) ============================= */
 /* ======================= VIEWER (task T5) ============================== */
+dialog { border: none; background: transparent; padding: 0; }
+dialog::backdrop { background: #05060acc; }
+/* No display on the base rule: it would override the UA's
+   dialog:not([open]){display:none} and paint the closed dialog into the
+   page flow. Only the [open] state lays out. */
+#viewer { color: var(--ink); font: 400 13px/1.5 "Segoe UI", system-ui, sans-serif;
+          width: 96vw; height: 94vh; max-width: 96vw; max-height: 94vh;
+          flex-direction: column; }
+#viewer[open] { display: flex; }
+.v-bar { display: flex; gap: var(--sp2); align-items: center; padding: 8px 4px; flex-wrap: wrap; }
+.v-bar .grow { flex: 1; }
+.v-bar button, .v-bar [role="radio"] {
+  background: var(--s1); border: 1px solid var(--line); border-radius: var(--r1);
+  padding: 8px 12px; font-size: 12px; min-width: 40px; min-height: 36px;
+}
+.v-bar [role="radio"][aria-checked="true"] { background: var(--ink); color: var(--bg);
+                                             border-color: var(--ink); }
+.v-bar button:disabled, .v-bar [role="radio"]:disabled { opacity: .35; cursor: not-allowed; }
+#v-pin[aria-pressed="true"] { color: var(--warn); border-color: var(--warn); }
+#v-title { font-size: 12px; color: var(--ink2); }
+#v-stage { flex: 1; display: flex; gap: var(--sp3); align-items: center;
+           justify-content: center; min-height: 0; }
+#v-stage img, #v-stage canvas { max-height: 100%; max-width: 100%;
+  border-radius: var(--r2); background: #0b0c10; }
+.v-pane { display: flex; flex-direction: column; align-items: center; gap: 4px;
+          min-width: 0; max-height: 100%; min-height: 0; }
+.v-pane b { font: 400 11px/1.4 var(--mono); color: var(--ink2); font-weight: 400;
+            max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-pane.half { max-width: 48%; }
+.v-warn { color: var(--warn); font-size: 12px; padding: 20px; text-align: center; }
+#v-strip { display: flex; gap: 6px; overflow-x: auto; padding: 8px 2px 2px; }
+#v-strip button { flex: 0 0 auto; padding: 0; border-radius: var(--r1); position: relative; }
+#v-strip img { width: 48px; height: 64px; object-fit: cover; border-radius: var(--r1);
+               background: #0b0c10; border: 2px solid transparent; }
+#v-strip button[aria-current="true"] img { border-color: var(--ink); }
+#v-strip .pinmark { position: absolute; top: 2px; left: 2px; font-size: 10px;
+                    color: var(--warn); background: #000c; border-radius: 3px; padding: 0 2px; }
+#shortcuts { background: var(--s1); border: 1px solid var(--line); border-radius: var(--r3);
+             padding: 20px 24px; box-shadow: 0 8px 32px #000a; color: var(--ink); }
+#shortcuts table { border-collapse: collapse; font-size: 12px; }
+#shortcuts td { padding: 3px 12px 3px 0; color: var(--ink2); }
+#shortcuts td:first-child { font-family: var(--mono); color: var(--ink); }
 </style>
 
 <a class="skip" href="#main">skip to content</a>
@@ -293,6 +335,39 @@ section.zone > h2 {
       new N npcs · makers &lt;asset&gt; N · promote &lt;design&gt; · finish &lt;asset&gt;</div>
   </aside>
 </div>
+
+<dialog id="viewer" aria-modal="true" aria-labelledby="v-title">
+  <div class="v-bar">
+    <button id="v-close" data-keep aria-label="close viewer">✕</button>
+    <span id="v-title" data-keep></span>
+    <span class="grow"></span>
+    <button id="v-pin" data-keep aria-pressed="false"
+            title="pin this image as the compare base (P)">⌖ pin</button>
+    <span role="radiogroup" aria-label="compare mode" id="v-modes" data-keep>
+      <button role="radio" data-mode="single" aria-checked="true">single</button>
+      <button role="radio" data-mode="side" aria-checked="false">side-by-side</button>
+      <button role="radio" data-mode="diff" aria-checked="false">pixel diff</button>
+    </span>
+    <button id="v-prev" data-keep title="previous (←)">←</button>
+    <button id="v-next" data-keep title="next (→)">→</button>
+    <button id="v-help" data-keep title="keyboard shortcuts (?)">?</button>
+  </div>
+  <div id="v-stage"></div>
+  <div id="v-strip" data-keep aria-label="filmstrip"></div>
+</dialog>
+
+<dialog id="shortcuts" aria-label="keyboard shortcuts">
+  <h2 style="margin-bottom:10px">Keyboard <button id="sc-close" aria-label="close"
+    style="float:right;padding:4px 10px">✕</button></h2>
+  <table>
+    <tr><td>← →</td><td>previous / next image</td></tr>
+    <tr><td>Home End</td><td>first / last image</td></tr>
+    <tr><td>1 S D</td><td>single · side-by-side · pixel diff</td></tr>
+    <tr><td>P</td><td>pin / unpin as compare base</td></tr>
+    <tr><td>Esc</td><td>close</td></tr>
+    <tr><td>?</td><td>this help</td></tr>
+  </table>
+</dialog>
 
 <script>
 'use strict';
@@ -813,6 +888,151 @@ function renderCompare() {
   host.textContent = '';
   host.appendChild(h('div', { class: 'card empty', text: 'compare — task T10' }));
 }
+/* ============================== viewer ================================
+   One lightbox for every image on the page. Filmstrip = whatever context
+   the click came from. "Pin as compare base" replaces the old page's
+   accepted-before rule: pin any image, then side-by-side / pixel-diff any
+   other against it. */
+const V = { items: [], idx: 0, mode: 'single', pin: null, opener: null, gen: 0 };
+function openViewer(items, idx) {
+  if (!items || !items.length) return;
+  V.items = items;
+  V.idx = Math.min(Math.max(0, idx ?? 0), items.length - 1);
+  V.mode = 'single';
+  V.opener = document.activeElement;
+  $('viewer').showModal();
+  renderViewer();
+}
+$('viewer').addEventListener('close', () => {
+  if (V.opener && V.opener.isConnected) V.opener.focus();
+});
+function compareBase() {                     // pinned image wins; else the previous item
+  if (V.pin && V.pin.src !== V.items[V.idx]?.src) return V.pin;
+  if (!V.pin && V.idx > 0) return V.items[V.idx - 1];
+  return null;
+}
+const DIFF_THRESHOLD = 24;    // below this is preview sampling noise, not change
+function loadImg(src) {
+  return new Promise((res, rej) => { const i = new Image();
+    i.onload = () => res(i); i.onerror = () => rej(new Error('could not load ' + src)); i.src = src; });
+}
+async function drawDiff(stage, beforeSrc, afterSrc, live) {
+  let a, b;
+  try { [a, b] = await Promise.all([loadImg(beforeSrc), loadImg(afterSrc)]); }
+  catch (e) { if (live()) stage.appendChild(h('div', { class: 'v-warn', text: e.message })); return; }
+  if (!live()) return;                       // user navigated while the PNGs loaded
+  if (a.naturalWidth !== b.naturalWidth || a.naturalHeight !== b.naturalHeight) {
+    stage.appendChild(h('div', { class: 'v-warn',
+      text: `Cannot diff: images are different sizes (${a.naturalWidth}×${a.naturalHeight} vs `
+          + `${b.naturalWidth}×${b.naturalHeight}). Side-by-side still works.` }));
+    return;
+  }
+  const w = a.naturalWidth, hgt = a.naturalHeight;
+  const mk = img => { const c = document.createElement('canvas'); c.width = w; c.height = hgt;
+    const x = c.getContext('2d'); x.drawImage(img, 0, 0); return x.getImageData(0, 0, w, hgt).data; };
+  const A = mk(a), B = mk(b);
+  const out = document.createElement('canvas'); out.width = w; out.height = hgt;
+  const ctx = out.getContext('2d'); const img = ctx.createImageData(w, hgt); const D = img.data;
+  for (let i = 0; i < D.length; i += 4) {
+    const d = Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2]);
+    if (d > DIFF_THRESHOLD) {                // amber, hotter with bigger change, over the new image
+      const k = Math.min(1, d / 180);
+      D[i] = 255; D[i + 1] = 190 - 130 * k; D[i + 2] = 70 - 70 * k; D[i + 3] = 255;
+    } else { D[i] = B[i] * .22; D[i + 1] = B[i + 1] * .22; D[i + 2] = B[i + 2] * .22; D[i + 3] = 255; }
+  }
+  ctx.putImageData(img, 0, 0);
+  out.setAttribute('role', 'img');
+  out.setAttribute('aria-label', 'changed pixels highlighted over the newer image');
+  if (live()) stage.appendChild(h('div', { class: 'v-pane' },
+    h('b', { text: 'changed pixels over the current image' }), out));
+}
+async function renderViewer() {
+  const gen = ++V.gen;                       // re-entrancy epoch for async image loads
+  const live = () => gen === V.gen && $('viewer').open;
+  const cur = V.items[V.idx];
+  if (!cur) return;
+  const base = compareBase();
+  $('v-title').textContent = `${cur.caption || ''} — ${V.idx + 1}/${V.items.length}`;
+  $('v-prev').disabled = V.idx <= 0;
+  $('v-next').disabled = V.idx >= V.items.length - 1;
+  const pinned = V.pin?.src === cur.src;
+  $('v-pin').setAttribute('aria-pressed', String(!!V.pin));
+  $('v-pin').textContent = pinned ? '⌖ unpin' : V.pin ? '⌖ pinned: ' + (V.pin.caption || '').slice(0, 24) : '⌖ pin';
+  for (const b of document.querySelectorAll('#v-modes [role=radio]')) {
+    b.disabled = b.dataset.mode !== 'single' && !base;
+    b.setAttribute('aria-checked', String(b.dataset.mode === V.mode));
+  }
+  const stage = $('v-stage');
+  stage.textContent = '';
+  if (V.mode === 'diff' && base) await drawDiff(stage, base.src, cur.src, live);
+  else if (V.mode === 'side' && base) {
+    stage.appendChild(h('div', { class: 'v-pane half' },
+      h('b', { text: (V.pin ? '⌖ ' : '') + (base.caption || 'previous') }),
+      h('img', { src: base.src, alt: base.caption || 'compare base' })));
+    stage.appendChild(h('div', { class: 'v-pane half' },
+      h('b', { text: cur.caption || '' }),
+      h('img', { src: cur.src, alt: cur.caption || 'current image' })));
+  } else {
+    stage.appendChild(h('div', { class: 'v-pane' },
+      h('b', { text: cur.caption || '' }),
+      h('img', { src: cur.src, alt: cur.caption || 'image' })));
+  }
+  if (!live()) return;
+  const strip = $('v-strip');
+  strip.textContent = '';
+  V.items.forEach((it, i) => {
+    const b = h('button', { 'aria-current': String(i === V.idx),
+      title: it.caption || '', 'aria-label': (it.caption || 'image ' + (i + 1)),
+      onclick: () => { V.idx = i; renderViewer(); } },
+      h('img', { src: it.src, alt: '', loading: 'lazy' }));
+    if (V.pin?.src === it.src) b.appendChild(h('span', { class: 'pinmark', text: '⌖' }));
+    strip.appendChild(b);
+  });
+  strip.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+}
+$('v-close').addEventListener('click', () => $('viewer').close());
+$('v-prev').addEventListener('click', () => { if (V.idx > 0) { V.idx--; renderViewer(); } });
+$('v-next').addEventListener('click', () => { if (V.idx < V.items.length - 1) { V.idx++; renderViewer(); } });
+$('v-pin').addEventListener('click', () => {
+  const cur = V.items[V.idx];
+  V.pin = V.pin?.src === cur.src ? null : cur;
+  renderViewer();
+});
+for (const b of document.querySelectorAll('#v-modes [role=radio]'))
+  b.addEventListener('click', () => { V.mode = b.dataset.mode; renderViewer(); });
+$('v-help').addEventListener('click', () => $('shortcuts').showModal());
+$('sc-close').addEventListener('click', () => $('shortcuts').close());
+$('shortcuts').addEventListener('pointerdown', e => {
+  if (!e.target.closest('table, h2')) $('shortcuts').close();
+});
+// Any pointerdown inside the open dialog closes it UNLESS the target is
+// interactive (data-keep) or an image/canvas — clicks in stage gutters work.
+$('viewer').addEventListener('pointerdown', e => {
+  if (e.target.closest('[data-keep], img, canvas, button, a, input, select')) return;
+  $('viewer').close();
+});
+$('viewer').addEventListener('cancel', e => {      // Esc: shortcuts overlay first
+  if ($('shortcuts').open) { e.preventDefault(); $('shortcuts').close(); }
+});
+document.addEventListener('keydown', e => {
+  if (e.target instanceof Element && e.target.matches('input, select, textarea')) return;
+  if ($('shortcuts').open) {
+    if (e.key === '?' || e.key === 'Escape') { $('shortcuts').close(); e.preventDefault(); }
+    return;
+  }
+  if (!$('viewer').open) return;
+  if (e.key === '?') $('shortcuts').showModal();
+  else if (e.key === 'ArrowLeft' && V.idx > 0) { V.idx--; renderViewer(); }
+  else if (e.key === 'ArrowRight' && V.idx < V.items.length - 1) { V.idx++; renderViewer(); }
+  else if (e.key === 'Home') { V.idx = 0; renderViewer(); }
+  else if (e.key === 'End') { V.idx = V.items.length - 1; renderViewer(); }
+  else if (e.key === 's' || e.key === 'S') { if (compareBase()) { V.mode = 'side'; renderViewer(); } }
+  else if (e.key === 'd' || e.key === 'D') { if (compareBase()) { V.mode = 'diff'; renderViewer(); } }
+  else if (e.key === '1') { V.mode = 'single'; renderViewer(); }
+  else if (e.key === 'p' || e.key === 'P') { $('v-pin').click(); }
+  else return;
+  e.preventDefault();
+});
 /* ============================== chat ================================== */
 function parseJsonl(text) {
   return (text || '').split('\n').filter(l => l.trim()).map(l => {
