@@ -1,208 +1,305 @@
 <!doctype html>
-<!-- Gloomfell mission control (modev4).
-
-     One page for the whole fleet: fleet strip up top, the focused asset's
-     champion / design lanes / live render strip in the middle, and the chat
-     dock on the right. Served by _tools/serve.py, which copies this file into
-     the previews root at startup — RESTART THE SERVER after editing this file.
-
-     Data contract (all polled as static files; the server never computes):
-       /fleet.json                supervisor   fleet registry
-       /<asset>/pipeline.json     shepherd     designs, queue, staged, events, heartbeat
-       /<asset>/live.json         tap.py       run directories + shots
-       /<asset>/champion.json     record.py    current champion + provenance
-       /chat.jsonl + /feed.jsonl  page POST / supervisor   the conversation
-       POST /chat {text, asset?}  the user's one write door on this page
-
-     Missing files are normal (a zone shows its empty state); the error banner
-     is reserved for the server itself being unreachable. Schemas are pinned in
-     .claude/skills/blender-model-modev4/references/page.md — keep them in sync. -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gloomfell · mission control</title>
+<!-- ======================================================================
+     THE GLOOMFELL SUITE — one coherent app for the whole modelling fleet.
+     fleet overview (#/) → per-asset war room (#/a/<asset>, tabs Overview ·
+     Live · Compare) → design dossier slide-over (#/a/<asset>/d/<design>).
+
+     Single self-contained file, no external requests. Served by
+     _tools/serve.py, which copies it into the previews root at startup —
+     RESTART THE SERVER after editing this file. index.html and live.html are
+     redirect stubs into this page.
+
+     Data contract (server computes nothing; the page polls static files):
+       /fleet.json                  supervisor    fleet registry
+       /assets.json                 preview.py    on-disk asset discovery
+       /<asset>/pipeline.json       shepherd      designs/queue/staged/events/heartbeat
+       /<asset>/attempts.jsonl      record.py     waves · verdicts · promotions
+       /<asset>/champion.json       record.py     current champion + provenance
+       /<asset>/control.json        supervisor    read-only dials display
+       /<asset>/live.json           tap.py        run dirs + shots (Live tab)
+       /<asset>/latest.json,
+       /<asset>/run-NNN/manifest.json  preview.py  Compare tab
+       /chat.jsonl + /feed.jsonl    page POST / supervisor   the conversation
+       /<asset>/user-signals.jsonl, user-directives.jsonl    page POSTs, page reflects
+     Writes: POST /chat, POST /signal, POST /directive — nothing else, ever.
+     Verb buttons only PRE-FILL the chat input; the user presses Enter.
+
+     Schemas are pinned in .claude/skills/blender-model-modev4/references/
+     page.md — keep them in sync. Design spec:
+     docs/superpowers/specs/2026-08-12-gallery-suite-design.md
+     ====================================================================== -->
 <style>
-  :root{
-    color-scheme: dark;
-    --bg:#12151c; --panel:#181c25; --panel2:#1e2331; --line:#2b3242;
-    --ink:#e3e7f0; --ink2:#a8b0c2; --mute:#6f7891;
-    --accent:#8e9bee; --ok:#5fbe99; --warn:#d2a05c; --dead:#d03b3b; --shelf:#9085e9;
-    --mono:ui-monospace,"Cascadia Mono",Consolas,monospace;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-       font:14px/1.5 -apple-system,"Segoe UI",system-ui,sans-serif}
-  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
-  img{display:block}
-  .mono{font-family:var(--mono)}
-  .dim{color:var(--ink2)} .faint{color:var(--mute)}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:6px}
-  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-
-  /* ---- fleet strip ---- */
-  header{position:sticky;top:0;z-index:5;background:var(--bg);
-         border-bottom:1px solid var(--line);padding:10px 16px;
-         display:flex;gap:12px;align-items:center;overflow-x:auto}
-  h1{font:600 13px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;
-     margin:0;color:var(--accent);white-space:nowrap}
-  #dot{width:8px;height:8px;border-radius:50%;background:var(--mute);flex:0 0 auto}
-  #dot.on{background:var(--ok)} #dot.err{background:var(--dead)}
-  .fcard{flex:0 0 auto;display:flex;flex-direction:column;gap:4px;text-align:left;
-         padding:8px 12px;border:1px solid var(--line);border-radius:6px;
-         background:var(--panel)}
-  .fcard[aria-current="true"]{border-color:var(--accent)}
-  .fcard .l1{display:flex;gap:8px;align-items:center}
-  .fcard .name{font:600 13px/1 var(--mono)}
-  .fcard .l2{display:flex;gap:10px;font:11px/1 var(--mono);color:var(--ink2)}
-  .pill{display:inline-flex;align-items:center;gap:5px;font:600 10px/1 var(--mono);
-        padding:3px 8px;border-radius:999px}
-  .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
-  .st-run{color:var(--ok);background:color-mix(in srgb,var(--ok) 12%,transparent)}
-  .st-pause{color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,transparent)}
-  .st-stop,.st-unknown{color:var(--mute);background:var(--panel2)}
-  @media (prefers-reduced-motion:no-preference){
-    .st-run::before{animation:pulse 2.4s ease-in-out infinite}
-    @keyframes pulse{50%{opacity:.35}}
-  }
-  .hb-ok{color:var(--ok)} .hb-warn{color:var(--warn)} .hb-stale{color:var(--dead);font-weight:600}
-  .banner{display:none;background:color-mix(in srgb,var(--dead) 16%,var(--bg));
-          color:var(--ink);padding:6px 16px;font:12px var(--mono)}
-  .banner.on{display:block}
-
-  /* ---- layout ---- */
-  #wrap{display:grid;grid-template-columns:1fr 340px;gap:0;align-items:start}
-  main{padding:14px 16px 60px;min-width:0}
-  section{margin-bottom:14px}
-  section>h2{font:600 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;
-             color:var(--mute);margin:0 0 8px}
-  .empty{color:var(--mute);font-size:12px;padding:14px;text-align:center}
-
-  /* ---- champion ---- */
-  #champ .body{display:flex;gap:14px;padding:12px;align-items:flex-start}
-  #champ img{max-height:300px;max-width:min(440px,40vw);border-radius:4px;
-             background:#0c0e13;border:1px solid var(--line);cursor:zoom-in}
-  #champ .meta{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--ink2)}
-
-  /* ---- designs ---- */
-  .staged{border:1px solid var(--warn);border-radius:6px;background:var(--panel);
-          padding:10px 12px;margin-bottom:8px;font-size:12px}
-  .staged b{color:var(--warn)}
-  .lane{padding:10px 12px;margin-bottom:8px}
-  .lane .head{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .lane .id{font:600 13px/1 var(--mono)}
-  .lane .sum{color:var(--ink2);font-size:12px;flex:1 1 200px;overflow:hidden;
-             text-overflow:ellipsis;white-space:nowrap}
-  .chip{display:inline-flex;align-items:center;gap:4px;font:400 10px/1 var(--mono);
-        color:var(--ink2);background:var(--panel2);border:1px solid var(--line);
-        padding:3px 7px;border-radius:4px;white-space:nowrap}
-  .chip.amber{color:var(--warn)}
-  .chip.origin-agent{color:var(--shelf)}
-  .m{display:inline-block;font:600 11px/1 var(--mono);padding:3px 6px;border-radius:4px;
-     background:var(--panel2)}
-  .m.pos{color:var(--ok)} .m.neg{color:var(--dead)} .m.mid{color:var(--ink2)}
-  .qrow{display:flex;gap:8px;align-items:center;padding:3px 0;font-size:12px}
-  #events{font:11px/1.7 var(--mono);color:var(--ink2);padding:8px 12px;
-          max-height:180px;overflow-y:auto}
-  #events .at{color:var(--mute);margin-right:8px}
-
-  /* ---- live runs ---- */
-  .run{border:1px solid var(--line);border-radius:4px;background:var(--panel);
-       margin-bottom:8px;overflow:hidden}
-  .run.unclaimed{opacity:.72;border-style:dashed}
-  .rhead{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;padding:6px 10px;
-         background:var(--panel2);border-bottom:1px solid var(--line);
-         font:11px/1.4 var(--mono)}
-  .rn{color:var(--accent);font-weight:700}
-  .tag{color:var(--ok)} .untag{color:var(--mute);font-style:italic}
-  .seed{color:var(--ink2)} .when{margin-left:auto;color:var(--mute)}
-  .shots{display:flex;gap:8px;padding:8px 10px;overflow-x:auto}
-  .shot{flex:0 0 auto;text-align:center}
-  .shot img{height:120px;width:auto;border-radius:3px;background:#0c0e13;
-            border:1px solid var(--line);cursor:zoom-in}
-  .shot span{display:block;font:10px/1.6 var(--mono);color:var(--mute);max-width:150px;
-             overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
-  /* ---- chat dock ---- */
-  #chat{position:sticky;top:57px;height:calc(100vh - 57px);display:flex;
-        flex-direction:column;border-left:1px solid var(--line);background:var(--panel)}
-  #chat .bar{display:flex;gap:8px;align-items:center;padding:8px 12px;
-             border-bottom:1px solid var(--line);font:600 11px/1 var(--mono);
-             letter-spacing:.1em;text-transform:uppercase;color:var(--mute)}
-  #chat .bar button{margin-left:auto;color:var(--mute);font-size:14px}
-  #msgs{flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
-  .msg{max-width:88%;padding:7px 10px;border-radius:8px;font-size:12.5px;
-       white-space:pre-wrap;overflow-wrap:break-word}
-  .msg .who{display:block;font:10px/1.6 var(--mono);color:var(--mute)}
-  .msg.user{align-self:flex-end;background:color-mix(in srgb,var(--accent) 16%,var(--panel2))}
-  .msg.supervisor{align-self:flex-start;background:var(--panel2)}
-  .msg.undelivered{align-self:flex-end;background:color-mix(in srgb,var(--dead) 18%,var(--panel2));
-                   color:var(--warn);font-size:11px}
-  #chat form{display:flex;gap:6px;padding:10px 12px 4px;border-top:1px solid var(--line)}
-  #chat-in{flex:1;background:var(--bg);color:var(--ink);border:1px solid var(--line);
-           border-radius:6px;padding:8px 10px;font:inherit;font-size:13px}
-  #chat-send{background:var(--panel2);border:1px solid var(--line);border-radius:6px;
-             padding:8px 12px;color:var(--accent);font-weight:600}
-  #chat .opts{display:flex;gap:8px;align-items:center;padding:2px 12px;font-size:11px;
-              color:var(--mute)}
-  #verbs{padding:6px 12px 12px;font:10px/1.7 var(--mono);color:var(--mute);
-         border-top:1px dashed var(--line)}
-  body.nochat #chat{display:none}
-  body.nochat #wrap{grid-template-columns:1fr}
-
-  @media (max-width:1100px){
-    #wrap{grid-template-columns:1fr}
-    #chat{position:fixed;left:0;right:0;bottom:0;top:auto;height:44vh;z-index:8;
-          border-top:1px solid var(--line)}
-    main{padding-bottom:46vh}
-    body.nochat main{padding-bottom:60px}
-  }
-
-  /* ---- zoom overlay ---- */
-  #big{position:fixed;inset:0;background:#080a0ee6;display:none;z-index:20;
-       align-items:center;justify-content:center;cursor:zoom-out}
-  #big img{max-width:96vw;max-height:92vh;border-radius:4px}
-  #big div{position:fixed;bottom:14px;left:0;right:0;text-align:center;
-           font:11px var(--mono);color:var(--ink2)}
+/* ============================ TOKENS ================================== */
+:root {
+  color-scheme: dark;
+  --bg:   #0f1014;   /* page ground                     */
+  --s1:   #16171d;   /* surface-1: cards                */
+  --s2:   #1c1e26;   /* surface-2: chips, insets        */
+  --s3:   #232630;   /* surface-3: hover, active insets */
+  --line: #2a2d38;   /* hairline borders                */
+  --line2:#3a3e4b;   /* emphasised borders              */
+  --ink:  #e6e8ef;   /* primary text (no pure white — dark-room page) */
+  --ink2: #9ba1b0;   /* secondary                       */
+  --ink3: #6d7280;   /* faint                           */
+  /* Status semantics. Always triple-encoded: color + glyph + text. */
+  --ok:    #46b26b;  /* accepted / running / healthy    */
+  --warn:  #d9a13d;  /* staged, needs-work, amber chips */
+  --dead:  #d05656;  /* failures, stale, abandoned      */
+  --shelf: #9085e9;  /* shelved / agent-origin tint     */
+  --pend:  #8a93a6;  /* in-flight / unknown             */
+  --accent:#6b96f2;  /* interactive, focus, NEW, charts */
+  --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --r1: 4px; --r2: 6px; --r3: 10px;
+  --sp1: 4px; --sp2: 8px; --sp3: 12px; --sp4: 16px; --sp5: 24px;
+  --bar-h: 52px;
+  --chat-w: 340px;
+}
+/* ============================ BASE ==================================== */
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 400 13px/1.5 "Segoe UI", system-ui, sans-serif;
+}
+h1, h2, h3 { font-weight: 600; margin: 0; }
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+img { display: block; }
+input { font: inherit; }
+.mono  { font-family: var(--mono); }
+.num   { font-variant-numeric: tabular-nums; }
+.dim   { color: var(--ink2); }
+.faint { color: var(--ink3); }
+.sr { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.skip {
+  position: absolute; left: -9999px; top: 8px; z-index: 99;
+  background: var(--s2); padding: 8px 12px; border-radius: var(--r1);
+}
+.skip:focus-visible { left: 8px; }
+@media (prefers-reduced-motion: no-preference) {
+  .pulse::before { animation: pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  #dossier[open] { animation: slidein .16s ease-out; }
+  @keyframes slidein { from { transform: translateX(24px); opacity: .4; } }
+}
+/* ========================== COMPONENTS ================================ */
+.card { background: var(--s1); border: 1px solid var(--line); border-radius: var(--r2); }
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font: 400 11px/1 var(--mono); color: var(--ink2);
+  background: var(--s2); border: 1px solid var(--line);
+  padding: 3px 7px; border-radius: var(--r1); white-space: nowrap;
+}
+.chip b { font-weight: 600; color: var(--ink); }
+.chip.amber  { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }
+.chip.origin-user  { color: var(--ok); }
+.chip.origin-agent { color: var(--shelf); }
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font: 600 11px/1 "Segoe UI", system-ui, sans-serif;
+  padding: 4px 8px; border-radius: var(--r1); white-space: nowrap;
+}
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; position: relative;
+  font: 600 10px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase;
+  padding: 4px 9px; border-radius: 999px;
+}
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.st-run    { color: var(--ok);   background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.st-pause  { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.st-stop, .st-unknown { color: var(--ink3); background: var(--s2); }
+.hb-ok { color: var(--ok); } .hb-warn { color: var(--warn); }
+.hb-stale { color: var(--dead); font-weight: 600; }
+.m { display: inline-block; font: 600 11px/1 var(--mono); padding: 3px 6px;
+     border-radius: var(--r1); background: var(--s2); }
+.m.pos { color: var(--ok); } .m.neg { color: var(--dead); } .m.mid { color: var(--ink2); }
+.empty { color: var(--ink2); text-align: center; padding: 28px 16px; font-size: 12.5px; }
+.empty .cmd { display: inline-block; margin-top: 8px; font: 11px/1.6 var(--mono);
+              color: var(--ink3); background: var(--s2); padding: 4px 10px;
+              border-radius: var(--r1); user-select: all; }
+.banner {
+  display: none; background: color-mix(in srgb, var(--dead) 15%, var(--bg));
+  color: var(--ink); padding: 6px 16px; font: 12px/1.5 var(--mono);
+  border-bottom: 1px solid var(--line);
+}
+.banner.on { display: block; }
+.newdot {
+  display: inline-flex; align-items: center; gap: 4px;
+  color: var(--accent); font: 600 10px/1 "Segoe UI", system-ui, sans-serif;
+}
+.newdot::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.noimg {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink3); font-size: 11px; background: #0b0c10;
+  border: 1px dashed var(--line); border-radius: var(--r1);
+}
+.imgbtn { display: block; border-radius: var(--r1); }
+.imgbtn img { border-radius: var(--r1); background: #0b0c10; border: 1px solid var(--line); }
+time { cursor: default; }
+.starred { color: var(--warn); } .crossed { color: var(--dead); }
+.reactbtn { padding: 4px 8px; border-radius: var(--r1); font-size: 13px; }
+.reactbtn[aria-pressed="true"] { background: var(--s2); border: 1px solid var(--line); }
+/* ============================ CHROME ================================== */
+#bar {
+  position: sticky; top: 0; z-index: 10; height: var(--bar-h);
+  display: flex; align-items: center; gap: var(--sp3); padding: 0 var(--sp4);
+  background: color-mix(in srgb, var(--bg) 92%, black); border-bottom: 1px solid var(--line);
+}
+#brand {
+  font: 700 13px/1 var(--mono); letter-spacing: .14em; color: var(--ink);
+  white-space: nowrap; display: inline-flex; align-items: baseline; gap: 7px;
+}
+#brand span { font: 600 9px/1 var(--mono); letter-spacing: .22em; color: var(--accent);
+              text-transform: uppercase; }
+#brand:hover { text-decoration: none; }
+#dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pend); flex: 0 0 auto; }
+#dot.on { background: var(--ok); } #dot.err { background: var(--dead); }
+#strip { display: flex; gap: var(--sp2); align-items: stretch; overflow-x: auto;
+         scrollbar-width: none; flex: 1 1 auto; min-width: 0; }
+.fcard {
+  flex: 0 0 auto; display: flex; flex-direction: column; gap: 3px; text-align: left;
+  padding: 5px 10px; border: 1px solid var(--line); border-radius: var(--r2);
+  background: var(--s1);
+}
+.fcard:hover { background: var(--s2); }
+.fcard[aria-current="true"] { border-color: var(--accent); }
+.fcard .l1 { display: flex; gap: 8px; align-items: center; }
+.fcard .name { font: 600 12px/1 var(--mono); }
+.fcard .l2 { display: flex; gap: 8px; font: 10px/1 var(--mono); color: var(--ink2);
+             align-items: center; }
+#bell {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  font: 600 11px/1 "Segoe UI", system-ui, sans-serif; color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line));
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  padding: 6px 10px; border-radius: 999px;
+}
+#chat-toggle {
+  font: 600 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink2); border: 1px solid var(--line); border-radius: var(--r1);
+  padding: 6px 10px; white-space: nowrap;
+}
+#chat-toggle[aria-pressed="true"] { color: var(--accent); border-color: var(--line2); }
+/* ============================ LAYOUT ================================== */
+#wrap { display: grid; grid-template-columns: minmax(0, 1fr) var(--chat-w); align-items: start; }
+body.nochat #wrap { grid-template-columns: minmax(0, 1fr); }
+body.nochat #chat { display: none; }
+#main { padding: var(--sp4); min-width: 0; padding-bottom: 80px; }
+section.zone { margin-bottom: var(--sp4); }
+section.zone > h2 {
+  font: 600 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ink3); margin: 0 0 var(--sp2);
+}
+/* war-room sub-header + tabs */
+#warhead {
+  position: sticky; top: var(--bar-h); z-index: 5;
+  background: color-mix(in srgb, var(--bg) 94%, black);
+  margin: calc(-1 * var(--sp4)) calc(-1 * var(--sp4)) var(--sp4);
+  padding: var(--sp2) var(--sp4) 0; border-bottom: 1px solid var(--line);
+}
+#warhead .row1 { display: flex; gap: var(--sp3); align-items: center; flex-wrap: wrap;
+                 padding-bottom: var(--sp2); }
+#warhead h1 { font: 600 15px/1 var(--mono); }
+#warhead .note { color: var(--ink3); font-size: 11px; overflow: hidden;
+                 text-overflow: ellipsis; white-space: nowrap; max-width: 40ch; }
+#warhead .spacer { flex: 1; }
+#tabs { display: flex; gap: 2px; }
+#tabs a {
+  display: inline-block; padding: 7px 14px 8px; font: 600 11px/1 "Segoe UI", system-ui, sans-serif;
+  letter-spacing: .02em; color: var(--ink2); border-bottom: 2px solid transparent;
+  border-radius: var(--r1) var(--r1) 0 0;
+}
+#tabs a:hover { color: var(--ink); background: var(--s1); text-decoration: none; }
+#tabs a[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+#seen-wrap { display: inline-flex; gap: 8px; align-items: center; }
+#seen-btn { color: var(--accent); border: 1px solid var(--line); border-radius: var(--r1);
+            padding: 4px 8px; font-size: 11px; }
+/* ============================ CHAT ==================================== */
+#chat {
+  position: sticky; top: var(--bar-h); height: calc(100vh - var(--bar-h));
+  display: flex; flex-direction: column;
+  border-left: 1px solid var(--line); background: var(--s1);
+}
+#chat .bar {
+  display: flex; gap: 8px; align-items: center; padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  font: 600 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ink3);
+}
+#msgs { flex: 1; overflow-y: auto; padding: var(--sp3); display: flex;
+        flex-direction: column; gap: var(--sp2); }
+.msg { max-width: 90%; padding: 7px 10px; border-radius: var(--r3); font-size: 12.5px;
+       white-space: pre-wrap; overflow-wrap: break-word; }
+.msg .who { display: block; font: 10px/1.7 var(--mono); color: var(--ink3); }
+.msg.user { align-self: flex-end; background: color-mix(in srgb, var(--accent) 15%, var(--s2));
+            border-bottom-right-radius: var(--r1); }
+.msg.supervisor { align-self: flex-start; background: var(--s2);
+                  border-bottom-left-radius: var(--r1); }
+.msg.undelivered { align-self: flex-end; font-size: 11px; color: var(--warn);
+                   background: color-mix(in srgb, var(--dead) 16%, var(--s2)); }
+#chat form { display: flex; gap: 6px; padding: 10px 12px 6px; border-top: 1px solid var(--line); }
+#chat-in { flex: 1; background: var(--bg); color: var(--ink); border: 1px solid var(--line);
+           border-radius: var(--r2); padding: 8px 10px; font-size: 13px; min-width: 0; }
+#chat-send { background: var(--s2); border: 1px solid var(--line); border-radius: var(--r2);
+             padding: 8px 12px; color: var(--accent); font-weight: 600; }
+#chat .opts { display: flex; gap: 8px; align-items: center; padding: 2px 12px;
+              font-size: 11px; color: var(--ink3); }
+#verbs { padding: 6px 12px 12px; font: 10px/1.7 var(--mono); color: var(--ink3);
+         border-top: 1px dashed var(--line); }
+@media (max-width: 1100px) {
+  #wrap { grid-template-columns: minmax(0, 1fr); }
+  #chat { position: fixed; left: 0; right: 0; bottom: 0; top: auto; height: 44vh;
+          z-index: 12; border-top: 1px solid var(--line); }
+  #main { padding-bottom: 46vh; }
+  body.nochat #main { padding-bottom: 80px; }
+}
+/* ====================== FLEET (task T6) ================================ */
+/* ===================== WAR ROOM (task T7) ============================== */
+/* ====================== DOSSIER (task T8) ============================== */
+/* ======================== LIVE (task T9) =============================== */
+/* ====================== COMPARE (task T10) ============================= */
+/* ======================= VIEWER (task T5) ============================== */
 </style>
 
-<header>
-  <h1>Gloomfell · mission control</h1>
+<a class="skip" href="#main">skip to content</a>
+<header id="bar">
+  <a id="brand" href="#/">GLOOMFELL<span>suite</span></a>
   <span id="dot" title="server connection"></span>
-  <div id="fleet" style="display:flex;gap:10px;align-items:stretch"></div>
+  <nav id="strip" aria-label="fleet"></nav>
+  <button id="bell" hidden aria-label="items needing you"></button>
+  <button id="chat-toggle" aria-pressed="true">chat</button>
 </header>
-<div id="net" class="banner">server unreachable — showing the last good state</div>
+<div id="net" class="banner" role="status">server unreachable — showing the last good state</div>
+<div id="announce" class="sr" role="status" aria-live="polite"></div>
 
 <div id="wrap">
-<main>
-  <section id="champ" class="card"><h2 style="padding:10px 12px 0">Champion</h2>
-    <div class="body" id="champ-body"></div></section>
-  <section id="designs-sec"><h2>Designs</h2><div id="staged"></div><div id="designs"></div>
-    <div id="queue" class="card" style="padding:8px 12px"></div>
-    <div id="events" class="card"></div></section>
-  <section id="runs-sec"><h2>Live renders</h2><div id="runs"></div></section>
-</main>
+  <main id="main" tabindex="-1"></main>
 
-<aside id="chat" aria-label="chat with the supervisor">
-  <div class="bar">Chat<button id="chat-hide" title="hide chat">✕</button></div>
-  <div id="msgs"></div>
-  <form id="chat-form">
-    <input id="chat-in" autocomplete="off"
-           placeholder="tell the workflow… (Enter to send)">
-    <button id="chat-send" type="submit">Send</button>
-  </form>
-  <label class="opts"><input type="checkbox" id="chat-scope"> <span id="scope-label">to this asset</span></label>
-  <div id="verbs">stop · pause &lt;asset&gt; · resume &lt;asset&gt; · status ·
-    add design &lt;asset&gt;: &lt;text&gt; · new &lt;hero|npc|tower&gt; [name]: &lt;desc&gt; ·
-    new N npcs · makers &lt;asset&gt; N · promote &lt;design&gt; · finish &lt;asset&gt;</div>
-</aside>
+  <aside id="chat" aria-label="chat with the supervisor">
+    <div class="bar">Chat</div>
+    <div id="msgs"></div>
+    <form id="chat-form">
+      <input id="chat-in" autocomplete="off" placeholder="tell the workflow… (Enter to send)">
+      <button id="chat-send" type="submit">Send</button>
+    </form>
+    <label class="opts"><input type="checkbox" id="chat-scope">
+      <span id="scope-label">to this asset</span></label>
+    <div id="verbs">stop · pause &lt;asset&gt; · resume &lt;asset&gt; · status ·
+      add design &lt;asset&gt;: &lt;text&gt; · new &lt;hero|npc|tower&gt; [name]: &lt;desc&gt; ·
+      new N npcs · makers &lt;asset&gt; N · promote &lt;design&gt; · finish &lt;asset&gt;</div>
+  </aside>
 </div>
-
-<div id="big"><img alt=""><div></div></div>
 
 <script>
 'use strict';
+/* ============================ utils =================================== */
 const $ = id => document.getElementById(id);
 const q = p => p + (p.includes('?') ? '&' : '?') + 't=' + Date.now();  // JSON only — never images
-function h(tag, attrs, ...kids) {           // tiny element builder — no innerHTML with data
+function h(tag, attrs, ...kids) {          // tiny element builder — no innerHTML with data, ever
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
     if (k === 'class') el.className = v;
@@ -213,6 +310,8 @@ function h(tag, attrs, ...kids) {           // tiny element builder — no inner
   for (const k of kids) if (k) el.appendChild(typeof k === 'string' ? document.createTextNode(k) : k);
   return el;
 }
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 function fmtRel(iso) {
   const t = Date.parse(iso); if (!Number.isFinite(t)) return null;
   const s = Math.max(0, (Date.now() - t) / 1000);
@@ -222,9 +321,9 @@ function fmtRel(iso) {
   return new Date(t).toLocaleDateString();
 }
 function timeEl(iso) {
-  if (!iso) return h('span', { class: 'when', text: '' });
-  const el = h('time', { class: 'when', datetime: iso, 'data-ts': iso,
-                         title: new Date(iso).toLocaleString() });
+  if (!iso) return h('span', { class: 'faint', text: '' });
+  const el = h('time', { class: 'faint num', datetime: iso, 'data-ts': iso,
+                         title: new Date(iso).toLocaleString() + ' · ' + iso });
   el.textContent = fmtRel(iso) || iso;
   return el;
 }
@@ -235,25 +334,296 @@ function refreshTimes() {
   }
 }
 function hbAge(iso) { const t = Date.parse(iso); return Number.isFinite(t) ? (Date.now() - t) / 1000 : null; }
-
-const S = {
-  focused: new URLSearchParams(location.search).get('asset') || null,
-  fleet: null, pipes: new Map(), live: null, champion: null, chat: [],
-  sigs: {}, failures: 0, tick: 0, pendingRows: [],
-};
-
-/* ---------------- fetch cycle ---------------- */
-async function jget(url) {
+function fmtAge(age) {
+  if (age < 90) return Math.round(age) + 's';
+  if (age < 5400) return Math.round(age / 60) + 'm';
+  if (age < 172800) return (age / 3600).toFixed(1).replace('.0', '') + 'h';
+  return Math.round(age / 86400) + 'd';
+}
+function announce(key, msg) {              // edge-triggered screen-reader announcements
+  if (S.announced[key] === msg) return;
+  S.announced[key] = msg;
+  if (msg) $('announce').textContent = msg;
+}
+/* ============================ router ================================== */
+// #/                      fleet overview
+// #/a/<asset>             war room (overview tab)
+// #/a/<asset>/live        war room, live tab
+// #/a/<asset>/compare     war room, compare tab
+// #/a/<asset>/d/<design>  dossier slide-over above the overview tab
+function parseRoute() {
+  const m = location.hash.match(
+    /^#\/a\/([A-Za-z0-9_-]{1,64})(?:\/(live|compare)|\/d\/([A-Za-z0-9_-]{1,64}))?$/);
+  if (!m) return { view: 'fleet', asset: null, tab: null, design: null };
+  return { view: 'asset', asset: m[1], tab: m[2] || 'overview', design: m[3] || null };
+}
+function nav(hash) { if (location.hash !== hash) location.hash = hash; }
+function applyRoute() {
+  const next = parseRoute();
+  const was = S.route;
+  if (next.asset !== was.asset) {
+    // all per-asset state derives from the asset — drop it wholesale
+    S.champion = S.control = S.live = S.attempts = null;
+    S.attemptsSig = null; S.compare = null; S.compareText = null;
+    S.marks = new Map(); S.dirs = new Map(); S.seen = null;
+    S.sigs = {};
+  }
+  if (next.view !== was.view || next.tab !== was.tab) S.viewKind = null;  // rebuild scaffold
+  S.route = next;
+  render();
+  tick();                                   // fetch the new focus immediately
+}
+/* ============================== net =================================== */
+async function jget(url) {                   // 404 = absent state, not an error
   const r = await fetch(q(url), { cache: 'no-store' });
-  return r.ok ? r.json() : null;                 // 404 = absent state, not an error
+  return r.ok ? r.json() : null;
 }
 async function tget(url) {
   const r = await fetch(q(url), { cache: 'no-store' });
   return r.ok ? r.text() : null;
 }
+async function headSig(url) {                // cheap change gate for big JSONL files
+  const r = await fetch(q(url), { method: 'HEAD', cache: 'no-store' });
+  if (!r.ok) return null;
+  return (r.headers.get('content-length') || '') + '|' + (r.headers.get('last-modified') || '');
+}
+async function postJSON(path, body) {
+  try {
+    const r = await fetch(path, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return r.ok;
+  } catch (e) { return false; }
+}
+/* ============================== store ================================= */
+const S = {
+  route: { view: null, asset: null, tab: null, design: null },
+  viewKind: null,                 // which scaffold #main currently holds
+  sigs: {},                       // render signature guards, cleared per view/asset
+  fleet: null, assetsOnDisk: [], pipes: new Map(),
+  champion: null, control: null, live: null,
+  attempts: null, attemptsSig: null,
+  compare: null, compareText: null, manifests: new Map(),
+  chat: [], pendingRows: [],
+  marks: new Map(), dirs: new Map(), signalsOK: true,
+  seen: null, announced: {},
+  failures: 0, tick: 0, ticking: false,
+};
+window.__gf = S;                  // debugging seam — verification reads parsed state here
+function sig(key, value) {
+  const s = JSON.stringify(value ?? null);
+  if (S.sigs[key] === s) return false;
+  S.sigs[key] = s;
+  return true;
+}
+/* ============================== poller ================================ */
+async function tick() {
+  if (S.ticking) return;                    // a slow tick must not interleave with the next
+  S.ticking = true;
+  try { await tickBody(); } finally { S.ticking = false; }
+  try { render(); } catch (e) { console.error('render failed', e); }
+  refreshTimes();
+}
+async function tickBody() {
+  S.tick++;
+  const slow = S.tick % 5 === 1;
+  const R = S.route, asset = R.view === 'asset' ? R.asset : null;
+  try {
+    if (slow || !S.fleet) {
+      S.fleet = await jget('/fleet.json');
+      S.assetsOnDisk = (await jget('/assets.json')) || [];
+      for (const a of (S.fleet?.assets || []))
+        if (a.asset !== asset) S.pipes.set(a.asset, await jget(`/${a.asset}/pipeline.json`));
+    }
+    if (asset) {
+      S.pipes.set(asset, await jget(`/${asset}/pipeline.json`));
+      if (slow || !S.champion) S.champion = await jget(`/${asset}/champion.json`);
+      if (slow || !S.control) S.control = await jget(`/${asset}/control.json`);
+      if (slow || !S.attempts) await pollAttempts(asset);
+      if (slow) { await pollSignals(asset); await pollDirectives(asset); }
+      if (R.tab === 'live') S.live = await jget(`/${asset}/live.json`);
+      if (R.tab === 'compare') await pollCompare(asset);
+    }
+    S.chat = mergeChat(await tget('/chat.jsonl'), await tget('/feed.jsonl'));
+    S.failures = 0;
+    $('dot').className = 'on';
+    $('net').classList.remove('on');
+  } catch (e) {                             // server unreachable — keep the last good state
+    S.failures++;
+    if (S.failures >= 3) { $('dot').className = 'err'; $('net').classList.add('on'); }
+  }
+}
+/* --- data-layer stubs filled by task T4 --- */
+async function pollAttempts(asset) {}
+async function pollSignals(asset) {}
+async function pollDirectives(asset) {}
+async function pollCompare(asset) {}
+/* ============================== render ================================ */
+function ensureScaffold(kind, build) {
+  if (S.viewKind === kind) return;
+  S.viewKind = kind;
+  S.sigs = {};
+  const main = $('main');
+  main.textContent = '';
+  build(main);
+}
+function render() {
+  renderStrip();
+  renderBell();
+  if (S.route.view === 'fleet') renderFleetView();
+  else renderAssetView();
+  renderChat();
+}
+/* --- chrome: fleet strip (enriched in T6; minimal cards now) --- */
+function stateOf(a) {                        // fleet state wins; pipeline, then control fill in
+  return a?.state || S.pipes.get(a?.asset)?.state || 'unknown';
+}
+function renderStrip() {
+  const assets = S.fleet?.assets || [];
+  const hbs = assets.map(x => S.pipes.get(x.asset)?.heartbeat || null);
+  if (!sig('strip', [assets, hbs, S.route.asset])) return;
+  const host = $('strip');
+  host.textContent = '';
+  for (const a of assets) {
+    const st = ['run', 'pause', 'stop'].includes(a.state) ? a.state : 'unknown';
+    const age = hbAge(S.pipes.get(a.asset)?.heartbeat);
+    const hbCls = a.state !== 'run' || age == null ? 'faint'
+                : age < 90 ? 'hb-ok' : age < 300 ? 'hb-warn' : 'hb-stale';
+    const hbTxt = age == null ? 'hb —' : 'hb ' + fmtAge(age) + (age >= 300 && a.state === 'run' ? ' · stuck?' : '');
+    host.appendChild(h('button', { class: 'fcard', 'aria-current': String(a.asset === S.route.asset),
+                                   onclick: () => nav('#/a/' + a.asset) },
+      h('span', { class: 'l1' },
+        h('span', { class: 'name', text: a.asset }),
+        h('span', { class: 'pill st-' + st + (st === 'run' ? ' pulse' : ''), text: a.state || '?' })),
+      h('span', { class: 'l2 num' },
+        h('span', { title: 'accepted', text: '✓' + (a.accepted ?? '—') }),
+        h('span', { title: 'queue depth', text: 'q' + (a.queue ?? '—') }),
+        a.staged ? h('span', { class: 'chip amber', title: 'staged, awaiting promote', text: '⚑' + a.staged }) : null,
+        h('span', { class: hbCls, text: hbTxt }))));
+  }
+}
+function needsYou() {                        // aggregated attention items (fleshed out in T6)
+  const items = [];
+  for (const a of (S.fleet?.assets || [])) {
+    const p = S.pipes.get(a.asset);
+    for (const s of (p?.staged || []))
+      items.push({ asset: a.asset, kind: 'staged',
+                   label: `${a.asset} — ${s.design} staged ${fmtMargins(s.margins)}, awaiting promote`,
+                   href: '#/a/' + a.asset });
+    const age = hbAge(p?.heartbeat);
+    if (a.state === 'run' && age != null && age >= 300)
+      items.push({ asset: a.asset, kind: 'stale-hb',
+                   label: `${a.asset} — heartbeat ${fmtAge(age)} old while running: pipeline may be stuck`,
+                   href: '#/a/' + a.asset });
+    if (a.state === 'pause' && a.staged)
+      items.push({ asset: a.asset, kind: 'paused-staged',
+                   label: `${a.asset} — paused with ${a.staged} staged design${a.staged === 1 ? '' : 's'} waiting`,
+                   href: '#/a/' + a.asset });
+  }
+  return items;
+}
+function fmtMargins(ms) {
+  return (ms || []).map(m => (m > 0 ? '+' : '') + m).join('/');
+}
+function renderBell() {
+  const n = needsYou().length;
+  if (!sig('bell', n)) return;
+  const bell = $('bell');
+  bell.hidden = !n;
+  bell.textContent = '';
+  if (n) {
+    bell.appendChild(h('span', { text: '⚑ ' }));
+    bell.appendChild(h('b', { class: 'num', text: String(n) }));
+    bell.appendChild(h('span', { text: ' need' + (n === 1 ? 's' : '') + ' you' }));
+    bell.onclick = () => nav('#/');
+    announce('bell', n + ' item' + (n === 1 ? '' : 's') + ' waiting on you');
+  } else announce('bell', '');
+}
+/* --- view scaffolds: stubs replaced by T6/T7/T9/T10 --- */
+function renderFleetView() {
+  ensureScaffold('fleet', main => {
+    main.appendChild(h('div', { class: 'card empty', id: 'fleet-stub', text: 'fleet view — task T6' }));
+  });
+}
+function renderAssetView() {
+  const R = S.route;
+  ensureScaffold('asset:' + R.asset, main => {
+    const head = h('div', { id: 'warhead' },
+      h('div', { class: 'row1' },
+        h('h1', { text: R.asset }),
+        h('span', { id: 'wh-state', class: 'pill st-unknown', text: '—' }),
+        h('span', { id: 'wh-hb', class: 'chip num', text: 'hb —' }),
+        h('span', { id: 'wh-note', class: 'note' }),
+        h('span', { class: 'spacer' }),
+        h('span', { id: 'seen-wrap', hidden: 'hidden' },
+          h('span', { id: 'wh-new', class: 'newdot' }),
+          h('button', { id: 'seen-btn', text: 'mark seen' }))),
+      h('nav', { id: 'tabs', role: 'tablist', 'aria-label': 'war room views' }));
+    main.appendChild(head);
+    main.appendChild(h('div', { id: 'tab-overview', role: 'tabpanel' }));
+    main.appendChild(h('div', { id: 'tab-live', role: 'tabpanel' }));
+    main.appendChild(h('div', { id: 'tab-compare', role: 'tabpanel' }));
+  });
+  // tab bar + panel visibility react to the route every render
+  if (sig('tabs', [R.asset, R.tab])) {
+    const tabs = $('tabs');
+    tabs.textContent = '';
+    for (const [key, label] of [['overview', 'Overview'], ['live', 'Live'], ['compare', 'Compare']]) {
+      tabs.appendChild(h('a', { role: 'tab', 'aria-selected': String(R.tab === key),
+        href: '#/a/' + R.asset + (key === 'overview' ? '' : '/' + key), text: label }));
+    }
+    for (const key of ['overview', 'live', 'compare'])
+      $('tab-' + key).style.display = R.tab === key ? '' : 'none';
+  }
+  renderWarHead();
+  if (R.tab === 'overview') renderOverview();
+  else if (R.tab === 'live') renderLive();
+  else renderCompare();
+}
+function renderWarHead() {
+  const R = S.route, p = S.pipes.get(R.asset);
+  const fleetRow = (S.fleet?.assets || []).find(x => x.asset === R.asset);
+  const state = fleetRow?.state || p?.state || S.control?.state || 'unknown';
+  if (!sig('warhead', [state, p?.heartbeat, p?.note, fleetRow?.note])) return;
+  const st = $('wh-state');
+  st.textContent = state;
+  st.className = 'pill st-' + (['run', 'pause', 'stop'].includes(state) ? state : 'unknown')
+    + (state === 'run' ? ' pulse' : '');
+  announce('state', R.asset + ' pipeline ' + state);
+  const age = hbAge(p?.heartbeat);
+  const hb = $('wh-hb');
+  if (age == null) { hb.textContent = 'hb —'; hb.className = 'chip num'; }
+  else {
+    const stuck = age >= 300 && state === 'run';
+    hb.textContent = 'hb ' + fmtAge(age) + (stuck ? ' · stuck?' : '');
+    hb.className = 'chip num ' + (state !== 'run' ? '' : age < 90 ? 'hb-ok' : age < 300 ? 'hb-warn' : 'hb-stale');
+    hb.title = 'shepherd heartbeat: ' + (p?.heartbeat ? new Date(p.heartbeat).toLocaleString() : '—');
+    announce('stuck', stuck ? 'shepherd heartbeat is stale — pipeline may be stuck' : '');
+  }
+  $('wh-note').textContent = p?.note || fleetRow?.note || '';
+  $('wh-note').title = $('wh-note').textContent;
+}
+function renderOverview() {
+  const host = $('tab-overview');
+  if (!sig('ov-stub', 1)) return;
+  host.textContent = '';
+  host.appendChild(h('div', { class: 'card empty', text: 'war room overview — task T7' }));
+}
+function renderLive() {
+  const host = $('tab-live');
+  if (!sig('live-stub', 1)) return;
+  host.textContent = '';
+  host.appendChild(h('div', { class: 'card empty', text: 'live feed — task T9' }));
+}
+function renderCompare() {
+  const host = $('tab-compare');
+  if (!sig('cmp-stub', 1)) return;
+  host.textContent = '';
+  host.appendChild(h('div', { class: 'card empty', text: 'compare — task T10' }));
+}
+/* ============================== chat ================================== */
 function parseJsonl(text) {
   return (text || '').split('\n').filter(l => l.trim()).map(l => {
-    try { return JSON.parse(l); } catch (e) { return null; }
+    try { return JSON.parse(l); } catch (e) { return null; }   // torn tail line
   }).filter(Boolean);
 }
 function mergeChat(chatText, feedText) {
@@ -265,224 +635,12 @@ function mergeChat(chatText, feedText) {
   });
   return lines;
 }
-
-async function tick() {
-  S.tick++;
-  const slow = S.tick % 5 === 1;                  // fleet + champion cadence
-  try {
-    if (slow || !S.fleet) {
-      S.fleet = await jget('/fleet.json');
-      for (const a of (S.fleet?.assets || []))
-        if (a.asset !== S.focused)
-          S.pipes.set(a.asset, await jget(`/${a.asset}/pipeline.json`));
-    }
-    if (!S.focused && S.fleet?.assets?.length) S.focused = S.fleet.assets[0].asset;
-    if (S.focused) {
-      S.pipes.set(S.focused, await jget(`/${S.focused}/pipeline.json`));
-      S.live = await jget(`/${S.focused}/live.json`);
-      if (slow || !S.champion) S.champion = await jget(`/${S.focused}/champion.json`);
-    }
-    S.chat = mergeChat(await tget('/chat.jsonl'), await tget('/feed.jsonl'));
-    S.failures = 0;
-    $('dot').className = 'on';
-    $('net').classList.remove('on');
-  } catch (e) {
-    S.failures++;
-    if (S.failures >= 3) { $('dot').className = 'err'; $('net').classList.add('on'); }
-    return;                                       // keep the last good state
-  }
-  render();
-  refreshTimes();
-}
-
-function focusAsset(asset) {
-  if (asset === S.focused) return;
-  S.focused = asset; S.live = null; S.champion = null;
-  history.replaceState(null, '', '?asset=' + encodeURIComponent(asset));
-  S.sigs = {}; S.tick = 0;                        // force full refetch + rerender
-  tick();
-}
-
-/* ---------------- render ---------------- */
-function sigGuard(key, value) {
-  const s = JSON.stringify(value ?? null);
-  if (S.sigs[key] === s) return false;
-  S.sigs[key] = s;
-  return true;
-}
-function render() {
-  renderFleet(); renderChampion(); renderDesigns(); renderRuns(); renderChat();
-}
-
-function renderFleet() {
-  const assets = S.fleet?.assets || [];
-  const hb = assets.map(a => {
-    const p = S.pipes.get(a.asset);
-    return p?.heartbeat || null;
-  });
-  if (!sigGuard('fleet', [assets, hb, S.focused])) return;
-  const host = $('fleet');
-  host.textContent = '';
-  if (!assets.length) {
-    host.appendChild(h('span', { class: 'faint', text: 'no fleet running — waiting for the supervisor' }));
-    return;
-  }
-  for (const a of assets) {
-    const p = S.pipes.get(a.asset);
-    const age = p?.heartbeat ? hbAge(p.heartbeat) : null;
-    const hbCls = a.state !== 'run' || age == null ? 'faint'
-                : age < 90 ? 'hb-ok' : age < 300 ? 'hb-warn' : 'hb-stale';
-    const hbTxt = age == null ? 'hb —'
-                : 'hb ' + (age < 90 ? Math.round(age) + 's'
-                          : age < 5400 ? Math.round(age / 60) + 'm'
-                          : (age / 3600).toFixed(1) + 'h')
-                  + (age >= 300 && a.state === 'run' ? ' · stuck?' : '');
-    host.appendChild(h('button', { class: 'fcard', 'aria-current': String(a.asset === S.focused),
-                                   onclick: () => focusAsset(a.asset) },
-      h('span', { class: 'l1' },
-        h('span', { class: 'name', text: a.asset }),
-        h('span', { class: 'pill st-' + (['run', 'pause', 'stop'].includes(a.state) ? a.state : 'unknown'),
-                    text: a.state || '?' })),
-      h('span', { class: 'l2' },
-        h('span', { text: `mk ${a.makers ?? '—'}` }),
-        h('span', { text: `q ${a.queue ?? '—'}` }),
-        h('span', { text: `✓ ${a.accepted ?? '—'}` }),
-        a.staged ? h('span', { class: 'chip amber', text: `staged ${a.staged}` }) : null,
-        h('span', { class: hbCls, text: hbTxt }))));
-  }
-}
-
-function zoom(src, caption) {
-  $('big').style.display = 'flex';
-  $('big').querySelector('img').src = src;
-  $('big').querySelector('div').textContent = caption || '';
-}
-
-function renderChampion() {
-  const c = S.champion;
-  if (!sigGuard('champ', [c, S.focused])) return;
-  const host = $('champ-body');
-  host.textContent = '';
-  if (!c || !S.focused) {
-    host.appendChild(h('div', { class: 'empty', text: 'no champion yet — nothing has been promoted for this asset' }));
-    return;
-  }
-  const runDir = 'run-' + String(c.run).padStart(3, '0');
-  if (c.sheet) {
-    const src = `/${S.focused}/${runDir}/${c.sheet}`;
-    host.appendChild(h('img', { src, alt: 'champion contact sheet',
-      onclick: () => zoom(src, `${S.focused} champion · run ${c.run} cell ${c.cell}`) }));
-  }
-  host.appendChild(h('div', { class: 'meta' },
-    h('span', { class: 'mono', text: `run ${c.run} · cell ${c.cell} · ${c.label ?? ''}` }),
-    h('span', {}, 'promoted by ', h('b', { text: c.by || '?' }), ' · ', timeEl(c.at)),
-    c.quote ? h('span', { class: 'faint', text: c.quote }) : null,
-    c.seed != null ? h('span', { class: 'faint mono', text: 'seed ' + c.seed }) : null));
-}
-
-function marginChip(v) {
-  const cls = v >= 2 ? 'pos' : v <= -2 ? 'neg' : 'mid';
-  return h('span', { class: 'm ' + cls, text: (v > 0 ? '+' : '') + v });
-}
-
-function renderDesigns() {
-  const p = S.pipes.get(S.focused);
-  if (!sigGuard('designs', [p, S.focused])) return;
-  const staged = $('staged'), lanes = $('designs'), queue = $('queue'), events = $('events');
-  staged.textContent = lanes.textContent = queue.textContent = events.textContent = '';
-  if (!p) {
-    lanes.appendChild(h('div', { class: 'empty card',
-      text: 'no pipeline.json — the shepherd for this asset is not running' }));
-    queue.style.display = events.style.display = 'none';
-    return;
-  }
-  queue.style.display = events.style.display = '';
-  for (const s of (p.staged || [])) {
-    staged.appendChild(h('div', { class: 'staged' },
-      h('b', { text: `⚑ ${s.design} · panel accepted, waiting for you` }), ' — ',
-      `run ${s.run} cell ${s.cell}, margins ${((s.margins) || []).map(m => (m > 0 ? '+' : '') + m).join('/')}`,
-      s.chips?.length ? ` · chips: ${s.chips.join(', ')}` : '',
-      h('div', { class: 'faint', text: `say "promote ${s.design}" in chat, or file a directive from the gallery` })));
-  }
-  const ds = p.designs || [];
-  if (!ds.length && !(p.staged || []).length)
-    lanes.appendChild(h('div', { class: 'empty card', text: 'no designs in flight' }));
-  for (const d of ds) {
-    lanes.appendChild(h('div', { class: 'lane card' },
-      h('div', { class: 'head' },
-        h('span', { class: 'id', text: d.id }),
-        h('span', { class: 'chip origin-' + (d.origin || 'agent'),
-                    text: d.origin === 'user' ? 'yours' : 'agent-authored' }),
-        d.status ? h('span', { class: 'chip', text: d.status }) : null,
-        d.attempts ? h('span', { class: 'chip', text: 'a' + d.attempts }) : null,
-        h('span', { class: 'sum', title: d.summary || '', text: d.summary || '' }),
-        ...(d.last_margins || []).map(marginChip),
-        ...((d.chips || []).map(c => h('span', { class: 'chip amber', text: c }))))));
-  }
-  const qs = p.queue || [];
-  queue.appendChild(h('div', { class: 'faint mono', text: `queue · ${qs.length} waiting` }));
-  for (const d of qs) {
-    queue.appendChild(h('div', { class: 'qrow' },
-      h('span', { class: 'chip', text: d.id }),
-      h('span', { class: 'chip origin-' + (d.origin || 'agent'),
-                  text: d.origin === 'user' ? 'yours' : 'agent' }),
-      h('span', { class: 'dim', text: d.summary || '' })));
-  }
-  const evs = [...(p.events || [])].reverse().slice(0, 15);
-  for (const e of evs) {
-    events.appendChild(h('div', {},
-      h('span', { class: 'at', text: (e.at || '').replace('T', ' ').slice(5, 16) }),
-      e.text || ''));
-  }
-  if (!evs.length) events.appendChild(h('div', { class: 'faint', text: 'no events yet' }));
-}
-
-function renderRuns() {
-  const L = S.live;
-  if (!sigGuard('runs', [L?.stamped, L?.runs?.length, S.focused])) return;
-  const host = $('runs');
-  host.textContent = '';
-  if (!L || !L.runs) {
-    host.appendChild(h('div', { class: 'empty card',
-      text: `no live feed — is the tap running?  python Assets/Blender/_tools/tap.py ${S.focused || '<asset>'}` }));
-    return;
-  }
-  for (const r of L.runs.slice(0, 20)) {
-    const el = h('section', { class: 'run' + (r.claimed ? '' : ' unclaimed') });
-    const shots = r.variants.flatMap(v => v.shots);
-    el.appendChild(h('div', { class: 'rhead' },
-      h('span', { class: 'rn', text: 'run-' + r.run }),
-      r.claimed ? h('span', { class: 'tag', text: r.tag }) : h('span', { class: 'untag', text: 'unclaimed' }),
-      r.seed != null ? h('span', { class: 'seed', text: 'seed ' + r.seed }) : null,
-      h('span', { class: 'seed', text: shots.length + ' shot' + (shots.length === 1 ? '' : 's') }),
-      r.done === false ? h('span', { class: 'tag', text: 'rendering…' }) : null,
-      r.audit ? h('span', { class: 'seed', text: 'audit ' + r.audit }) : null,
-      h('span', { class: 'when', text: r.started || '' })));
-    if (!shots.length) {
-      el.appendChild(h('div', { class: 'empty', text: 'no images on disk for this run' }));
-    } else {
-      const strip = h('div', { class: 'shots' });
-      for (const pth of shots) {
-        const src = `/${S.focused}/${pth}`;
-        strip.appendChild(h('div', { class: 'shot' },
-          h('img', { src, loading: 'lazy', alt: pth,
-                     onclick: () => zoom(src, `run-${r.run} · ${pth}`) }),
-          h('span', { text: pth.split('/').pop() })));
-      }
-      el.appendChild(strip);
-    }
-    host.appendChild(el);
-  }
-}
-
-/* ---------------- chat ---------------- */
 function chatPinned() {
   const m = $('msgs');
   return m.scrollHeight - m.scrollTop - m.clientHeight < 40;
 }
 function renderChat() {
-  const sig = [S.chat.length, S.chat[S.chat.length - 1]?.at, S.pendingRows.length];
-  if (!sigGuard('chat', sig)) return;
+  if (!sig('chat', [S.chat.length, S.chat[S.chat.length - 1]?.at, S.pendingRows.length])) return;
   const m = $('msgs');
   const pin = chatPinned();
   m.textContent = '';
@@ -492,12 +650,21 @@ function renderChat() {
     const who = line.from === 'user' ? 'user' : 'supervisor';
     m.appendChild(h('div', { class: 'msg ' + who },
       h('span', { class: 'who' },
-        (who === 'user' ? 'you' : 'supervisor')
-        + (line.asset ? ' · ' + line.asset : '') + ' · ', timeEl(line.at)),
+        (who === 'user' ? 'you' : 'supervisor') + (line.asset ? ' · ' + line.asset : '') + ' · ',
+        timeEl(line.at)),
       line.text || ''));
   }
   for (const row of S.pendingRows) m.appendChild(row);
   if (pin) m.scrollTop = m.scrollHeight;
+}
+function prefillChat(text) {                 // verb buttons come here — never a silent POST
+  document.body.classList.remove('nochat');
+  $('chat-toggle').setAttribute('aria-pressed', 'true');
+  lsSet('gf-suite-chat', '');
+  const input = $('chat-in');
+  input.value = text;
+  input.focus();
+  input.setSelectionRange(text.length, text.length);
 }
 async function sendChat(ev) {
   ev.preventDefault();
@@ -505,14 +672,11 @@ async function sendChat(ev) {
   const text = input.value.trim();
   if (!text) return;
   const body = { text };
-  if ($('chat-scope').checked && S.focused) body.asset = S.focused;
-  try {
-    const r = await fetch('/chat', { method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
+  if ($('chat-scope').checked && S.route.asset) body.asset = S.route.asset;
+  if (await postJSON('/chat', body)) {
     input.value = '';
-    tick();                                        // show the line immediately
-  } catch (e) {
+    tick();                                  // show the line immediately
+  } else {
     const row = h('div', { class: 'msg undelivered', text: '⚠ not delivered — server down? ' + text });
     S.pendingRows.push(row);
     $('msgs').appendChild(row);
@@ -524,27 +688,31 @@ async function sendChat(ev) {
   }
 }
 $('chat-form').addEventListener('submit', sendChat);
-$('chat-hide').addEventListener('click', () => {
+$('chat-toggle').addEventListener('click', () => {
+  const hidden = document.body.classList.toggle('nochat');
+  $('chat-toggle').setAttribute('aria-pressed', String(!hidden));
+  lsSet('gf-suite-chat', hidden ? 'hidden' : '');
+});
+if (lsGet('gf-suite-chat') === 'hidden') {
   document.body.classList.add('nochat');
-  try { localStorage.setItem('gf-v4-chat', 'hidden'); } catch (e) {}
-});
-try {
-  if (localStorage.getItem('gf-v4-chat') === 'hidden') document.body.classList.add('nochat');
-} catch (e) {}
-document.body.addEventListener('dblclick', ev => {   // double-click anywhere on the header re-opens chat
-  if (ev.target.closest('header')) {
-    document.body.classList.remove('nochat');
-    try { localStorage.setItem('gf-v4-chat', ''); } catch (e) {}
-  }
-});
-
-$('big').onclick = () => { $('big').style.display = 'none'; };
-addEventListener('keydown', e => { if (e.key === 'Escape') $('big').style.display = 'none'; });
-
+  $('chat-toggle').setAttribute('aria-pressed', 'false');
+}
 setInterval(() => {
-  const label = $('scope-label');
-  label.textContent = 'to ' + (S.focused || 'this asset');
+  $('scope-label').textContent = 'to ' + (S.route.asset || 'this asset');
 }, 2000);
-tick();
-setInterval(tick, 1000);
+/* ============================== boot ================================== */
+addEventListener('hashchange', applyRoute);
+(function boot() {
+  // legacy deep links: ?asset=x → #/a/x (and the old live.html deep link shape)
+  const params = new URLSearchParams(location.search);
+  const legacy = params.get('asset');
+  if (legacy && !location.hash.startsWith('#/')) {
+    const clean = location.pathname + '#/a/' + encodeURIComponent(legacy);
+    history.replaceState(null, '', clean);
+  }
+  S.route = parseRoute();
+  render();
+  tick();
+  setInterval(tick, 1000);
+})();
 </script>
