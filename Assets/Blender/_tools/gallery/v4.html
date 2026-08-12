@@ -360,6 +360,56 @@ section.zone > h2 {
 .zonehead button { font-size: 11px; color: var(--accent); }
 
 /* ====================== DOSSIER (task T8) ============================== */
+#dossier { margin: 0 0 0 auto; width: min(720px, 60vw); height: 100vh; max-height: 100vh;
+           background: var(--s1); border-left: 1px solid var(--line2);
+           color: var(--ink); }
+#dossier[open] { display: flex; flex-direction: column; }
+#dossier .dhead { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap;
+                  padding: var(--sp3) var(--sp4); border-bottom: 1px solid var(--line);
+                  position: sticky; top: 0; background: var(--s1); z-index: 2; }
+#dossier .dhead .id { font: 600 16px/1 var(--mono); }
+#dossier .dhead .sum { flex-basis: 100%; color: var(--ink2); font-size: 12.5px; }
+#dossier .dbody { flex: 1; overflow-y: auto; padding: var(--sp3) var(--sp4) 60px; }
+#d-close { margin-left: auto; font-size: 15px; min-width: 36px; min-height: 36px;
+           border: 1px solid var(--line); border-radius: var(--r1); }
+.att { border: 1px solid var(--line); border-radius: var(--r2); background: var(--s2);
+       margin-bottom: var(--sp3); overflow: hidden; }
+.att > .ahead { display: flex; gap: var(--sp2); align-items: baseline; flex-wrap: wrap;
+                padding: 8px var(--sp3); background: var(--s3);
+                border-bottom: 1px solid var(--line); font: 11px/1.5 var(--mono); }
+.att .an { color: var(--ink); font-weight: 700; font-size: 13px; }
+.att .abody { padding: var(--sp3); display: flex; flex-direction: column; gap: var(--sp3); }
+.cellgrid { display: flex; gap: 6px; flex-wrap: wrap; }
+.cellchip { display: flex; flex-direction: column; gap: 3px; padding: 6px 8px;
+            border: 1px solid var(--line); border-radius: var(--r1); background: var(--s1);
+            font: 10px/1.4 var(--mono); color: var(--ink2); min-width: 76px; text-align: left; }
+.cellchip .cl1 { display: flex; gap: 5px; align-items: center; color: var(--ink); }
+.cellchip.judged { border-color: var(--chart); box-shadow: 0 0 0 1px var(--chart); }
+.cellchip.dead-cell { border-color: color-mix(in srgb, var(--dead) 55%, var(--line)); }
+.cellchip.dead-cell .cl1 { color: var(--dead); }
+.verdict { display: flex; gap: var(--sp2); align-items: flex-start; padding: 8px 10px;
+           background: var(--s1); border: 1px solid var(--line); border-radius: var(--r1); }
+.verdict .vmeta { display: flex; gap: 6px; align-items: center; flex: 0 0 auto; flex-wrap: wrap;
+                  max-width: 180px; }
+.verdict .sugg { flex: 1; font-size: 12px; color: var(--ink2); white-space: pre-wrap; }
+.dirblock { background: var(--s1); border: 1px solid var(--line); border-radius: var(--r1);
+            padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.dirbtn { border: 1px solid var(--line); border-radius: var(--r1); padding: 6px 10px;
+          font-size: 12px; background: var(--s2); }
+.dirbtn.confirm { color: var(--accent); border-color: var(--accent); }
+.dirchip { color: var(--warn); }
+.dirblock input { background: var(--bg); color: var(--ink); border: 1px solid var(--line);
+                  border-radius: var(--r1); padding: 6px 8px; font: inherit; font-size: 12px;
+                  width: 100%; }
+#d-chart { overflow-x: auto; }
+#d-chart .axis-lbl { font: 9px/1 var(--mono); fill: var(--ink3); }
+#d-chart .grid { stroke: var(--line); stroke-width: 1; }
+#d-chart .zero { stroke: var(--line2); stroke-width: 1.5; }
+#d-chart .origin-line { fill: none; stroke: var(--chart); stroke-width: 2; }
+#d-chart .origin-dot { fill: var(--chart); }
+#d-chart .inc-dot { fill: none; stroke: var(--ink2); stroke-width: 2; }
+#d-chart .series-lbl { font: 10px/1 var(--mono); fill: var(--ink2); }
+
 /* ======================== LIVE (task T9) =============================== */
 /* ====================== COMPARE (task T10) ============================= */
 /* ======================= VIEWER (task T5) ============================== */
@@ -435,6 +485,11 @@ dialog::backdrop { background: #05060acc; }
       new N npcs · makers &lt;asset&gt; N · promote &lt;design&gt; · finish &lt;asset&gt;</div>
   </aside>
 </div>
+
+<dialog id="dossier" aria-modal="true" aria-label="design dossier">
+  <div class="dhead" id="d-head"></div>
+  <div class="dbody" id="d-body"></div>
+</dialog>
 
 <dialog id="viewer" aria-modal="true" aria-labelledby="v-title">
   <div class="v-bar">
@@ -532,7 +587,11 @@ function parseRoute() {
   if (!m) return { view: 'fleet', asset: null, tab: null, design: null };
   return { view: 'asset', asset: m[1], tab: m[2] || 'overview', design: m[3] || null };
 }
-function nav(hash) { if (location.hash !== hash) location.hash = hash; }
+function nav(hash) {
+  if (location.hash === hash) return;
+  location.hash = hash;
+  applyRoute();          // synchronous — never wait on a (possibly throttled) hashchange
+}
 function applyRoute() {
   const next = parseRoute();
   const was = S.route;
@@ -783,6 +842,9 @@ function commitSeen() {
 addEventListener('pagehide', commitSeen);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') commitSeen();
+  // Chrome throttles a hidden tab's timers to ~1/min; catch up the instant
+  // the user looks back at the page instead of waiting out the throttle.
+  else tick();
 });
 /* ======================= signals + directives =========================
    Two separate doors on purpose (serve.py): star/cross are taste signals,
@@ -1021,6 +1083,7 @@ function renderAssetView() {
   if (R.tab === 'overview') renderOverview();
   else if (R.tab === 'live') renderLive();
   else renderCompare();
+  syncDossier();
 }
 function renderWarHead() {
   const R = S.route, p = S.pipes.get(R.asset);
@@ -1325,6 +1388,226 @@ function renderOverview() {
     }
   }
 }
+/* ============================= dossier ================================
+   The design's full story as a slide-over: the war room stays behind it.
+   Esc / scrim / ✕ close back to the war room; the URL deep-links it. */
+const DIRINFO = {
+  rework:    ['↻', 'needs more work'],
+  revert:    ['⎌', 'revert this change'],
+  resurrect: ['✓', 'mark good'],
+};
+function syncDossier() {
+  const dlg = $('dossier');
+  if (!S.route.design) { if (dlg.open) dlg.close(); return; }
+  if (!dlg.open) dlg.showModal();
+  renderDossier();
+}
+$('dossier').addEventListener('close', () => {          // the native-Esc path
+  S.dirCompose = null;
+  if (S.route.design) nav('#/a/' + S.route.asset);
+});
+$('dossier').addEventListener('pointerdown', e => {
+  if (e.target === $('dossier')) nav('#/a/' + S.route.asset);   // backdrop clicks target the dialog itself
+});
+function ratchetChart(atts) {
+  const pts = atts.map((a, i) => ({ i, a,
+    org: signedMean(a.verdicts.filter(v => v.vs === 'origin')),
+    inc: signedMean(a.verdicts.filter(v => v.vs !== 'origin')) }));
+  if (!pts.some(p => p.org != null || p.inc != null)) return null;
+  const b = bands();
+  const W = Math.max(320, Math.min(560, 90 + atts.length * 64)), H = 150;
+  const ML = 30, MR = 92, MT = 12, MB = 22;
+  const x = i => ML + (atts.length === 1 ? 0 : i * (W - ML - MR) / (atts.length - 1));
+  const y = v => MT + (3 - v) / 6 * (H - MT - MB);        // fixed −3..+3 — margins are bounded
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('width', W); svg.setAttribute('height', H);
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', 'margins per attempt — '
+    + pts.map(p => `a${p.a.attempt}: origin ${p.org == null ? '—' : (p.org > 0 ? '+' : '') + p.org}, `
+                 + `incumbent ${p.inc == null ? '—' : (p.inc > 0 ? '+' : '') + p.inc}`).join('; '));
+  const gline = (v, cls, lbl) => {
+    const l = document.createElementNS(NS, 'line');
+    l.setAttribute('class', cls);
+    l.setAttribute('x1', ML - 4); l.setAttribute('x2', W - MR + 24);
+    l.setAttribute('y1', y(v)); l.setAttribute('y2', y(v));
+    svg.appendChild(l);
+    const t = document.createElementNS(NS, 'text');
+    t.setAttribute('class', 'axis-lbl');
+    t.setAttribute('x', 2); t.setAttribute('y', y(v) + 3);
+    t.textContent = lbl;
+    svg.appendChild(t);
+  };
+  gline(b.accept, 'grid', '+' + b.accept);
+  gline(0, 'zero', '0');
+  gline(b.reject, 'grid', String(b.reject));
+  for (const p of pts) {                    // x tick labels: the attempt number
+    const t = document.createElementNS(NS, 'text');
+    t.setAttribute('class', 'axis-lbl');
+    t.setAttribute('x', x(p.i) - 5); t.setAttribute('y', H - 6);
+    t.textContent = 'a' + (p.a.attempt ?? '?');
+    svg.appendChild(t);
+  }
+  const orgPts = pts.filter(p => p.org != null);
+  if (orgPts.length > 1) {
+    const pl = document.createElementNS(NS, 'polyline');
+    pl.setAttribute('class', 'origin-line');
+    pl.setAttribute('points', orgPts.map(p => `${x(p.i)},${y(p.org)}`).join(' '));
+    svg.appendChild(pl);
+  }
+  const mark = (px, py, cls, r, tip) => {
+    const c = document.createElementNS(NS, 'circle');
+    c.setAttribute('class', cls);
+    c.setAttribute('cx', px); c.setAttribute('cy', py); c.setAttribute('r', r);
+    const t = document.createElementNS(NS, 'title');
+    t.textContent = tip;
+    c.appendChild(t);
+    svg.appendChild(c);
+  };
+  for (const p of orgPts)
+    mark(x(p.i), y(p.org), 'origin-dot', 4,
+         `a${p.a.attempt} · vs origin ${(p.org > 0 ? '+' : '') + p.org}`);
+  for (const p of pts.filter(q => q.inc != null))                 // dodge +7 so marks never occlude
+    mark(x(p.i) + 7, y(p.inc), 'inc-dot', 4,
+         `a${p.a.attempt} · vs incumbent ${(p.inc > 0 ? '+' : '') + p.inc}`);
+  const slbl = (py, txt, fill) => {
+    const t = document.createElementNS(NS, 'text');
+    t.setAttribute('class', 'series-lbl');
+    t.setAttribute('x', W - MR + 30); t.setAttribute('y', py + 3);
+    if (fill) t.setAttribute('fill', fill);
+    t.textContent = txt;
+    svg.appendChild(t);
+  };
+  const lastOrg = orgPts[orgPts.length - 1];
+  const incPts = pts.filter(q => q.inc != null);
+  const lastInc = incPts[incPts.length - 1];
+  if (lastOrg) slbl(y(lastOrg.org), 'vs origin', 'var(--chart)');
+  if (lastInc) slbl(y(lastInc.inc) + (lastOrg && Math.abs(y(lastOrg.org) - y(lastInc.inc)) < 12 ? 12 : 0), 'vs incumbent');
+  return svg;
+}
+function directiveBlock(a) {
+  const key = rowKey(a);
+  const wrap = h('div', { class: 'dirblock', role: 'group', 'aria-label': 'your verdict override' });
+  if (S.dirCompose && S.dirCompose.key === key) {
+    const [g, label] = DIRINFO[S.dirCompose.directive];
+    const input = h('input', { type: 'text', maxlength: '400',
+      placeholder: 'why? (this line goes to the shepherd)' });
+    wrap.appendChild(h('div', { class: 'row' }, h('b', { text: `${g} ${label} — add a note:` })));
+    wrap.appendChild(input);
+    wrap.appendChild(h('div', { class: 'row' },
+      h('button', { class: 'dirbtn confirm', text: 'confirm', onclick: async () => {
+        if (await sendDirective(a, S.dirCompose.directive, input.value)) {
+          S.dirCompose = null; S.sigs = {}; render();
+        } } }),
+      h('button', { class: 'dirbtn', text: 'cancel',
+        onclick: () => { S.dirCompose = null; S.sigs = {}; render(); } })));
+    setTimeout(() => input.focus(), 0);
+    return wrap;
+  }
+  const pending = S.dirs.get(key);
+  if (pending) {
+    const [g, label] = DIRINFO[pending.directive] || ['⚑', pending.directive];
+    wrap.appendChild(h('div', { class: 'row' },
+      h('span', { class: 'chip dirchip', title: pending.note || '',
+                  text: `${g} ${label} · pending — the shepherd acts on its next cycle` }),
+      h('button', { class: 'dirbtn', text: 'withdraw', onclick: async () => {
+        if (await sendDirective(a, 'withdraw')) { S.sigs = {}; render(); } } })));
+    return wrap;
+  }
+  const incMean = signedMean(a.verdicts.filter(v => v.vs !== 'origin'));
+  const btns = incMean != null && incMean >= bands().accept ? ['rework', 'revert'] : ['resurrect'];
+  wrap.appendChild(h('div', { class: 'row' },
+    h('span', { class: 'faint', text: 'your call:' }),
+    ...btns.map(d => h('button', { class: 'dirbtn', text: `${DIRINFO[d][0]} ${DIRINFO[d][1]}`,
+      onclick: () => { S.dirCompose = { key, directive: d }; S.sigs = {}; render(); } }))));
+  return wrap;
+}
+function renderDossier() {
+  const R = S.route;
+  // never rebuild under a focused compose input — the note would be lost
+  // (buttons are fine: their clicks are what trigger legitimate rebuilds)
+  if ($('dossier').contains(document.activeElement)
+      && document.activeElement.matches('input')) return;
+  const p = S.pipes.get(R.asset);
+  const meta = (p?.designs || []).find(d => d.id === R.design)
+            || (p?.queue || []).find(d => d.id === R.design) || null;
+  const atts = S.attempts?.designs.get(R.design) || [];
+  const dsig = [meta, atts.map(a => [rowKey(a), verdictSig(a), S.marks.get(rowKey(a)),
+                                     S.dirs.get(rowKey(a))?.directive]), !!S.dirCompose];
+  if (!sig('dossier', dsig)) return;
+  const head = $('d-head'), body = $('d-body');
+  head.textContent = ''; body.textContent = '';
+  head.appendChild(h('span', { class: 'id', text: R.design }));
+  if (meta) {
+    head.appendChild(h('span', { class: 'chip origin-' + (meta.origin === 'user' ? 'user' : 'agent'),
+      text: meta.origin === 'user' ? 'yours' : 'agent-authored' }));
+    if (meta.status) head.appendChild(h('span', { class: 'chip', text: String(meta.status).slice(0, 60) }));
+    for (const c of (meta.chips || [])) head.appendChild(h('span', { class: 'chip amber', text: c }));
+  }
+  head.appendChild(h('button', { id: 'd-close', 'aria-label': 'close dossier', text: '✕',
+                                 onclick: () => nav('#/a/' + S.route.asset) }));
+  if (meta?.summary) head.appendChild(h('span', { class: 'sum', text: meta.summary }));
+  const chart = ratchetChart(atts);
+  if (chart) {
+    body.appendChild(h('section', { class: 'zone' },
+      h('h2', { text: 'The ratchet — vs origin decides progress, vs incumbent decides acceptance' }),
+      h('div', { class: 'card', id: 'd-chart', style: 'padding:8px 12px' }, chart)));
+  }
+  const zone = h('section', { class: 'zone' },
+    h('h2', { text: atts.length + ' attempt' + (atts.length === 1 ? '' : 's') + ' — newest first' }));
+  if (!atts.length)
+    zone.appendChild(h('div', { class: 'card empty',
+      text: 'no waves recorded for this design yet' }));
+  for (const a of [...atts].reverse()) {
+    const block = h('div', { class: 'att' });
+    block.appendChild(h('div', { class: 'ahead' },
+      h('span', { class: 'an', text: 'a' + (a.attempt ?? '?') }),
+      h('span', { class: 'num', text: 'run ' + a.run }),
+      a.tag ? h('span', { text: 'tag ' + a.tag }) : null,
+      a.seed != null ? h('span', { class: 'num', text: 'seed ' + a.seed }) : null,
+      a.scriptSha ? h('span', { class: 'faint', title: 'script sha — the era this attempt belongs to',
+                                text: a.scriptSha.slice(0, 8) }) : null,
+      h('span', { class: 'num', text: a.cells.length + ' cells' }),
+      isNewRow(a) ? h('span', { class: 'newdot', text: 'NEW' }) : null,
+      h('span', { style: 'margin-left:auto' }, timeEl(a.at))));
+    const abody = h('div', { class: 'abody' });
+    const judged = judgedCell(a);
+    const viewerItems = a.cells.filter(c => c.exit === 0).map(c => ({
+      src: `/${R.asset}/${runDir(a.run)}/${cellDir(c.n)}/hero_34.png`,
+      caption: `a${a.attempt} · run ${a.run} · cell ${c.n} ${c.label || ''}` }));
+    const grid = h('div', { class: 'cellgrid' });
+    for (const c of a.cells) {
+      const bad = c.exit !== 0 && c.exit !== null;
+      const chip = h('button', { class: 'cellchip' + (c.n === judged ? ' judged' : '') + (bad ? ' dead-cell' : ''),
+        title: bad ? `cell ${c.n} failed (exit ${c.exit})`
+             : c.n === judged ? `cell ${c.n} — the cell the panel judged` : `cell ${c.n}`,
+        onclick: () => {
+          const idx = viewerItems.findIndex(it => it.caption.includes('cell ' + c.n + ' '));
+          if (idx >= 0) openViewer(viewerItems, idx);
+        } },
+        h('span', { class: 'cl1' },
+          h('b', { text: String(c.n) }), (c.label || '') + (bad ? ' · exit ' + c.exit : '')
+          + (c.n === judged ? ' · judged' : '')),
+        (c.chips || []).length ? h('span', { class: 'amber', text: c.chips.join(' · ') }) : null);
+      grid.appendChild(chip);
+    }
+    abody.appendChild(grid);
+    for (const v of a.verdicts) {
+      const sm = signedMargin(v);
+      abody.appendChild(h('div', { class: 'verdict' },
+        h('span', { class: 'vmeta' },
+          h('span', { class: 'chip' }, 'judge ', h('b', { text: v.judge })),
+          sm != null ? marginChip(sm, 'vs ' + v.vs) : null,
+          h('span', { class: 'chip', text: 'vs ' + v.vs }),
+          v.flip ? h('span', { class: 'chip', title: 'A/B sides were flipped for this judge', text: '⇄ flipped' }) : null),
+        h('span', { class: 'sugg', text: v.suggestion || v.note || '(no suggestion recorded)' })));
+    }
+    abody.appendChild(h('div', { class: 'row' }, markButtons(a), directiveBlock(a)));
+    block.appendChild(abody);
+    zone.appendChild(block);
+  }
+  body.appendChild(zone);
+}
 function renderLive() {
   const host = $('tab-live');
   if (!sig('live-stub', 1)) return;
@@ -1422,9 +1705,11 @@ async function renderViewer() {
       h('b', { text: cur.caption || '' }),
       h('img', { src: cur.src, alt: cur.caption || 'current image' })));
   } else {
+    const img = h('img', { src: cur.src, alt: cur.caption || 'image',
+      onerror: e => e.target.replaceWith(h('div', { class: 'v-warn',
+        text: 'render not on disk — unclaimed or cleaned up (' + cur.src + ')' })) });
     stage.appendChild(h('div', { class: 'v-pane' },
-      h('b', { text: cur.caption || '' }),
-      h('img', { src: cur.src, alt: cur.caption || 'image' })));
+      h('b', { text: cur.caption || '' }), img));
   }
   if (!live()) return;
   const strip = $('v-strip');
