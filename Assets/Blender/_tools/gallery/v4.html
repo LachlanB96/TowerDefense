@@ -452,10 +452,203 @@ async function tickBody() {
     if (S.failures >= 3) { $('dot').className = 'err'; $('net').classList.add('on'); }
   }
 }
-/* --- data-layer stubs filled by task T4 --- */
-async function pollAttempts(asset) {}
-async function pollSignals(asset) {}
-async function pollDirectives(asset) {}
+/* ======================= attempts data layer ==========================
+   attempts.jsonl is the durable record (record.py): one line per wave, one
+   per judge verdict, one per promotion. Everything the dossier, ratchet and
+   run-attribution show is a client-side join over it — no writer changes. */
+function parseAttempts(text) {
+  const waves = [], verdicts = [], promos = [];
+  for (const line of (text || '').split('\n')) {
+    if (!line.trim()) continue;
+    let r; try { r = JSON.parse(line); } catch (e) { continue; }   // torn tail line
+    if (r.kind === 'wave') waves.push(r);
+    else if (r.kind === 'verdict') verdicts.push(r);
+    else if (r.kind === 'promote' || r.kind === 'promotion' || r.kind === 'champion') promos.push(r);
+    // any other kind is recorded for the pipeline, not for us — skip silently
+  }
+  const vByRun = new Map();
+  for (const v of verdicts) {
+    if (!Number.isFinite(v.run)) continue;
+    if (!vByRun.has(v.run)) vByRun.set(v.run, []);
+    vByRun.get(v.run).push({ at: v.at || null, cell: v.cell ?? null,
+      vs: v.vs || 'incumbent', prefer: v.prefer || null,
+      margin: Number.isFinite(v.margin) ? v.margin : null,
+      flip: v.flip ?? null, judge: v.judge || '?',
+      suggestion: typeof v.suggestion === 'string' ? v.suggestion : '',
+      note: typeof v.note === 'string' ? v.note : '' });
+  }
+  const designs = new Map(), byRun = new Map();
+  for (const w of waves) {
+    const id = w.design || 'ungrouped';
+    if (!designs.has(id)) designs.set(id, []);
+    designs.get(id).push({ design: id, attempt: w.attempt ?? null, run: w.run,
+      tag: w.tag || '', seed: w.seed ?? null, scriptSha: w.script_sha || '',
+      at: w.at || null, draw: w.draw || null, note: w.note || '',
+      cells: Array.isArray(w.cells) ? w.cells : [],
+      verdicts: vByRun.get(w.run) || [] });
+    if (Number.isFinite(w.run)) byRun.set(w.run, { design: id, attempt: w.attempt ?? null });
+  }
+  for (const list of designs.values())
+    list.sort((a, b) => (a.attempt ?? 0) - (b.attempt ?? 0) || a.run - b.run);
+  return { designs, byRun, promos };
+}
+function rowKey(a) { return `${a.design}·a${a.attempt ?? '?'}·r${a.run}`; }
+function judgedCell(a) {                    // the cell the panel judged — mode of verdict cells
+  const counts = new Map();
+  for (const v of a.verdicts) if (v.cell != null)
+    counts.set(v.cell, (counts.get(v.cell) || 0) + 1);
+  let best = null, n = 0;
+  for (const [c, k] of counts) if (k > n) { best = c; n = k; }
+  return best;
+}
+// MARGIN is a magnitude; the sign comes from PREFER (judge.py's convention —
+// see refine.py / selftest). Tolerate prefer-less rows by taking margin raw.
+function signedMargin(v) {
+  if (v.margin == null) return null;
+  if (!v.prefer) return v.margin;
+  return v.prefer === 'challenger' ? Math.abs(v.margin) : -Math.abs(v.margin);
+}
+function signedMean(verdicts) {
+  const vals = verdicts.map(signedMargin).filter(Number.isFinite);
+  if (!vals.length) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+// The ratchet: 'origin' = judged against the design's first baseline (never
+// moves — the only true progress measure); 'incumbent' = against the moving
+// champion (decides acceptance, says nothing about direction).
+function marginSeries(attempts, kind) {
+  const out = [];
+  for (const a of attempts) {
+    const vs = a.verdicts.filter(v => kind === 'origin' ? v.vs === 'origin' : v.vs !== 'origin');
+    const mean = signedMean(vs);
+    if (mean != null) out.push({ attempt: a.attempt, run: a.run, mean });
+  }
+  return out;
+}
+function runDir(n) { return 'run-' + String(n).padStart(3, '0'); }
+function cellDir(n) { return 'v' + n; }
+// Fallback chain for an attempt thumbnail: the judged cell's hero, then its
+// sheet, then the baseline cell's hero. Images are immutable — never busted.
+function thumbSrcs(asset, run, cell) {
+  const rd = `/${asset}/${runDir(run)}/`;
+  const c = cell ?? 1;
+  return [rd + cellDir(c) + '/hero_34.png', rd + cellDir(c) + '/_sheet.png',
+          rd + 'v1/hero_34.png'];
+}
+function imgFallback(el, srcs, noimgText) {
+  let i = 0;
+  el.src = srcs[0];
+  el.onerror = () => {
+    if (++i < srcs.length) el.src = srcs[i];
+    else {
+      const d = h('div', { class: 'noimg', text: noimgText || 'no render' });
+      d.style.width = el.style.width || el.getAttribute('width') + 'px';
+      d.style.height = el.style.height || el.getAttribute('height') + 'px';
+      el.replaceWith(d);
+    }
+  };
+}
+async function pollAttempts(asset) {
+  const url = `/${asset}/attempts.jsonl`;
+  const head = await headSig(url);           // cheap gate — the file can reach hundreds of KB
+  if (asset !== S.route.asset) return;       // switched mid-flight
+  if (head === null) { S.attempts = { designs: new Map(), byRun: new Map(), promos: [] }; return; }
+  if (head === S.attemptsSig && S.attempts) return;
+  const text = await tget(url);
+  if (asset !== S.route.asset || text === null) return;
+  S.attemptsSig = head;
+  S.attempts = parseAttempts(text);
+  S.seen = loadSeen(asset, S.attempts);
+}
+/* =========================== watermark ================================
+   "What's new since I last looked": per-asset localStorage snapshot of
+   rowKey -> verdict signature. NEW = unseen row OR its verdicts changed.
+   A generation signature guards archive rotation — on mismatch, reset. */
+function seenKey(asset) { return 'gf-seen-' + asset; }
+function verdictSig(a) {
+  return a.verdicts.length + '|' + a.verdicts.map(v => signedMargin(v)).join(',');
+}
+function loadSeen(asset, parsed) {
+  let firstWave = null, firstV = null;
+  for (const list of parsed.designs.values()) {
+    for (const a of list) {
+      if (!firstWave || a.run < firstWave.run) firstWave = a;
+      if (!firstV && a.verdicts.length) firstV = a.verdicts[0];
+    }
+  }
+  const gen = firstWave ? `${firstWave.design}|${firstWave.run}|${firstV?.at || ''}` : 'empty';
+  let s = null;
+  try { s = JSON.parse(lsGet(seenKey(asset)) || 'null'); } catch (e) {}
+  if (!s || s.gen !== gen) s = { gen, seen: {}, t: null };
+  return s;
+}
+function isNewRow(a) {
+  if (!S.seen) return false;
+  const k = rowKey(a);
+  return !(k in S.seen.seen) || S.seen.seen[k] !== verdictSig(a);
+}
+function newCount() {
+  if (!S.attempts || !S.seen) return 0;
+  let n = 0;
+  for (const list of S.attempts.designs.values())
+    for (const a of list) if (isNewRow(a)) n++;
+  return n;
+}
+function commitSeen() {
+  const asset = S.route.asset;
+  if (!asset || !S.attempts || !S.seen) return;
+  for (const list of S.attempts.designs.values())
+    for (const a of list) S.seen.seen[rowKey(a)] = verdictSig(a);
+  S.seen.t = new Date().toISOString();
+  lsSet(seenKey(asset), JSON.stringify(S.seen));
+}
+addEventListener('pagehide', commitSeen);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') commitSeen();
+});
+/* ======================= signals + directives =========================
+   Two separate doors on purpose (serve.py): star/cross are taste signals,
+   directives are instructions. The page POSTs and then reflects what the
+   files say — the files are the truth, not local state. */
+async function pollSignals(asset) {
+  const text = await tget(`/${asset}/user-signals.jsonl`);
+  if (asset !== S.route.asset) return;
+  const m = new Map();
+  for (const s of parseJsonl(text)) {
+    if (s.mark === 'clear') m.delete(s.attempt);
+    else if (s.mark) m.set(s.attempt, s.mark);
+  }
+  S.marks = m;
+}
+async function pollDirectives(asset) {
+  const text = await tget(`/${asset}/user-directives.jsonl`);
+  if (asset !== S.route.asset) return;
+  const m = new Map();
+  for (const d of parseJsonl(text)) {
+    if (d.directive === 'withdraw') m.delete(d.attempt);
+    else if (d.directive) m.set(d.attempt, d);
+  }
+  S.dirs = m;
+}
+async function sendSignal(a, mark) {         // toggle semantics: same mark again clears
+  const key = rowKey(a);
+  const next = S.marks.get(key) === mark ? 'clear' : mark;
+  const ok = await postJSON('/signal', { asset: S.route.asset, attempt: key,
+    design: a.design || '', run: a.run ?? '', mark: next });
+  if (!ok) return false;
+  if (next === 'clear') S.marks.delete(key); else S.marks.set(key, next);
+  return true;
+}
+async function sendDirective(a, directive, note) {
+  const key = rowKey(a);
+  const ok = await postJSON('/directive', { asset: S.route.asset, attempt: key,
+    design: a.design || '', run: a.run ?? '', directive, note: note || '' });
+  if (!ok) return false;
+  if (directive === 'withdraw') S.dirs.delete(key);
+  else S.dirs.set(key, { directive, note: note || '', at: new Date().toISOString() });
+  return true;
+}
+/* --- compare fetching lands with its tab (task T10) --- */
 async function pollCompare(asset) {}
 /* ============================== render ================================ */
 function ensureScaffold(kind, build) {
