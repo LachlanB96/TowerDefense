@@ -72,10 +72,16 @@ Tower/unit meshes are authored in Blender via scripts in `Assets/Blender/blender
 
 ### Preview harness
 
-`Assets/Blender/_tools/` renders variants of an asset in parallel and shows them in a
-browser gallery. Start the gallery once and leave it running:
+`Assets/Blender/_tools/` renders variants of an asset in parallel and shows them in
+**the Gloomfell suite** — one page for everything: fleet overview → per-asset war room
+(tabs Overview · Live · Compare) → design dossier. Start the server once and leave it
+running:
 
-    python Assets/Blender/_tools/serve.py        # http://localhost:8777/
+    python Assets/Blender/_tools/serve.py        # suite: http://localhost:8777/v4.html
+
+Old bookmarks (`/` and `/live.html`) redirect into the suite. Page contract:
+`.claude/skills/blender-model-modev4/references/page.md`. `GLOOMFELL_PREVIEW_ROOT`
+points the server at a scratch root for testing (never POST against the live root).
 
 Then, to compare alternatives:
 
