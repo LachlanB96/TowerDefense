@@ -441,6 +441,36 @@ section.zone > h2 {
              color: var(--accent); background: var(--s1); font-size: 12px; }
 
 /* ====================== COMPARE (task T10) ============================= */
+#cmp-head { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap;
+            padding: 10px var(--sp3); margin-bottom: var(--sp3); font-size: 12px; }
+#cmp-head .fp { color: var(--ink3); font: 10px/1.5 var(--mono); flex-basis: 100%; }
+.cols { display: flex; gap: var(--sp3); align-items: flex-start; overflow-x: auto;
+        padding-bottom: var(--sp1); }
+.col { padding: var(--sp2); min-width: 200px; max-width: 300px; flex: 0 0 auto; }
+.col h3 { font-size: 12px; margin-bottom: 4px; display: flex; gap: 6px; align-items: center; }
+.col .diffvars { font: 10px/1.5 var(--mono); color: var(--ink2); margin: 4px 0 8px;
+                 white-space: pre-wrap; }
+.col .clauses { font: 10px/1.4 var(--mono); color: var(--ink3); margin-bottom: 6px; }
+.col .imgbtn { margin-bottom: var(--sp2); }
+.col .imgbtn img { width: 100%; }
+.col.err { border-color: color-mix(in srgb, var(--dead) 50%, var(--line)); }
+.col.err pre { font: 10px/1.5 var(--mono); color: #ffb4ae; background: #241314;
+               padding: 8px; border-radius: var(--r1); margin: 0; max-height: 220px;
+               overflow: auto; white-space: pre-wrap; }
+.col .pending2 { color: var(--ink2); font-style: italic; padding: 16px 0; text-align: center; }
+#cmp-hist details { margin-bottom: var(--sp2); border: 1px solid var(--line);
+                    border-radius: var(--r2); background: var(--s1); }
+#cmp-hist summary { cursor: pointer; color: var(--ink2); padding: 8px var(--sp3);
+                    font: 11px/1.5 var(--mono); }
+#cmp-hist details[open] summary { border-bottom: 1px solid var(--line); }
+#cmp-hist .cols { padding: var(--sp3); }
+#cmp-jump { display: flex; gap: var(--sp2); align-items: center; margin: var(--sp2) 0 var(--sp3);
+            font-size: 12px; color: var(--ink3); }
+#cmp-jump input { width: 70px; background: var(--bg); color: var(--ink);
+                  border: 1px solid var(--line); border-radius: var(--r1); padding: 5px 8px; }
+#cmp-jump button { border: 1px solid var(--line); border-radius: var(--r1);
+                   padding: 5px 12px; color: var(--accent); }
+
 /* ======================= VIEWER (task T5) ============================== */
 dialog { border: none; background: transparent; padding: 0; }
 dialog::backdrop { background: #05060acc; }
@@ -918,8 +948,38 @@ async function sendDirective(a, directive, note) {
   else S.dirs.set(key, { directive, note: note || '', at: new Date().toISOString() });
   return true;
 }
-/* --- compare fetching lands with its tab (task T10) --- */
-async function pollCompare(asset) {}
+/* ======================== compare fetching ============================
+   latest.json is the current preview.py run; run-NNN manifests are immutable
+   once done, so history is fetched once per (asset, run) and memoized. */
+async function pollCompare(asset) {
+  const text = await tget(`/${asset}/latest.json`);
+  if (asset !== S.route.asset) return;
+  if (text === null) { S.compare = null; S.compareText = null; return; }
+  if (text !== S.compareText) {
+    try { S.compare = JSON.parse(text); S.compareText = text; }
+    catch (e) { return; }              // half-written — keep the previous good parse
+  }
+  const cur = S.compare?.run;
+  if (!Number.isFinite(cur)) return;
+  for (let n = cur - 1; n >= 1 && n > cur - 12; n--) {
+    const key = asset + '|' + n;
+    if (S.manifests.has(key)) continue;
+    S.manifests.set(key, 'fetching');    // claim before await — ticks overlap
+    const m = await jget(`/${asset}/${runDir(n)}/manifest.json`);
+    if (asset !== S.route.asset) { S.manifests.delete(key); return; }
+    S.manifests.set(key, m || 'missing');
+  }
+}
+async function jumpToRun(asset, n) {
+  const key = asset + '|' + n;
+  if (!S.manifests.has(key) || S.manifests.get(key) === 'missing') {
+    S.manifests.set(key, 'fetching');
+    const m = await jget(`/${asset}/${runDir(n)}/manifest.json`);
+    S.manifests.set(key, m || 'missing');
+  }
+  S.cmpJump = n;
+  S.sigs = {}; render();
+}
 /* ============================== render ================================ */
 function ensureScaffold(kind, build) {
   if (S.viewKind === kind) return;
@@ -1738,11 +1798,99 @@ function renderLive() {
       text: `Load ${Math.min(30, runs.length - cap)} more (${runs.length - cap} older)`,
       onclick: () => { S.liveCap = cap + 30; S.sigs = {}; render(); } }));
 }
+/* ============================ compare tab ==============================
+   The preview.py --variants workflow, first-class: current run as columns,
+   prior manifests as collapsible history, renderer fingerprint on show. */
+function variantCol(asset, run, v) {
+  const bad = v.exit !== 0 && v.exit !== null;
+  const el = h('div', { class: 'col card' + (bad ? ' err' : '') });
+  el.appendChild(h('h3', {},
+    h('span', { class: 'chip num', text: String(v.n) }), v.label || ''));
+  if (Array.isArray(v.clauses) && v.clauses.length)
+    el.appendChild(h('div', { class: 'clauses', text: 'clauses: ' + v.clauses.join(' + ') }));
+  const dv = Object.entries(v.diff || {}).map(([k, val]) => `${k} = ${JSON.stringify(val)}`).join('\n');
+  el.appendChild(h('div', { class: 'diffvars', text: dv || 'baseline' }));
+  if (v.exit === null) el.appendChild(h('div', { class: 'pending2', text: 'building…' }));
+  else if (bad) el.appendChild(h('pre', { text: `exit ${v.exit}\n\n${v.stderr_tail || '(no stderr)'}` }));
+  else {
+    const items = (v.renders || []).map(r => ({ src: `/${asset}/${runDir(run)}/${r}`,
+      caption: `run ${run} · v${v.n} ${v.label || ''} · ${r}` }));
+    (v.renders || []).forEach((r, i) => {
+      el.appendChild(h('button', { class: 'imgbtn', 'aria-label': 'enlarge ' + r,
+        onclick: () => openViewer(items, i) },
+        h('img', { src: `/${asset}/${runDir(run)}/${r}`, loading: 'lazy', alt: r })));
+    });
+    const foot = h('div', { class: 'row' });
+    if (v.seconds != null) foot.appendChild(h('span', { class: 'chip num', text: v.seconds + 's' }));
+    for (const c of (v.chips || [])) foot.appendChild(h('span', { class: 'chip amber', text: c }));
+    el.appendChild(foot);
+  }
+  return el;
+}
+function manifestDetails(asset, m, open) {
+  const labels = (m.variants || []).map(v => v.label).join(', ');
+  const d = h('details', open ? { open: 'open' } : {},
+    h('summary', { text: `run ${m.run} · ${(m.started || '').replace('T', ' ')} · ${labels}`
+      + (m.audit ? ` · audit ${String(m.audit).slice(0, 30)}` : '') }));
+  const cols = h('div', { class: 'cols' });
+  for (const v of (m.variants || [])) cols.appendChild(variantCol(asset, m.run, v));
+  d.appendChild(cols);
+  return d;
+}
+function fingerprint(m) {
+  const e = m?.render_env;
+  if (!e) return null;
+  return `renderer: ${e.blender || '?'} · ${e.gpu || '?'} · backend ${e.gpu_backend || '?'}`
+       + (m.script_sha ? ` · script ${String(m.script_sha).slice(0, 12)}` : '');
+}
 function renderCompare() {
-  const host = $('tab-compare');
-  if (!sig('cmp-stub', 1)) return;
+  const R = S.route, host = $('tab-compare');
+  const m = S.compare;
+  const histKeys = m ? [...Array(11).keys()].map(i => m.run - 1 - i).filter(n => n >= 1) : [];
+  const histSig = histKeys.map(n => typeof S.manifests.get(R.asset + '|' + n));
+  if (!sig('cmp', [S.compareText, histSig, S.cmpJump])) return;
   host.textContent = '';
-  host.appendChild(h('div', { class: 'card empty', text: 'compare — task T10' }));
+  if (!m) {
+    host.appendChild(h('div', { class: 'card empty' },
+      'no variant run for this asset — start one with',
+      h('span', { class: 'cmd', text: `python Assets/Blender/_tools/preview.py ${R.asset} --variants <file>.json` })));
+    return;
+  }
+  const head = h('div', { class: 'card', id: 'cmp-head' },
+    h('span', { class: 'chip num' }, h('b', { text: 'run ' + m.run })),
+    h('span', { class: 'pill ' + (m.done ? 'st-stop' : 'st-run'), text: m.done ? 'done' : 'building' }),
+    m.tag ? h('span', { class: 'chip', text: m.tag }) : null,
+    m.seed != null ? h('span', { class: 'chip num', text: 'seed ' + m.seed }) : null,
+    m.audit ? h('span', { class: 'chip' + (String(m.audit).includes('FAIL') ? ' amber' : ''),
+                          text: 'audit ' + String(m.audit).slice(0, 50) }) : null,
+    h('span', { class: 'dim' }, timeEl(m.started)));
+  const fp = fingerprint(m);
+  if (fp) head.appendChild(h('span', { class: 'fp', text: fp }));
+  host.appendChild(head);
+  const cols = h('div', { class: 'cols' });
+  for (const v of (m.variants || [])) cols.appendChild(variantCol(R.asset, m.run, v));
+  host.appendChild(cols);
+  const jump = h('div', { id: 'cmp-jump' },
+    h('span', { text: 'history — previous runs open below · jump to run' }));
+  const inp = h('input', { type: 'number', min: '1', 'aria-label': 'run number' });
+  jump.appendChild(inp);
+  jump.appendChild(h('button', { text: 'open', onclick: () => {
+    const n = parseInt(inp.value, 10);
+    if (Number.isFinite(n) && n >= 1) jumpToRun(R.asset, n);
+  } }));
+  host.appendChild(jump);
+  const hist = h('div', { id: 'cmp-hist' });
+  if (S.cmpJump && S.cmpJump !== m.run && !histKeys.includes(S.cmpJump)) {
+    const jm = S.manifests.get(R.asset + '|' + S.cmpJump);
+    if (jm && typeof jm === 'object') hist.appendChild(manifestDetails(R.asset, jm, true));
+    else hist.appendChild(h('div', { class: 'card empty', text: `run ${S.cmpJump}: no manifest on disk` }));
+  }
+  for (const n of histKeys) {
+    const hm = S.manifests.get(R.asset + '|' + n);
+    if (hm && typeof hm === 'object')
+      hist.appendChild(manifestDetails(R.asset, hm, S.cmpJump === n));
+  }
+  host.appendChild(hist);
 }
 /* ============================== viewer ================================
    One lightbox for every image on the page. Filmstrip = whatever context
