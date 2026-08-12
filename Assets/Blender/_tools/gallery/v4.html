@@ -258,6 +258,37 @@ section.zone > h2 {
   body.nochat #main { padding-bottom: 80px; }
 }
 /* ====================== FLEET (task T6) ================================ */
+#fv-inbox .item {
+  display: flex; gap: var(--sp3); align-items: center; padding: 10px 14px;
+  border-bottom: 1px solid var(--line); width: 100%; text-align: left;
+}
+#fv-inbox .item:last-child { border-bottom: none; }
+#fv-inbox .item:hover { background: var(--s2); }
+#fv-inbox .glyph { font-size: 14px; flex: 0 0 auto; }
+#fv-inbox .glyph.staged { color: var(--warn); }
+#fv-inbox .glyph.stale-hb { color: var(--dead); }
+#fv-inbox .glyph.paused-staged { color: var(--pend); }
+#fv-inbox .lbl { flex: 1; font-size: 12.5px; }
+#fv-inbox .go { color: var(--ink3); font-size: 11px; }
+#fv-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: var(--sp3); }
+.acard { display: flex; gap: var(--sp3); padding: var(--sp3); text-align: left;
+         align-items: stretch; }
+.acard:hover { background: var(--s2); }
+.acard .thumb { flex: 0 0 96px; }
+.acard .thumb img { width: 96px; height: 120px; object-fit: cover;
+                    border-radius: var(--r1); background: #0b0c10;
+                    border: 1px solid var(--line); }
+.acard .thumb .noimg { width: 96px; height: 120px; }
+.acard .meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.acard .meta .l1 { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap; }
+.acard .meta .name { font: 600 14px/1 var(--mono); }
+.acard .counters { display: flex; gap: var(--sp2); flex-wrap: wrap; }
+.acard .note { color: var(--ink3); font-size: 11.5px; overflow: hidden;
+               display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+#fv-loose { display: flex; gap: var(--sp2); align-items: center; flex-wrap: wrap;
+            padding: 10px 14px; font-size: 12px; color: var(--ink3); }
+
 /* ===================== WAR ROOM (task T7) ============================== */
 /* ====================== DOSSIER (task T8) ============================== */
 /* ======================== LIVE (task T9) =============================== */
@@ -477,7 +508,7 @@ const S = {
   fleet: null, assetsOnDisk: [], pipes: new Map(),
   champion: null, control: null, live: null,
   attempts: null, attemptsSig: null,
-  compare: null, compareText: null, manifests: new Map(),
+  compare: null, compareText: null, manifests: new Map(), champs: new Map(),
   chat: [], pendingRows: [],
   marks: new Map(), dirs: new Map(), signalsOK: true,
   seen: null, announced: {},
@@ -508,6 +539,9 @@ async function tickBody() {
       S.assetsOnDisk = (await jget('/assets.json')) || [];
       for (const a of (S.fleet?.assets || []))
         if (a.asset !== asset) S.pipes.set(a.asset, await jget(`/${a.asset}/pipeline.json`));
+      if (R.view === 'fleet')                // champion thumbs for the overview cards
+        for (const a of (S.fleet?.assets || []))
+          S.champs.set(a.asset, await jget(`/${a.asset}/champion.json`));
     }
     if (asset) {
       S.pipes.set(asset, await jget(`/${asset}/pipeline.json`));
@@ -806,11 +840,82 @@ function renderBell() {
     announce('bell', n + ' item' + (n === 1 ? '' : 's') + ' waiting on you');
   } else announce('bell', '');
 }
-/* --- view scaffolds: stubs replaced by T6/T7/T9/T10 --- */
+/* ============================ fleet view ============================== */
 function renderFleetView() {
   ensureScaffold('fleet', main => {
-    main.appendChild(h('div', { class: 'card empty', id: 'fleet-stub', text: 'fleet view — task T6' }));
+    main.appendChild(h('section', { class: 'zone', id: 'z-inbox' },
+      h('h2', { text: 'Needs you' }),
+      h('div', { class: 'card', id: 'fv-inbox' })));
+    main.appendChild(h('section', { class: 'zone' },
+      h('h2', { text: 'Fleet' }),
+      h('div', { id: 'fv-cards' }),
+      h('div', { class: 'card', id: 'fv-loose', style: 'margin-top:12px' })));
   });
+  const items = needsYou();
+  if (sig('fv-inbox', items.map(i => i.kind + i.label))) {
+    const host = $('fv-inbox');
+    host.textContent = '';
+    if (!items.length)
+      host.appendChild(h('div', { class: 'empty', text: 'nothing waiting on you' }));
+    for (const it of items) {
+      const glyph = it.kind === 'staged' ? '⚑' : it.kind === 'stale-hb' ? '⏱' : '⏸';
+      host.appendChild(h('button', { class: 'item', onclick: () => nav(it.href) },
+        h('span', { class: 'glyph ' + it.kind, text: glyph }),
+        h('span', { class: 'lbl', text: it.label }),
+        h('span', { class: 'go', text: 'open →' })));
+    }
+  }
+  const assets = S.fleet?.assets || [];
+  const champSig = assets.map(a => JSON.stringify(S.champs.get(a.asset) || null));
+  const hbSig = assets.map(a => { const age = hbAge(S.pipes.get(a.asset)?.heartbeat);
+                                  return age == null ? '-' : Math.floor(age / 30); });
+  if (sig('fv-cards', [assets, champSig, hbSig])) {
+    const host = $('fv-cards');
+    host.textContent = '';
+    if (!assets.length)
+      host.appendChild(h('div', { class: 'card empty', style: 'grid-column:1/-1',
+        text: 'no fleet running — waiting for the supervisor to write fleet.json' }));
+    for (const a of assets) {
+      const st = ['run', 'pause', 'stop'].includes(a.state) ? a.state : 'unknown';
+      const c = S.champs.get(a.asset);
+      const age = hbAge(S.pipes.get(a.asset)?.heartbeat);
+      const hbCls = a.state !== 'run' || age == null ? 'faint'
+                  : age < 90 ? 'hb-ok' : age < 300 ? 'hb-warn' : 'hb-stale';
+      const thumb = h('span', { class: 'thumb' });
+      if (c && c.sheet) {
+        const img = h('img', { alt: a.asset + ' champion', loading: 'lazy' });
+        imgFallback(img, [`/${a.asset}/${runDir(c.run)}/${c.sheet}`], 'no champion');
+        thumb.appendChild(img);
+      } else thumb.appendChild(h('span', { class: 'noimg', text: 'no champion yet' }));
+      host.appendChild(h('button', { class: 'acard card', onclick: () => nav('#/a/' + a.asset) },
+        thumb,
+        h('span', { class: 'meta' },
+          h('span', { class: 'l1' },
+            h('span', { class: 'name', text: a.asset }),
+            h('span', { class: 'pill st-' + st + (st === 'run' ? ' pulse' : ''), text: a.state || '?' }),
+            h('span', { class: 'chip num ' + hbCls,
+                        text: age == null ? 'hb —' : 'hb ' + fmtAge(age)
+                              + (age >= 300 && a.state === 'run' ? ' · stuck?' : '') })),
+          h('span', { class: 'counters num' },
+            h('span', { class: 'chip', title: 'panel accepts landed' }, '✓ ', h('b', { text: String(a.accepted ?? '—') })),
+            h('span', { class: 'chip', title: 'designs queued' }, 'queue ', h('b', { text: String(a.queue ?? '—') })),
+            h('span', { class: 'chip', title: 'makers dialled' }, 'makers ', h('b', { text: String(a.makers ?? '—') })),
+            a.staged ? h('span', { class: 'chip amber' }, '⚑ staged ', h('b', { text: String(a.staged) })) : null),
+          h('span', { class: 'note', title: a.note || '', text: a.note || '' }))));
+    }
+  }
+  const loose = (S.assetsOnDisk || []).filter(n =>
+    !n.startsWith('_') && !assets.some(a => a.asset === n));
+  if (sig('fv-loose', loose)) {
+    const host = $('fv-loose');
+    host.style.display = loose.length ? '' : 'none';
+    host.textContent = '';
+    if (loose.length) {
+      host.appendChild(h('span', { text: 'on disk, not in the fleet:' }));
+      for (const n of loose)
+        host.appendChild(h('a', { class: 'chip', href: '#/a/' + n, text: n }));
+    }
+  }
 }
 function renderAssetView() {
   const R = S.route;
