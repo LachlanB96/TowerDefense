@@ -34,10 +34,19 @@ ASSET = os.path.join(HERE, "_selftest_asset.py")
 ASSET_NAME = os.path.splitext(os.path.basename(ASSET))[0]
 BUILD_ONE = os.path.join(HERE, "build_one.py")
 SERVE = os.path.join(HERE, "serve.py")
-# serve.py hardcodes its previews root relative to itself (no env override for
-# that, only for PORT), so this must match Assets/Blender/_previews~ exactly -
-# see serve.py's own PREVIEW_ROOT computation.
+# serve.py's default previews root is relative to itself; GLOOMFELL_PREVIEW_ROOT
+# can override it (suite testing serves scratch fixtures that way). The server
+# tests below therefore STRIP that variable from the child env - they assert
+# against shared state under the canonical root, and a leaked override would
+# silently repoint the server at a foreign root while the assertions kept
+# reading this one.
 PREVIEW_ROOT = os.path.join(os.path.dirname(HERE), "_previews~")
+
+
+def _server_env(port):
+    env = dict(os.environ, GLOOMFELL_GALLERY_PORT=str(port))
+    env.pop("GLOOMFELL_PREVIEW_ROOT", None)
+    return env
 
 _failures = []
 
@@ -537,7 +546,7 @@ def test_gallery_server_contract():
     print("test_gallery_server_contract")
     port = 8778
     base = "http://127.0.0.1:%d" % port
-    env = dict(os.environ, GLOOMFELL_GALLERY_PORT=str(port))
+    env = _server_env(port)
 
     os.makedirs(PREVIEW_ROOT, exist_ok=True)
     assets_json = os.path.join(PREVIEW_ROOT, "assets.json")
@@ -586,7 +595,7 @@ def test_chat_endpoint_and_v4_page():
     print("test_chat_endpoint_and_v4_page")
     port = 8779
     base = "http://127.0.0.1:%d" % port
-    env = dict(os.environ, GLOOMFELL_GALLERY_PORT=str(port))
+    env = _server_env(port)
     chat_path = os.path.join(PREVIEW_ROOT, "chat.jsonl")
     os.makedirs(PREVIEW_ROOT, exist_ok=True)
     before = open(chat_path, encoding="utf-8").read() if os.path.exists(chat_path) else None

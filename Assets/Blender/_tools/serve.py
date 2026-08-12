@@ -24,7 +24,10 @@ import socketserver
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PREVIEW_ROOT = os.path.join(os.path.dirname(HERE), "_previews~")
+# Overridable so a second instance can serve scratch fixtures on another port
+# without touching the live previews root (suite verification, spec 2026-08-12).
+PREVIEW_ROOT = (os.environ.get("GLOOMFELL_PREVIEW_ROOT")
+                or os.path.join(os.path.dirname(HERE), "_previews~"))
 PORT = int(os.environ.get("GLOOMFELL_GALLERY_PORT", "8777"))
 
 ASSET_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")   # path-traversal guard
@@ -144,8 +147,10 @@ def main():
             shutil.copyfile(src, os.path.join(PREVIEW_ROOT, page))
     handler = functools.partial(QuietHandler, directory=PREVIEW_ROOT)
     with Server(("127.0.0.1", PORT), handler) as httpd:
-        print("gallery: http://localhost:%d/      live: http://localhost:%d/live.html"
-              % (PORT, PORT))
+        # flush: stdout is normally redirected to a file; without it the banner
+        # sits in the block buffer for the life of the process
+        print("suite:   http://localhost:%d/v4.html   (index/live redirect here)" % PORT, flush=True)
+        print("root:    %s" % PREVIEW_ROOT, flush=True)
         httpd.serve_forever()
 
 
