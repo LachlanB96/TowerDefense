@@ -541,7 +541,8 @@ dialog::backdrop { background: #05060acc; }
       <span id="scope-label">to this asset</span></label>
     <div id="verbs">stop · pause &lt;asset&gt; · resume &lt;asset&gt; · status ·
       add design &lt;asset&gt;: &lt;text&gt; · new &lt;hero|npc|tower&gt; [name]: &lt;desc&gt; ·
-      new N npcs · makers &lt;asset&gt; N · promote &lt;design&gt; · finish &lt;asset&gt;</div>
+      new N npcs · makers &lt;asset&gt; N · designers &lt;asset&gt; N ·
+      promote &lt;design&gt; · finish &lt;asset&gt;</div>
   </aside>
 </div>
 
@@ -1471,6 +1472,8 @@ function renderOverview() {
       const note = (ctl.notes || [])[ctl.notes?.length - 1] || '';
       el.appendChild(h('span', { class: 'chip', text: 'state ' }, h('b', { text: ctl.state || '?' })));
       el.appendChild(h('span', { class: 'chip num' }, 'makers ', h('b', { text: String(ctl.makers ?? '—') })));
+      el.appendChild(h('span', { class: 'chip num', title: 'parallel queue-top-up batches' },
+        'designers ', h('b', { text: String(ctl.designers ?? 1) })));
       el.appendChild(h('span', { class: 'chip num' }, 'panel ', h('b', { text: (ctl.panel ?? '—') + ' → ' + (ctl.escalate_to ?? '—') })));
       el.appendChild(h('span', { class: 'chip num' }, 'accept ≥ ', h('b', { text: '+' + (ctl.accept_margin ?? 2) })));
       el.appendChild(h('span', { class: 'chip num' }, 'reject ≤ ', h('b', { text: String(ctl.reject_margin ?? -2) })));

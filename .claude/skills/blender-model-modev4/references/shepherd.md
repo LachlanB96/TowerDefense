@@ -40,10 +40,16 @@ work visible on the user's page.
 
 1. Read `control.json` (`state`, caps, thresholds — never hardcode them; `pause`
    means stop dispatching but keep collecting; `stop` means wind down and return).
-2. Read `design-queue.jsonl`. If fewer than 2 designs are queued and no top-up is in
-   flight, spawn one text-only designer batch: inline the character summary, the
-   standing brief, the three laws, a one-line "already tried / in flight" digest, and
-   ask for 3–5 concrete design specs back as JSON; append them with `origin: "agent"`.
+2. Read `design-queue.jsonl`. If fewer than `makers` designs are queued, keep up to
+   `designers` text-only designer batches in flight (a `control.json` dial, 1–5;
+   absent in older files = 1; batches are transient — spawn, collect, append, gone).
+   Each batch gets the same inlined context — the character summary, the standing
+   brief, the three laws, a one-line "already tried / in flight" digest — plus a
+   DISTINCT exploration angle you name (silhouette, material, pose, story,
+   negative-space, …): five batches with identical briefs return the same five ideas
+   five times. Each returns 3–5 concrete design specs as JSON; merge, drop
+   near-duplicates against the queue and against each other, append the survivors
+   with `origin: "agent"` and monotonic ids.
 3. Keep up to `makers` maker agents alive, one design each, oldest queued first.
    Dispatch with the template below. A maker persists across its design's attempts —
    resume it, never respawn it (builders need continuity; judges need freshness).

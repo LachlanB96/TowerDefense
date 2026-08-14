@@ -116,11 +116,13 @@ All under `Assets/Blender/_previews~/` unless noted. Full schemas: `references/p
 
   ```json
   {"state": "run", "notes": [],
-   "makers": 2, "panel": 2, "escalate_to": 3,
+   "makers": 2, "designers": 1, "panel": 2, "escalate_to": 3,
    "accept_margin": 2, "reject_margin": -2}
   ```
 
-  `state` is `run` | `pause` | `stop`. `makers` may go to 10 when the user dials it.
+  `state` is `run` | `pause` | `stop`. `makers` may go to 10 when the user dials it;
+  `designers` (parallel queue-top-up batches, each returning 3–5 specs from a distinct
+  angle) may go to 5.
   The margins are the user's dial — never hardcode them anywhere downstream. Every key
   here is read by the shepherd every cycle; there are deliberately no dead dials. The
   design-arc thresholds (grace 2, stall 3, abandon −2, report-at 8) live as named
@@ -149,6 +151,7 @@ context — you are the language model, the grammar is a floor, not a parser):
 | `new <hero\|npc\|tower> [<name>][: <desc>]` | genesis (below) |
 | `new N npcs` | batch genesis (below) |
 | `makers <asset> N` | update `control.json` (cap 10), note it stamped |
+| `designers <asset> N` | update `control.json` (cap 5), note it stamped |
 | `promote <design>` | the staged-card resolution: tell the shepherd to run the bake path for that design's staged attempt |
 | `finish <asset>` | the finish sequence above |
 | anything else | answer it yourself; if it is steering ("more aura"), append it stamped to `control.json` notes and tell the shepherd to fold it into new briefs |
@@ -226,6 +229,7 @@ Per attempt ≈ one maker turn + one wave (≤ 8 renders — axis.py's structura
 through the machine-wide GPU render semaphore: default 4 slots since 2026-08-14 on the
 610.88 driver, benchmarked; if `%TEMP%\blender.crash.txt` ever reappears, set
 `GLOOMFELL_RENDER_SLOTS=1` first and check the driver version) + 2–3 reviewer calls
-reading one contact sheet each. Queue top-ups are small batches (3–5 specs). Ten makers exist only when
+reading one contact sheet each. Queue top-ups are small batches (3–5 specs per
+designer batch; the `designers` dial caps how many batches fly at once). Ten makers exist only when
 the user dialled ten. Briefs are front-loaded: a child that begins by running `pwd` or
 hunting for paths was badly briefed, and that is your bug.

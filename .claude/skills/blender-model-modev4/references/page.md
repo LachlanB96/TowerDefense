@@ -112,6 +112,7 @@ and `record.py` respectively); the page builds the champion image path as
 
 `stop` · `pause <asset>` · `resume <asset>` · `status` ·
 `add design <asset>: <text>` · `new <hero|npc|tower> [name]: <desc>` · `new N npcs` ·
-`makers <asset> N` · `promote <design>` · `finish <asset>` — the supervisor interprets
+`makers <asset> N` · `designers <asset> N` · `promote <design>` · `finish <asset>` —
+the supervisor interprets
 anything else in context. This list appears in three places: here, SKILL.md's table,
 and the page's hint line; keep them identical.
