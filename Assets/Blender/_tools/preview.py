@@ -101,7 +101,18 @@ STDERR_TAIL_LINES = 20
 # So the trade is: one live GPU context instead of two, for roughly one extra minute
 # per wave, against a driver fault that takes the whole desktop with it. Raise it back
 # with GLOOMFELL_RENDER_SLOTS=2 on a machine that proves stable.
-RENDER_SLOTS = int(os.environ.get("GLOOMFELL_RENDER_SLOTS", "1"))
+#
+# 2026-08-14: DEFAULT RAISED TO 4, BY USER DECISION, after the machine changed under
+# the rule. The faulting driver 591.86 was replaced by 610.88 (fingerprinted in every
+# manifest since 589a438) plus BIOS changes. Benchmarked on the real mage000 script,
+# 21 renders across 1/2/3/4-way concurrency: zero faults, zero driver events, no
+# crash file. Cost per render: ~6.5 s solo -> ~8 s 2-way -> ~9.5 s 4-way; peak VRAM
+# 6.0 GB of 16.4 incl. desktop; peak RSS 1.25 GB/Blender. One benign quirk: the first
+# render at a NEW concurrency width can lose ~26 s once (shader-cache lock stampede,
+# exits 0, never recurred in soak). The fault was a driver bug, never load - if
+# blender.crash.txt reappears, drop this back to 1 first and check the driver version
+# against the manifests' render_env before blaming anything else.
+RENDER_SLOTS = int(os.environ.get("GLOOMFELL_RENDER_SLOTS", "4"))
 
 
 @contextlib.contextmanager

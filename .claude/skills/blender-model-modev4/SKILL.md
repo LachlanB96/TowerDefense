@@ -223,7 +223,9 @@ anything). The template — fill every `<placeholder>` yourself:
 ## Cost discipline
 
 Per attempt ≈ one maker turn + one wave (≤ 8 renders — axis.py's structural cap —
-through the 2-slot GPU semaphore, a safety limit you never raise) + 2–3 reviewer calls
+through the machine-wide GPU render semaphore: default 4 slots since 2026-08-14 on the
+610.88 driver, benchmarked; if `%TEMP%\blender.crash.txt` ever reappears, set
+`GLOOMFELL_RENDER_SLOTS=1` first and check the driver version) + 2–3 reviewer calls
 reading one contact sheet each. Queue top-ups are small batches (3–5 specs). Ten makers exist only when
 the user dialled ten. Briefs are front-loaded: a child that begins by running `pwd` or
 hunting for paths was badly briefed, and that is your bug.
