@@ -122,10 +122,6 @@ Design specs live in an Obsidian vault at `Obsidian/TD/` (the vault itself is un
 
 When the user asks about tower behaviour, **read the Obsidian doc before the code** — the doc is the intent; the code may lag behind (entries marked TBD are common).
 
-## Interaction conventions
-
-- When presenting multiple options to the user (candidate names, approaches, designs, anything choose-one), **always number them**. The user picks by number, so unnumbered lists force a re-ask.
-
 ## Git conventions
 
 - Commit messages are short and lowercase (e.g. `"added models for 5 heroes. introduced obsidian as LM"`, `"updated graphics"`).
