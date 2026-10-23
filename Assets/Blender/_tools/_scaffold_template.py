@@ -9,6 +9,7 @@ between them) so they stay sweepable through `vars`.
 
 import math
 import os
+import sys
 
 import bpy
 from mathutils import Vector
@@ -16,10 +17,16 @@ from mathutils import Vector
 bpy.ops.wm.read_homefile(use_empty=True, use_factory_startup=True)
 SCENE = bpy.context.scene
 
-# -- Paths (hardcoded per project convention) ----------------------------------
-BLEND_PATH = r"C:\Users\LachlanB\TD\Assets\Blender\__ASSET__.blend"
-FBX_PATH   = r"C:\Users\LachlanB\TD\Assets\Models\__ASSET__.fbx"
-RENDER_DIR = r"C:\Users\LachlanB\TD\Assets\Blender\___ASSET__"
+# -- Paths ---------------------------------------------------------------------
+# Worked out from this file's own path (the name its code was compiled under, which
+# `blender -P`, build_one.py and exec(compile(src, PATH, "exec")) all set), so they
+# hold wherever the repo lives. A copy run from a worktree under .claude/worktrees/
+# still writes into the main checkout (CLAUDE.md, "Asset pipeline").
+_REPO = os.path.abspath(os.path.join(os.path.dirname(sys._getframe().f_code.co_filename), "..", ".."))
+_REPO = _REPO.split(os.sep + os.path.join(".claude", "worktrees") + os.sep)[0]
+BLEND_PATH = os.path.join(_REPO, "Assets", "Blender", "__ASSET__.blend")
+FBX_PATH   = os.path.join(_REPO, "Assets", "Models", "__ASSET__.fbx")
+RENDER_DIR = os.path.join(_REPO, "Assets", "Blender", "___ASSET__")
 
 
 def _flag(name, default=False):

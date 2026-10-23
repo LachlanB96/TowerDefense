@@ -20,7 +20,11 @@ import bpy
 import bmesh
 from mathutils import Vector
 
-SCRIPT = r"C:\Users\LachlanB\TD\Assets\Blender\blender_knight000.py"
+# Resolved relative to THIS file, not hardcoded, as in audit_mage000.py: a
+# worktree's audit audits the worktree's script, not the main repo's baseline.
+SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                      os.pardir, "blender_knight000.py")
+SCRIPT = os.path.normpath(SCRIPT)
 exec(compile(open(SCRIPT, encoding="utf-8").read(), SCRIPT, "exec"))
 
 dg = bpy.context.evaluated_depsgraph_get()

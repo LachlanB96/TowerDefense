@@ -353,6 +353,7 @@ belt directive was stamped `(USER DECISION)`; the user does not remember writing
    resetting the display driver. Never raise it to buy speed.
 8. **Always pass `encoding="utf-8"`** when reading or writing state files. Windows
    defaults to cp1252 and silently mangles the punctuation critiques are full of.
-9. **Paths are hardcoded to `C:\Users\LachlanB\TD\...`** in the asset scripts.
+9. **Asset scripts work their output paths out from their own location**, and a copy
+   run from a worktree under `.claude/worktrees/` still writes into the main checkout.
 10. **Run `python Assets/Blender/_tools/selftest.py` after changing anything in
     `_tools/`.**

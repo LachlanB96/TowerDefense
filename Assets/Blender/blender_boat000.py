@@ -1,6 +1,8 @@
 import bpy
 import bmesh
 import math
+import os
+import sys
 from mathutils import Vector, Matrix
 
 def bake_rotation_on_mesh(obj, rotation_euler):
@@ -16,8 +18,14 @@ def bake_rotation_on_mesh(obj, rotation_euler):
     obj.data.transform(mat, shape_keys=True)
 
 # -- Paths ---------------------------------------------------------------------
-BLEND_DST = r"C:\Users\LachlanB\TD\Assets\Blender\boat000.blend"
-FBX_PATH  = r"C:\Users\LachlanB\TD\Assets\Models\boat000.fbx"
+# Worked out from this file's own path (the name its code was compiled under, which
+# `blender -P`, build_one.py and exec(compile(src, PATH, "exec")) all set), so they
+# hold wherever the repo lives. A copy run from a worktree under .claude/worktrees/
+# still writes into the main checkout (CLAUDE.md, "Asset pipeline").
+_REPO = os.path.abspath(os.path.join(os.path.dirname(sys._getframe().f_code.co_filename), "..", ".."))
+_REPO = _REPO.split(os.sep + os.path.join(".claude", "worktrees") + os.sep)[0]
+BLEND_DST = os.path.join(_REPO, "Assets", "Blender", "boat000.blend")
+FBX_PATH  = os.path.join(_REPO, "Assets", "Models", "boat000.fbx")
 
 # -- Empty scene ---------------------------------------------------------------
 bpy.ops.wm.read_factory_settings(use_empty=True)

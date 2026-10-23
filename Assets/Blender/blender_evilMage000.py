@@ -63,13 +63,20 @@ import bpy
 import bmesh
 import math
 import os
+import sys
 from math import radians, sin, cos, pi
 from mathutils import Vector, Matrix
 
 # -- Paths ---------------------------------------------------------------------
-BLEND_PATH = r"C:\Users\LachlanB\TD\Assets\Blender\evilMage000.blend"
-FBX_PATH   = r"C:\Users\LachlanB\TD\Assets\Models\evilMage000.fbx"
-RENDER_DIR = r"C:\Users\LachlanB\TD\Assets\Blender\_evilMage000"
+# Worked out from this file's own path (the name its code was compiled under, which
+# `blender -P`, build_one.py and exec(compile(src, PATH, "exec")) all set), so they
+# hold wherever the repo lives. A copy run from a worktree under .claude/worktrees/
+# still writes into the main checkout (CLAUDE.md, "Asset pipeline").
+_REPO = os.path.abspath(os.path.join(os.path.dirname(sys._getframe().f_code.co_filename), "..", ".."))
+_REPO = _REPO.split(os.sep + os.path.join(".claude", "worktrees") + os.sep)[0]
+BLEND_PATH = os.path.join(_REPO, "Assets", "Blender", "evilMage000.blend")
+FBX_PATH   = os.path.join(_REPO, "Assets", "Models", "evilMage000.fbx")
+RENDER_DIR = os.path.join(_REPO, "Assets", "Blender", "_evilMage000")
 
 
 def _flag(name, default=False):
