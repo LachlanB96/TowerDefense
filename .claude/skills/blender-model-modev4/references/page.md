@@ -3,12 +3,14 @@
 The page (`_tools/gallery/v4.html`, served at `http://localhost:8777/v4.html`) is
 **the Gloomfell suite** (2026-08-12): fleet overview → per-asset war room (tabs
 Overview · Live · Compare) → design dossier slide-over. It polls static files only;
-the server computes nothing. **Restart `serve.py` after editing any gallery page** —
-pages are copied into the previews root at startup. `index.html` and `live.html` are
-redirect stubs into the suite (they map `?asset=x` onto the router), so the old URLs
+the server computes nothing. Its script is TypeScript, `_tools/gallery/v4.ts` (since
+2026-10-24). **Restart `serve.py` after editing either file** — at startup it copies
+the page into the previews root and bundles `v4.ts` there as `v4.js` with Bun (build
+output: never edited or committed). The old URLs `/`, `/index.html` and `/live.html`
+are server redirects into the suite (they map `?asset=x` onto the router), so they
 can never show stale data. Schemas here must stay byte-compatible with the page
-source; when you change one, change both and grep the other four skill docs for the
-field name.
+source (`v4.ts`, whose interfaces mirror them); when you change one, change both and
+grep the other four skill docs for the field name.
 
 ## Who writes which file
 
@@ -79,8 +81,8 @@ and `record.py` respectively); the page builds the champion image path as
 - **Routes** (hash-based): `#/` fleet overview · `#/a/<asset>` war room Overview tab ·
   `#/a/<asset>/live` Live tab · `#/a/<asset>/compare` Compare tab ·
   `#/a/<asset>/d/<design>` dossier slide-over. Legacy `?asset=<name>` links (and the
-  two stub pages) map onto these on load. Clicking a fleet-strip card refocuses and
-  rewrites the URL.
+  old `/`, `index.html` and `live.html` URLs, which `serve.py` redirects) map onto
+  these on load. Clicking a fleet-strip card refocuses and rewrites the URL.
 - Poll cadence: focused asset's pipeline + chat/feed at 1 s; fleet, `assets.json`,
   champion, `control.json` (read-only dials display), signals/directives and other
   assets' pipelines at 5 s; `live.json` at 1 s **only while the Live tab is mounted**;
