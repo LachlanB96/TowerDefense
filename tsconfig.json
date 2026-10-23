@@ -1,0 +1,6 @@
+{
+  "extends": "../.typescript/tsconfig.base.json",
+  "compilerOptions": { "lib": ["es2024", "dom", "dom.iterable"] },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", ".claude", "Library", "Temp", "Logs", "obj", "Assets/Blender/_previews~"]
+}
