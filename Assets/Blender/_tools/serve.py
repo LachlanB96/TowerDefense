@@ -28,6 +28,7 @@ import re
 import shutil
 import socketserver
 import subprocess
+import sys
 import time
 import urllib.parse
 
@@ -280,6 +281,11 @@ class Server(socketserver.ThreadingTCPServer):
 
 
 def main():
+    # stdout is usually a file or a pipe, which on Windows means cp1252. Bun's
+    # errors quote v4.ts lines (full of characters like the arrows) and a path
+    # can hold anything; neither may kill the server at startup.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="backslashreplace")
     os.makedirs(PREVIEW_ROOT, exist_ok=True)
     # The page and its bundled script go into the previews root so the page's
     # relative image paths resolve. Rebuilt on every start, never served from
