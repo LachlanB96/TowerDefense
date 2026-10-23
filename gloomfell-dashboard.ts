@@ -34,7 +34,7 @@ const PROBE_MAX_AGE = 15000;      // serve.py is asked again at most every 15 s
 const PROBE_TIMEOUT = 1500;
 const HEARTBEAT_AMBER = 90;       // seconds; the suite's own thresholds (page.md: amber at 90 s, red at 300 s while running)
 const HEARTBEAT_RED = 300;
-const CHECK_TIMEOUT = 20 * 60000;
+const CHECK_TIMEOUT = 3 * 3600e3;  // check.ps1 gives the Blender harness 30 min and Unity's batch tests 120 under warden-run
 
 // Tests shorten these: how long Start suite waits for serve.py to answer after starting it
 export const timing = { suiteWaitMs: 500, suiteTries: 16 };
@@ -77,10 +77,12 @@ interface FileCache { size: number; mtimeMs: number; value: unknown }
 interface GitState { facts: GitFacts | null; error: string | null; at: number; running: Promise<void> | null }
 interface ProbeState { up: boolean | null; error: string | null; at: number; running: Promise<void> | null }
 interface CheckLog { at: number; code: number | null; lines: string[] }
-interface UiState { git: GitState; probe: ProbeState; files: Record<string, FileCache>; checkLog: CheckLog | null }
+interface StartState { running: Promise<{ ok: boolean; message: string }> | null; since: number; last: { ok: boolean; message: string; at: number } | null }
+interface UiState { git: GitState; probe: ProbeState; start: StartState; files: Record<string, FileCache>; checkLog: CheckLog | null }
 const uiOf = (ctx: Pick<Ctx, "state">): UiState => (ctx.state.gf ||= {
   git: { facts: null, error: null, at: 0, running: null },
   probe: { up: null, error: null, at: 0, running: null },
+  start: { running: null, since: 0, last: null },
   files: {}, checkLog: null,
 }) as UiState;
 
@@ -100,7 +102,7 @@ function cached<T>(S: UiState, file: string, parse: (text: string) => T): T | nu
  *  what landed; it reads ctx.state, so it works across the module being loaded fresh. */
 export async function settle(state: Record<string, unknown>): Promise<void> {
   const S = uiOf({ state });
-  await Promise.all([S.git.running, S.probe.running]);
+  await Promise.all([S.git.running, S.probe.running, S.start.running]);
 }
 
 // ============================================================
@@ -470,7 +472,7 @@ export async function page(ctx: GfCtx): Promise<string> {
   let unity: UnityView | null = null;
   try { unity = readUnity(dir); } catch (e) { unity = { open: false, lockfile: false, since: null, version: null, error: errMsg(e) }; }
   const checkFile = path.join(dir, "check.ps1"), hasCheck = fs.existsSync(checkFile);
-  const checkJob = ctx.jobStatus("check"), suiteJob = ctx.jobStatus("suite");
+  const checkJob = ctx.jobStatus("check"), starting = !!S.start.running;
   const hasServe = fs.existsSync(path.join(dir, "Assets", "Blender", "_tools", "serve.py"));
 
   // ---------- hero ----------
@@ -487,19 +489,19 @@ export async function page(ctx: GfCtx): Promise<string> {
       G.facts ? chip("", "Branches", String(G.facts.branches.filter(b => b.name !== G.facts!.trunk).length)) : "",
     ].join("");
     const suiteBtn = P.up ? `<button class="gf-btn" data-url="${esc(suiteUrl())}" title="Open the Gloomfell suite in the browser">🖼 Open suite</button>`
-      : P.up === false && hasServe ? `<button class="gf-btn accent" data-action="startSuite" title="python Assets/Blender/_tools/serve.py, detached and without a window"${suiteJob.state !== "idle" ? " disabled" : ""}>${suiteJob.state !== "idle" ? "Starting the suite…" : "▶ Start suite"}</button>` : "";
+      : (P.up === false || starting) && hasServe ? `<button class="gf-btn accent" data-action="startSuite" title="python Assets/Blender/_tools/serve.py, detached and without a window"${starting ? " disabled" : ""}>${starting ? "Starting the suite…" : "▶ Start suite"}</button>` : "";
     const checkBtn = hasCheck
-      ? `<button class="gf-btn" data-action="check" title="pwsh -File check.ps1, as a job"${checkJob.state !== "idle" ? " disabled" : ""}>${checkJob.state === "running" ? "Checking…" : checkJob.state === "queued" ? "Check queued…" : "✔ Run check"}</button>`
+      ? `<button class="gf-btn" data-action="check" title="pwsh -File check.ps1 (TypeScript, the Blender harness, Unity's EditMode tests), as a job"${checkJob.state !== "idle" ? " disabled" : ""}>${checkJob.state === "running" ? "Checking…" : checkJob.state === "queued" ? "Check queued…" : "✔ Run check"}</button>`
       : `<button class="gf-btn" data-action="check" title="There's no check.ps1 in the repo yet" disabled>No check.ps1 yet</button>`;
-    const outcome = (key: string, j: ReturnType<GfCtx["jobStatus"]>): string => j.last && j.last.message && j.state === "idle"
-      ? `<div class="gf-outcome ${j.last.ok ? "ok" : "err"}" data-job="${key}">${esc(j.last.message)} <span class="gf-meta">${esc(fmtAgo(j.last.at))}</span></div>` : "";
+    const line = (key: string, last: { ok: boolean; message: string | null; at: number } | null, busy: boolean): string => last && last.message && !busy
+      ? `<div class="gf-outcome ${last.ok ? "ok" : "err"}" data-job="${key}">${esc(last.message)} <span class="gf-meta">${esc(fmtAgo(last.at))}</span></div>` : "";
     const unpushed = G.facts?.unpushed;
     return `<div class="gf-hero">
       <div class="gf-hero-main">
         <div class="gf-hello">Gloomfell<span>Unity 6 tower defence: gothic Templars and wooden tack launchers. The repo, the modelling fleet, the towers' tables and the editor, read from <code>${esc(slash(dir))}</code>.</span></div>
         <div class="gf-chips">${chips}</div>
         <div class="gf-actions">${suiteBtn}${checkBtn}<button class="gf-btn ghost" data-action="refresh" title="Read git, the fleet and the suite again">↻ Refresh</button></div>
-        ${outcome("suite", suiteJob)}${outcome("check", checkJob)}
+        ${line("suite", S.start.last, starting)}${line("check", checkJob.last, checkJob.state !== "idle")}
       </div>
       <div class="gf-hero-side">
         <div class="gf-pulse-value">${unpushed == null ? "–" : unpushed}</div>
@@ -662,32 +664,45 @@ export function startScript(startUnfocused: string, serve: string, dir: string):
 export const startUnfocusedPath = (projects: string): string => path.join(projects, "Terminal", "code", "LBTerm", "lbterm", "motion", "start-unfocused.ps1");
 const lastLine = (s: string): string => s.replace(/\r/g, "").split("\n").map(l => l.trim()).filter(Boolean).pop() || "";
 
+/** pwsh runs Start-Unfocused, then serve.py gets a few seconds to answer (it copies the suite's pages into the
+ *  previews root before it listens) */
+async function startServe(ctx: GfCtx, su: string, serve: string): Promise<{ ok: boolean; message: string }> {
+  const S = uiOf(ctx);
+  // asked afresh: the page's last answer can be 15 s old, and a second serve.py would only fail to bind the port
+  S.probe.at = 0;
+  await probeNow(ctx);
+  if (S.probe.up) return { ok: true, message: `The suite is already up at ${suiteUrl()}` };
+  const r = await proc.run(PWSH, ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(startScript(su, serve, ctx.dir), "utf16le").toString("base64")], { cwd: ctx.dir, timeout: 60000 });
+  if (r.code !== 0) return { ok: false, message: `✗ Couldn't start serve.py: ${lastLine(r.stderr) || r.error || `pwsh exited ${r.code}`}` };
+  const pid = Number(lastLine(r.stdout)) || null;
+  for (let i = 0; i < timing.suiteTries; i++) {
+    S.probe.at = 0;
+    await probeNow(ctx);
+    if (S.probe.up) return { ok: true, message: `✓ The suite is up at ${suiteUrl()}${pid ? ` (serve.py, pid ${pid})` : ""}` };
+    await sleep(timing.suiteWaitMs);
+  }
+  return { ok: false, message: `✗ Started serve.py${pid ? ` (pid ${pid})` : ""}, but nothing answers on port ${galleryPort()} yet` };
+}
+
 export const actions = {
-  /** starts serve.py, then waits up to ~8 s for it to answer; a job, so a second press joins it */
-  startSuite: (ctx: GfCtx): ActionResult => {
+  /** starts serve.py and answers once it's up or ~8 s have gone by. Not a job: a dashboard's jobs run one at a time,
+   *  and this shouldn't wait behind a check that runs Blender and Unity for an hour. A second press, from any page
+   *  or the CLI, joins the start on its way rather than starting another. */
+  startSuite: (ctx: GfCtx): ActionResult | Promise<ActionResult> => {
     const S = uiOf(ctx);
     const serve = path.join(ctx.dir, "Assets", "Blender", "_tools", "serve.py");
     if (!fs.existsSync(serve)) return { ok: false, message: "✗ There's no Assets/Blender/_tools/serve.py in this checkout" };
     const su = startUnfocusedPath(ctx.projects);
     if (!fs.existsSync(su)) return { ok: false, message: `✗ Start-Unfocused isn't at ${su}` };
-    void ctx.job("suite", async () => {
-      // asked afresh: the page's last answer can be 15 s old, and a second serve.py would only fail to bind the port
-      S.probe.at = 0;
-      await probeNow(ctx);
-      if (S.probe.up) return `The suite is already up at ${suiteUrl()}`;
-      const r = await proc.run(PWSH, ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(startScript(su, serve, ctx.dir), "utf16le").toString("base64")], { cwd: ctx.dir, timeout: 60000 });
-      if (r.code !== 0) return { ok: false, message: `✗ Couldn't start serve.py: ${lastLine(r.stderr) || r.error || `pwsh exited ${r.code}`}` };
-      const pid = Number(lastLine(r.stdout)) || null;
-      // serve.py copies the suite's pages into the previews root before it listens, so give it a few seconds
-      for (let i = 0; i < timing.suiteTries; i++) {
-        S.probe.at = 0;
-        await probeNow(ctx);
-        if (S.probe.up) return `✓ The suite is up at ${suiteUrl()}${pid ? ` (serve.py, pid ${pid})` : ""}`;
-        await sleep(timing.suiteWaitMs);
-      }
-      return { ok: false, message: `✗ Started serve.py${pid ? ` (pid ${pid})` : ""}, but nothing answers on port ${galleryPort()} yet` };
-    });
-    return "Starting the suite…";
+    if (!S.start.running) {
+      S.start.since = Date.now();
+      S.start.running = startServe(ctx, su, serve)
+        .catch(e => ({ ok: false, message: `✗ Couldn't start serve.py: ${errMsg(e)}` }))
+        .then(r => { S.start.last = { ...r, at: Date.now() }; return r; })
+        .finally(() => { S.start.running = null; ctx.refresh(); });
+      ctx.refresh();   // every open page shows it starting
+    }
+    return S.start.running;
   },
 
   /** check.ps1 in pwsh 7, as a job; its last 40 lines are kept for the Check tile */
@@ -718,6 +733,7 @@ export const actions = {
  *  one it reads everything (about 35 ms on the real repo, most of it the Blender scripts). */
 export function summary(dir: string, keep: Record<string, unknown> = {}): { running: number; assets: number; scripts: number; conforming: number; towers: number; tbd: number; unityOpen: boolean } {
   const S = uiOf({ state: (keep.gloomfellSummary ||= {}) as Record<string, unknown> });
+  // (only S.files is used here; the rest of the state is the page's)
   const fleet = readFleet(S, dir), scripts = readScripts(S, dir), towers = readTowers(S, dir);
   return {
     running: fleet.running, assets: fleet.assets.length,

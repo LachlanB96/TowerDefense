@@ -35,8 +35,9 @@ const realTiming = { ...mod.timing };
 const state: Record<string, unknown> = {};   // what the server keeps across renders
 const jobs = jobQueue();
 const opts = (o: Partial<{ dir: string; state: Record<string, unknown> }> = {}) => ({ vault: SCRATCH, projects: PROJECTS, dir: o.dir || REPO, state: o.state || state, jobs });
-const act = (name: keyof typeof mod.actions, arg?: unknown): ActionResult =>
-  (mod.actions[name] as (c: unknown, a?: unknown) => ActionResult)(serverCtx(MODULE, opts()), arg);
+type Result = { ok?: boolean; message?: string };
+const act = (name: keyof typeof mod.actions, arg?: unknown): ActionResult | Promise<ActionResult> =>
+  (mod.actions[name] as (c: unknown, a?: unknown) => ActionResult | Promise<ActionResult>)(serverCtx(MODULE, opts()), arg);
 /** draws once to start the background reads (git, the serve.py probe), waits for them, and draws what landed */
 async function view<T>(fn: (p: Served) => T, o: Parameters<typeof opts>[0] = {}): Promise<T> {
   (await served(MODULE, opts(o))).close();
@@ -340,9 +341,9 @@ test("Run check: without check.ps1 the button says so and pressing it runs nothi
     assert.strictEqual(text(b), "No check.ps1 yet");
     assert.match(text(p.$(".gf-check .gf-empty")), /No check\.ps1/);
   });
-  const r = act("check") as { ok: boolean; message: string };
+  const r = act("check") as Result;
   assert.strictEqual(r.ok, false);
-  assert.match(r.message, /no check\.ps1/i);
+  assert.match(r.message!, /no check\.ps1/i);
   assert.strictEqual(jobs.status("check").state, "idle");
   assert.strictEqual(calls.length, 0);
 });
@@ -382,19 +383,31 @@ test("Start suite: offered only while serve.py doesn't answer, and it needs Star
     assert.ok(!p.$(".gf-hero [data-url]"), "nothing to open");
   });
   const calls = stub(() => ok("1"));
-  const r = act("startSuite") as { ok: boolean; message: string };
+  const r = await act("startSuite") as Result;
   assert.strictEqual(r.ok, false);
-  assert.match(r.message, /Start-Unfocused isn't at .*start-unfocused\.ps1/);
+  assert.match(r.message!, /Start-Unfocused isn't at .*start-unfocused\.ps1/);
   assert.strictEqual(calls.length, 0);
 });
 
 test("Start suite starts serve.py through Start-Unfocused with no console, then waits for it to answer", async () => {
   fs.mkdirSync(path.dirname(START_UNFOCUSED), { recursive: true });
   fs.writeFileSync(START_UNFOCUSED, "# stand-in\n");
-  const calls = stub(async () => { await startSuite(); return ok("4242\r\n"); });
-  assert.strictEqual(act("startSuite"), "Starting the suite…");
-  await jobs.idle();
-  assert.strictEqual(jobs.status("suite").last!.message, `✓ The suite is up at http://localhost:${port}/v4.html (serve.py, pid 4242)`);
+  let release!: () => void;
+  const gate = new Promise<void>(r => { release = r; });
+  const calls = stub(async () => { await gate; await startSuite(); return ok("4242\r\n"); });
+  // two presses (a double click, the phone and the PC) are one start
+  const presses = [act("startSuite"), act("startSuite")];
+  const page = await served(MODULE, opts());
+  try {
+    const b = page.$("[data-action=startSuite]")!;
+    assert.strictEqual(text(b), "Starting the suite…", "every page shows it starting");
+    assert.ok(b.hasAttribute("disabled"));
+  } finally { page.close(); }
+  release();
+  const [a, b] = await Promise.all(presses) as Result[];
+  assert.deepStrictEqual(a, { ok: true, message: `✓ The suite is up at http://localhost:${port}/v4.html (serve.py, pid 4242)` });
+  assert.deepStrictEqual(b, a);
+  assert.strictEqual(jobs.status("suite").state, "idle", "not on the job queue, where it would wait behind a check");
   assert.strictEqual(calls.length, 1);
   const [c] = calls;
   assert.strictEqual(c.file, PWSH, "pwsh 7 by its full path");
@@ -408,11 +421,9 @@ test("Start suite starts serve.py through Start-Unfocused with no console, then 
     assert.ok(!p.$("[data-action=startSuite]"));
     assert.strictEqual(text(p.$(".gf-hero [data-url]")), "🖼 Open suite");
   });
-  // pressed again while it's up: nothing starts
+  // pressed again while it's up (the CLI, or a page drawn before it came up): nothing starts
   const again = stub(() => ok("1"));
-  act("startSuite");
-  await jobs.idle();
-  assert.match(jobs.status("suite").last!.message!, /already up/);
+  assert.match(String(((await act("startSuite")) as Result).message), /already up/);
   assert.strictEqual(again.length, 0);
 });
 
@@ -420,14 +431,11 @@ test("Start suite says when pwsh fails, and when serve.py never answers", async 
   await stopSuite();
   Object.assign(mod.timing, { suiteWaitMs: 20, suiteTries: 3 });
   stub(() => ({ code: 1, stdout: "", stderr: "Exception: Win32_Process.Create failed (9) for C:\\Python313\\python.exe\r\n", error: null }));
-  act("startSuite");
-  await jobs.idle();
-  assert.strictEqual(jobs.status("suite").last!.ok, false);
-  assert.match(jobs.status("suite").last!.message!, /^✗ Couldn't start serve\.py: Exception: Win32_Process\.Create failed \(9\)/);
+  const failed = await act("startSuite") as Result;
+  assert.strictEqual(failed.ok, false);
+  assert.match(failed.message!, /^✗ Couldn't start serve\.py: Exception: Win32_Process\.Create failed \(9\)/);
   stub(() => ok("77"));
-  act("startSuite");
-  await jobs.idle();
-  assert.strictEqual(jobs.status("suite").last!.message, `✗ Started serve.py (pid 77), but nothing answers on port ${port} yet`);
+  assert.deepStrictEqual(await act("startSuite"), { ok: false, message: `✗ Started serve.py (pid 77), but nothing answers on port ${port} yet` });
   await view(p => assert.match(text(p.$(".gf-hero .gf-outcome.err[data-job=suite]")), /nothing answers/));
   Object.assign(mod.timing, realTiming);
   await startSuite();
