@@ -68,7 +68,7 @@ Implement `ITowerAttack` (`Range` property). Concrete attacks: `TackAttack`, `Sn
 
 ## Asset pipeline
 
-Tower/unit meshes are authored in Blender via scripts in `Assets/Blender/blender_*.py`. Each script opens a base `.blend`, mutates it, and exports an `.fbx` into `Assets/Models/` (path is hardcoded to `C:\Users\LachlanB\TD\...`, which matters if the repo ever moves). This is how visual variants of tower upgrades are produced (e.g. `tack100.blend` = red-metal fire variant of `tack000`).
+Tower/unit meshes are authored in Blender via scripts in `Assets/Blender/blender_*.py`. Each script opens a base `.blend`, mutates it, and exports an `.fbx` into `Assets/Models/` (the path is hardcoded to the old `TD` folder in the home folder, which still works through the junction the move to `~\AI\GloomFell` left on 2026-10-24, and breaks once that junction goes). This is how visual variants of tower upgrades are produced (e.g. `tack100.blend` = red-metal fire variant of `tack000`).
 
 ### Preview harness
 
