@@ -1,5 +1,9 @@
 # Evidence — why each v2 rule exists
 
+> Moved here from the v2 skill (`blender-model-modev2`, being retired) on 2026-10-24,
+> unchanged below this note. It is v2's record: `SKILL.md` and `orchestrator.md` mean
+> v2's files, A is v2's supervisor and B its orchestrator. v4 cites it by section.
+
 Receipts for the rules in `SKILL.md` and `orchestrator.md`. Nobody reads this at
 startup; read the section you doubt. Sources: `_previews~/mage000/iteration-log.json`
 plus its two archives (81 attempts across three regimes), `process-notes.md` (passes
