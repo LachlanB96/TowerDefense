@@ -2,7 +2,7 @@
 
     python Assets/Blender/_tools/serve.py
 
-Then open http://localhost:8777/ and leave the tab open on a second monitor.
+Then open http://localhost:8777/v4.html and leave the tab open on a second monitor.
 
 Nearly a stock http.server: the gallery is view-only except for ONE write
 endpoint, POST /signal, which appends the user's star/cross reactions to
@@ -10,20 +10,29 @@ endpoint, POST /signal, which appends the user's star/cross reactions to
 modelling pipeline (the orchestrator stamps reactions into attempt rows; the
 supervisor reports panel-vs-user agreement at finish) — it never gates a
 verdict and it is never control.json, which stays the supervisor's file alone.
-index.html lives in source control under _tools/ and is copied into the
-previews root on start so that relative image paths just work.
+
+The suite lives in source control under _tools/gallery/: the page (v4.html)
+and its script (v4.ts, TypeScript). Every start copies the page into the
+previews root, so relative image paths just work, and bundles the script there
+as v4.js with Bun, so the served script is never older than its source. The
+bundle is build output: it is never written under _tools/ and never committed.
+The old pages (/, /index.html, /live.html) are redirects into the suite.
 """
 
 import functools
+import html
 import http.server
 import json
 import os
 import re
 import shutil
 import socketserver
+import subprocess
 import time
+import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+GALLERY = os.path.join(HERE, "gallery")
 # Overridable so a second instance can serve scratch fixtures on another port
 # without touching the live previews root (suite verification, spec 2026-08-12).
 PREVIEW_ROOT = (os.environ.get("GLOOMFELL_PREVIEW_ROOT")
@@ -41,8 +50,114 @@ DIRECTIVES = {"rework", "revert", "resurrect", "withdraw"}
 # Replies (feed.jsonl) are written by the supervisor process directly, never
 # through HTTP, so everything in chat.jsonl is user-authored by construction.
 
+# The old pages, now redirects into the suite: path -> the suite tab it maps
+# ?asset=<name> onto. index.html (the v1-v3 gallery, also what / served) and
+# live.html (v3's live view) were stub files doing this in the browser until
+# 2026-10-24; with the stubs gone, / would otherwise be a directory listing.
+LEGACY_PAGES = {"/": "", "/index.html": "", "/live.html": "/live"}
+
+# The page script is TypeScript, and browsers run JavaScript, so it is bundled
+# at every start with the Bun the megaproject pins in ~/AI/.typescript (its
+# `npm ci` restores it). The repo sits at <megaproject>/GloomFell, so that is
+# <repo>/../.typescript. A worktree (<repo>/.claude/worktrees/<name>) finds it
+# through the .typescript junction beside it, or else through the main
+# checkout, worked out the way the Blender scripts work out _REPO.
+# GLOOMFELL_BUN points at another bun.exe.
+_REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
+_MAIN_REPO = _REPO.split(os.sep + os.path.join(".claude", "worktrees") + os.sep)[0]
+TS_DIR = os.path.join(os.path.dirname(_MAIN_REPO), ".typescript")
+_BUN_IN_TS = os.path.join("node_modules", "@oven", "bun-windows-x64", "bin", "bun.exe")
+BUNDLE = "v4.js"
+
+
+def find_bun():
+    """The bun.exe to bundle with: GLOOMFELL_BUN, else the megaproject's pinned copy.
+
+    Returns a path even when nothing is there, so the error can say where it looked.
+    """
+    override = os.environ.get("GLOOMFELL_BUN")
+    if override:
+        return override
+    candidates = [os.path.join(os.path.dirname(_REPO), ".typescript", _BUN_IN_TS),
+                  os.path.join(TS_DIR, _BUN_IN_TS)]
+    return next((c for c in candidates if os.path.isfile(c)), candidates[0])
+
+
+def _replace(src, dst):
+    """os.replace, retried briefly: on Windows it fails while a request thread
+    has the old bundle open (see preview.py's _atomic_json)."""
+    for attempt in range(1, 4):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == 3:
+                raise
+            time.sleep(0.05)
+
+
+def build_bundle(dest_dir):
+    """Bundle gallery/v4.ts into <dest_dir>/v4.js. Returns None, or what went wrong.
+
+    A bundle left by an earlier start is deleted when this build fails: a page
+    that says its script is missing beats one that quietly runs an old script.
+    """
+    out = os.path.join(dest_dir, BUNDLE)
+    part = out + ".part"     # built beside it and swapped in, so no request sees half a file
+    bun = find_bun()
+    error = None
+    if not os.path.isfile(bun):
+        error = ("bun not found at %s. Restore it with: npm ci --prefix \"%s\" "
+                 "(or point GLOOMFELL_BUN at a bun.exe)" % (bun, TS_DIR))
+    else:
+        try:
+            r = subprocess.run(
+                [bun, "build", os.path.join(GALLERY, "v4.ts"), "--outfile", part,
+                 "--target", "browser", "--format", "esm"],
+                cwd=GALLERY, capture_output=True, encoding="utf-8", errors="replace",
+                timeout=120, env=dict(os.environ, NO_COLOR="1"),
+                # no console window flashing up when serve.py itself has none
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if r.returncode != 0 or not os.path.isfile(part):
+                error = "bun build failed (exit %d):\n%s" % (
+                    r.returncode, (r.stderr.strip() or r.stdout.strip() or "(no output)"))
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            error = "bun build could not run: %s" % exc
+    if error:
+        for stale in (part, out):
+            if os.path.exists(stale):
+                os.remove(stale)
+        return error
+    _replace(part, out)
+    return None
+
+
+def install_page(dest_dir, bundle_error):
+    """Copy v4.html into the previews root, with a banner when its script didn't build.
+
+    Without its script the page is an empty frame, and whoever is looking at it may
+    never see this server's console, so the page says what happened too.
+    """
+    src, dst = os.path.join(GALLERY, "v4.html"), os.path.join(dest_dir, "v4.html")
+    if not bundle_error:
+        shutil.copyfile(src, dst)
+        return
+    with open(src, encoding="utf-8", newline="") as fh:
+        page = fh.read()
+    banner = ('<div class="banner on" role="alert">page script not built: %s. '
+              'Fix it and restart serve.py; its console has the details.</div>\n'
+              % html.escape(bundle_error.splitlines()[0]))
+    with open(dst, "w", encoding="utf-8", newline="") as fh:
+        fh.write(page.replace('<div id="net"', banner + '<div id="net"', 1))
+
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
+    # Pinned rather than left to mimetypes, which reads the Windows registry:
+    # where some installer has set .js to text/plain, the browser would refuse
+    # the page's script, because module scripts get a strict MIME check.
+    extensions_map = dict(http.server.SimpleHTTPRequestHandler.extensions_map,
+                          **{".js": "text/javascript"})
+
     def log_message(self, fmt, *args):
         pass          # a 1 Hz poll would otherwise flood the console
 
@@ -50,6 +165,36 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
         # The manifest changes several times within a run; never let it cache.
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
+
+    def do_GET(self):
+        if not self._redirect_legacy():
+            super().do_GET()
+
+    def do_HEAD(self):
+        if not self._redirect_legacy():
+            super().do_HEAD()
+
+    def _redirect_legacy(self):
+        """Send an old page's URL into the suite, as its stub file used to.
+
+        ?asset=<name> becomes the suite's #/a/<name> route (#/a/<name>/live from
+        live.html), read like URLSearchParams.get() and encoded like
+        encodeURIComponent(), which is what the stubs used. 302, not 301, and
+        no-store like every response, so no browser keeps the redirect.
+        """
+        url = urllib.parse.urlsplit(self.path)
+        tab = LEGACY_PAGES.get(url.path)
+        if tab is None:
+            return False
+        asset = (urllib.parse.parse_qs(url.query).get("asset") or [""])[0]
+        where = "/v4.html"
+        if asset:
+            where += "#/a/" + urllib.parse.quote(asset, safe="!'()*") + tab
+        self.send_response(302)
+        self.send_header("Location", where)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        return True
 
     def do_POST(self):
         if self.path == "/chat":
@@ -136,21 +281,28 @@ class Server(socketserver.ThreadingTCPServer):
 
 def main():
     os.makedirs(PREVIEW_ROOT, exist_ok=True)
-    # Both pages live in source control under _tools/gallery/ and are copied into the
-    # previews root at startup so their relative image paths resolve. live.html is a
-    # SEPARATE page on purpose: index.html hands the whole page to iteration-log.json
-    # whenever that file exists ("owns the page when present", per its own header), so
-    # a live pane bolted into it would be invisible on any asset with a log.
-    for page in ("index.html", "live.html", "v4.html"):
-        src = os.path.join(HERE, "gallery", page)
-        if os.path.exists(src):
-            shutil.copyfile(src, os.path.join(PREVIEW_ROOT, page))
+    # The page and its bundled script go into the previews root so the page's
+    # relative image paths resolve. Rebuilt on every start, never served from
+    # under _tools/, so what the browser runs always matches v4.ts.
+    bundle_error = build_bundle(PREVIEW_ROOT)
+    install_page(PREVIEW_ROOT, bundle_error)
+    # flush: stdout is normally redirected to a file; without it these lines
+    # sit in the block buffer for the life of the process
+    if bundle_error:
+        # Loud, and on stdout beside the banner, which is where people look.
+        # The server still starts: the data files and the POST doors work
+        # without the page, and the pipeline reads and writes through them.
+        print("!! PAGE SCRIPT NOT BUILT: the suite will load as an empty frame", flush=True)
+        for line in bundle_error.splitlines():
+            print("!!   " + line, flush=True)
+        print("!! Fix that and restart serve.py.", flush=True)
     handler = functools.partial(QuietHandler, directory=PREVIEW_ROOT)
     with Server(("127.0.0.1", PORT), handler) as httpd:
-        # flush: stdout is normally redirected to a file; without it the banner
-        # sits in the block buffer for the life of the process
-        print("suite:   http://localhost:%d/v4.html   (index/live redirect here)" % PORT, flush=True)
+        print("suite:   http://localhost:%d/v4.html   (/, /index.html, /live.html redirect here)" % PORT,
+              flush=True)
         print("root:    %s" % PREVIEW_ROOT, flush=True)
+        print("script:  %s" % ("NOT BUILT, see above" if bundle_error
+                               else "%s, bundled from gallery/v4.ts" % BUNDLE), flush=True)
         httpd.serve_forever()
 
 

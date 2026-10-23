@@ -115,3 +115,9 @@ Obsidian/TD/.obsidian/
 # Python bytecode from the preview harness, and the .meta Unity generates for it.
 __pycache__/
 __pycache__.meta
+
+# The suite's script is TypeScript (gallery/v4.ts); serve.py bundles it into
+# _previews~ as v4.js at every start. A .js under gallery/ is a stray hand
+# build of that output: never commit one.
+/[Aa]ssets/Blender/_tools/gallery/*.js
+/[Aa]ssets/Blender/_tools/gallery/*.js.meta
