@@ -1,5 +1,15 @@
 import bpy
 import math
+import os
+import sys
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+# Worked out from this file's own path (the name its code was compiled under, which
+# `blender -P`, build_one.py and exec(compile(src, PATH, "exec")) all set), so they
+# hold wherever the repo lives. A copy run from a worktree under .claude/worktrees/
+# still writes into the main checkout (CLAUDE.md, "Asset pipeline").
+_REPO = os.path.abspath(os.path.join(os.path.dirname(sys._getframe().f_code.co_filename), "..", ".."))
+_REPO = _REPO.split(os.sep + os.path.join(".claude", "worktrees") + os.sep)[0]
 
 # ── Clean scene ──────────────────────────────────────────────────────────────
 bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -7,7 +17,7 @@ for obj in bpy.data.objects:
     bpy.data.objects.remove(obj, do_unlink=True)
 
 # ── Import GLB ────────────────────────────────────────────────────────────────
-GLB_PATH = r"C:\Users\LachlanB\TD\Assets\Meshes\9_23_2025.glb"
+GLB_PATH = os.path.join(_REPO, "Assets", "Meshes", "9_23_2025.glb")
 bpy.ops.import_scene.gltf(filepath=GLB_PATH)
 
 # Find the mesh object
@@ -171,7 +181,7 @@ for action in bpy.data.actions:
 bpy.ops.object.mode_set(mode='OBJECT')
 
 # ── Export FBX ────────────────────────────────────────────────────────────────
-OUT = r"C:\Users\LachlanB\TD\Assets\Models\dino_walk.fbx"
+OUT = os.path.join(_REPO, "Assets", "Models", "dino_walk.fbx")
 bpy.ops.export_scene.fbx(
     filepath=OUT,
     use_selection=False,
