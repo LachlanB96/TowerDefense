@@ -1,0 +1,1929 @@
+// The Gloomfell suite's page script: fleet overview -> war room -> design dossier, the
+// image viewer and the chat. It was v4.html's inline <script> until 2026-10-24; the move to
+// TypeScript changed types only, not behaviour.
+//
+// This file is the source. serve.py bundles it at startup with the Bun pinned in
+// ~/AI/.typescript into the previews root as v4.js, beside its copy of v4.html, which loads
+// it as a module. The bundle is build output: never edit or commit a v4.js. Restart
+// serve.py after editing this file.
+//
+// A module is always strict, which the inline script asked for with 'use strict'.
+
+/* ========================= state-file shapes ==========================
+   What the page reads, as pinned in .claude/skills/blender-model-modev4/
+   references/page.md and written by the processes named there. Every file
+   belongs to another process and can be missing, older than this page or
+   half-written, so whatever the page tolerates being absent is optional.
+   Exporting them also makes this file a module rather than a global script,
+   so $, S, h and friends stay out of the scope every .ts in the repo shares. */
+
+/** /fleet.json - the supervisor's fleet registry. */
+export interface Fleet {
+  stamped?: string;
+  note?: string;
+  assets?: FleetAsset[];
+}
+export interface FleetAsset {
+  asset: string;
+  state: string;                 // run | pause | stop; anything else shows as unknown
+  makers?: number;
+  queue?: number;
+  accepted?: number;
+  staged?: number;
+  note?: string;
+}
+
+/** /<asset>/pipeline.json - that asset's shepherd, republished with a fresh heartbeat every cycle. */
+export interface Pipeline {
+  asset?: string;
+  heartbeat?: string;
+  state?: string;
+  note?: string;
+  makers?: Maker[];
+  queue?: QueuedDesign[];
+  designs?: Design[];
+  staged?: StagedCard[];
+  events?: PipelineEvent[];      // append order, oldest first; the page shows the newest 15
+}
+export interface Maker {
+  id?: string;
+  design?: string;
+  attempt?: number;
+  status?: string;
+}
+export type Origin = 'user' | 'agent';   // the page labels agent work explicitly (provenance)
+export interface QueuedDesign {
+  id: string;
+  origin?: Origin;
+  summary?: string;
+}
+export interface Design extends QueuedDesign {
+  status?: string;               // the shepherd's words, shown verbatim
+  attempts?: number;
+  last_margins?: number[];       // signed toward the challenger
+  staged?: boolean;
+  chips?: string[];
+}
+export interface StagedCard {
+  design: string;
+  run: number;
+  cell: number;
+  margins?: number[];
+  chips?: string[];
+  at?: string;
+  note?: string;
+}
+export interface PipelineEvent {
+  at?: string;
+  text?: string;
+}
+
+/** /<asset>/champion.json - record.py: the current champion and its provenance. */
+export interface Champion {
+  asset?: string;
+  run: number;
+  cell: number;
+  label?: string;
+  clauses?: string[];
+  seed?: number | null;
+  sheet?: string;                // relative to run-NNN/
+  at?: string;
+  by?: string;
+  quote?: string;
+}
+
+/** /<asset>/control.json - the supervisor's dials; the page only displays them. */
+export interface Control {
+  state?: string;
+  makers?: number;
+  designers?: number;
+  panel?: number;
+  escalate_to?: number;
+  accept_margin?: number;
+  reject_margin?: number;
+  notes?: string[];
+}
+
+/** /<asset>/live.json - tap.py's feed of run dirs and their shots (Live tab). */
+export interface LiveFeed {
+  asset?: string;
+  root?: string;
+  stamped?: string;
+  total_runs?: number;
+  unclaimed_runs?: number;
+  runs?: LiveRun[];
+  error?: string;
+}
+export interface LiveRun {
+  run: number;
+  dir?: string;
+  started?: string | null;
+  done?: boolean | null;
+  tag?: string | null;
+  seed?: number | null;
+  audit?: string | null;
+  claimed?: boolean;
+  variants?: LiveVariant[];
+}
+export interface LiveVariant {
+  n?: number;
+  label?: string | null;
+  exit?: number | null;
+  secs?: number | null;
+  shots?: string[];              // relative to the asset dir
+}
+
+/** /<asset>/latest.json and /<asset>/run-NNN/manifest.json - preview.py (Compare tab). */
+export interface Manifest {
+  asset?: string;
+  run: number;
+  started?: string;
+  done?: boolean;
+  tag?: string | null;
+  seed?: number | null;
+  audit?: string | null;
+  variants?: Variant[];
+  render_env?: RenderEnv;
+  script_sha?: string;
+  wave?: unknown;
+}
+export interface RenderEnv {
+  blender?: string;
+  gpu?: string;
+  gpu_backend?: string;
+}
+export interface Variant {
+  n: number;
+  label?: string;
+  diff?: Record<string, unknown>;
+  renders?: string[];            // relative to run-NNN/
+  exit: number | null;           // null while the cell is still building
+  seconds?: number | null;
+  stderr_tail?: string;
+  clauses?: string[] | null;
+  sheet?: string | null;
+  chips?: (string | Chip)[] | null;
+}
+/** What chips.py writes into a manifest; record.py flattens it to the chip name for attempts.jsonl. */
+export interface Chip {
+  chip: string;
+  detail?: string;
+  blocks_auto?: boolean;
+}
+
+/** /<asset>/attempts.jsonl - record.py: one line per wave, per judge verdict, per promotion. */
+export type AttemptsLine = WaveLine | VerdictLine | PromotionLine;
+export interface WaveLine {
+  kind: 'wave';
+  at?: string;
+  asset?: string;
+  design?: string;
+  attempt?: number | null;
+  run: number;
+  tag?: string | null;
+  seed?: number | null;
+  script_sha?: string | null;
+  draw?: unknown;
+  note?: string | null;
+  cells?: WaveCell[];
+}
+export interface WaveCell {
+  n: number;
+  label?: string | null;
+  clauses?: string[] | null;
+  sheet?: string | null;
+  exit: number | null;
+  chips?: string[];
+}
+export interface VerdictLine {
+  kind: 'verdict';
+  at?: string;
+  asset?: string;
+  run: number;
+  cell?: number | null;
+  vs?: string;                   // incumbent | origin
+  prefer?: string | null;        // challenger | incumbent | tie: the sign of the margin
+  margin?: number | null;        // a magnitude
+  flip?: boolean | null;
+  judge?: string;
+  source?: string;
+  note?: unknown;
+  suggestion?: unknown;
+}
+export interface PromotionLine {
+  kind: 'promote' | 'promotion' | 'champion';
+  asset?: string;
+  run: number;
+  cell?: number | null;
+  label?: string;
+  seed?: number | null;
+  sheet?: string;
+  at?: string;
+  by?: string;
+  quote?: string;
+}
+
+/** /<asset>/user-signals.jsonl - serve.py, from the page's POST /signal (star/cross). */
+export interface SignalLine {
+  at?: string;
+  asset?: string;
+  attempt: string;               // the page's row key, <design>·a<attempt>·r<run>
+  design?: string;
+  run?: string;
+  mark?: 'star' | 'cross' | 'clear';
+  note?: string;
+}
+/** A directive the page knows about: its own POST, or a line read back from the file. */
+export interface PendingDirective {
+  directive: string;
+  note?: string;
+  at?: string;
+}
+/** /<asset>/user-directives.jsonl - serve.py, from the page's POST /directive. */
+export interface DirectiveLine extends PendingDirective {
+  asset?: string;
+  attempt: string;               // the page's row key
+  design?: string;
+  run?: string;
+}
+
+/** /chat.jsonl (the page, through POST /chat) and /feed.jsonl (the supervisor). */
+export interface ChatLine {
+  at?: string;
+  from?: 'user' | 'supervisor';
+  text?: string;
+  asset?: string;
+}
+
+/* ========================= the page's own state ======================= */
+type Tab = 'overview' | 'live' | 'compare';
+interface Route {
+  view: 'fleet' | 'asset' | null;   // null only before boot parses the hash
+  asset: string | null;
+  tab: Tab | null;
+  design: string | null;
+}
+/** The route while the war room is up. render() only calls the asset views then, so they
+    read S.route through this; the cast is the whole of the narrowing. */
+interface AssetRoute extends Route {
+  view: 'asset';
+  asset: string;
+  tab: Tab;
+}
+type Mark = 'star' | 'cross';
+type Directive = 'rework' | 'revert' | 'resurrect' | 'withdraw';
+/** One verdict line from attempts.jsonl, with its defaults filled in. */
+interface Verdict {
+  at: string | null;
+  cell: number | null;
+  vs: string;
+  prefer: string | null;
+  margin: number | null;
+  flip: boolean | null;
+  judge: string;
+  suggestion: string;
+  note: string;
+}
+/** One wave (one attempt at a design), joined with the verdicts on its run. */
+interface Attempt {
+  design: string;
+  attempt: number | null;
+  run: number;
+  tag: string;
+  seed: number | null;
+  scriptSha: string;
+  at: string | null;
+  draw: unknown;
+  note: string;
+  cells: WaveCell[];
+  verdicts: Verdict[];
+}
+interface ParsedAttempts {
+  designs: Map<string, Attempt[]>;
+  byRun: Map<number, { design: string; attempt: number | null }>;
+  promos: PromotionLine[];
+}
+interface SeriesPoint {
+  attempt: number | null;
+  run: number;
+  mean: number;
+}
+/** The NEW-since-last-look watermark, as stored in localStorage. */
+interface Seen {
+  gen: string;
+  seen: Record<string, string>;
+  t: string | null;
+}
+interface LiveFilter {
+  claimed?: boolean;
+  failures?: boolean;
+}
+interface NeedsYouItem {
+  asset: string;
+  kind: 'staged' | 'stale-hb' | 'paused-staged';
+  label: string;
+  href: string;
+}
+interface ViewerItem {
+  src: string;
+  caption: string;
+}
+type ViewMode = 'single' | 'side' | 'diff';
+interface Store {
+  route: Route;
+  viewKind: string | null;
+  sigs: Record<string, string>;
+  fleet: Fleet | null;
+  assetsOnDisk: string[];
+  pipes: Map<string, Pipeline | null>;
+  champion: Champion | null;
+  control: Control | null;
+  live: LiveFeed | null;
+  attempts: ParsedAttempts | null;
+  attemptsSig: string | null;
+  compare: Manifest | null;
+  compareText: string | null;
+  manifests: Map<string, Manifest | 'fetching' | 'missing'>;
+  champs: Map<string, Champion | null>;
+  chat: ChatLine[];
+  pendingRows: HTMLElement[];
+  marks: Map<string, Mark>;
+  dirs: Map<string, PendingDirective>;
+  signalsOK: boolean;
+  seen: Seen | null;
+  announced: Record<string, string>;
+  failures: number;
+  tick: number;
+  ticking: boolean;
+  // Set later and absent until then, as they were in the inline script, so
+  // window.__gf reads the same.
+  liveCap?: number;
+  cmpJump?: number;
+  dirCompose?: { key: string; directive: Directive } | null;
+}
+declare global {
+  interface Window { __gf: Store; }
+}
+type Kid = Node | string | null | undefined | false;
+type AttrValue = string | number | boolean | null | undefined;
+type Attrs = Record<string, AttrValue | ((e: Event) => unknown)>;
+// Number.isFinite as a type guard: the built-in one doesn't narrow.
+const finite = (v: unknown): v is number => Number.isFinite(v);
+
+/* ============================ utils =================================== */
+const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
+const q = (p: string) => p + (p.includes('?') ? '&' : '?') + 't=' + Date.now();  // JSON only — never images
+function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs?: Attrs | null, ...kids: Kid[]): HTMLElementTagNameMap[K] {          // tiny element builder — no innerHTML with data, ever
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === 'class') el.className = v as string;
+    else if (k === 'text') el.textContent = v as string;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v as EventListener);
+    else if (v !== null && v !== undefined) el.setAttribute(k, v as string);
+  }
+  for (const k of kids) if (k) el.appendChild(typeof k === 'string' ? document.createTextNode(k) : k);
+  return el;
+}
+function lsGet(k: string): string | null { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k: string, v: string): void { try { localStorage.setItem(k, v); } catch (e) {} }
+function fmtRel(iso: string | null | undefined): string | null {
+  const t = Date.parse(iso as string); if (!Number.isFinite(t)) return null;
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 60) return Math.round(s) + 's';
+  if (s < 3600) return Math.round(s / 60) + 'm';
+  if (s < 86400) return (s / 3600).toFixed(1).replace('.0', '') + 'h';
+  return new Date(t).toLocaleDateString();
+}
+function timeEl(iso: string | null | undefined): HTMLElement {
+  if (!iso) return h('span', { class: 'faint', text: '' });
+  const el = h('time', { class: 'faint num', datetime: iso, 'data-ts': iso,
+                         title: new Date(iso).toLocaleString() + ' · ' + iso });
+  el.textContent = fmtRel(iso) || iso;
+  return el;
+}
+function refreshTimes() {
+  for (const el of document.querySelectorAll<HTMLElement>('[data-ts]')) {
+    const rel = fmtRel(el.dataset.ts);
+    if (rel) el.textContent = rel;
+  }
+}
+function hbAge(iso: string | null | undefined): number | null { const t = Date.parse(iso as string); return Number.isFinite(t) ? (Date.now() - t) / 1000 : null; }
+function fmtAge(age: number): string {
+  if (age < 90) return Math.round(age) + 's';
+  if (age < 5400) return Math.round(age / 60) + 'm';
+  if (age < 172800) return (age / 3600).toFixed(1).replace('.0', '') + 'h';
+  return Math.round(age / 86400) + 'd';
+}
+function announce(key: string, msg: string): void {              // edge-triggered screen-reader announcements
+  if (S.announced[key] === msg) return;
+  S.announced[key] = msg;
+  if (msg) $('announce').textContent = msg;
+}
+/* ============================ router ================================== */
+// #/                      fleet overview
+// #/a/<asset>             war room (overview tab)
+// #/a/<asset>/live        war room, live tab
+// #/a/<asset>/compare     war room, compare tab
+// #/a/<asset>/d/<design>  dossier slide-over above the overview tab
+function parseRoute(): Route {
+  const m = location.hash.match(
+    /^#\/a\/([A-Za-z0-9_-]{1,64})(?:\/(live|compare)|\/d\/([A-Za-z0-9_-]{1,64}))?$/);
+  if (!m) return { view: 'fleet', asset: null, tab: null, design: null };
+  return { view: 'asset', asset: m[1], tab: (m[2] || 'overview') as Tab, design: m[3] || null };
+}
+function nav(hash: string): void {
+  if (location.hash === hash) return;
+  location.hash = hash;
+  applyRoute();          // synchronous — never wait on a (possibly throttled) hashchange
+}
+function applyRoute() {
+  const next = parseRoute();
+  const was = S.route;
+  if (next.asset !== was.asset) {
+    // all per-asset state derives from the asset — drop it wholesale
+    S.champion = S.control = S.live = S.attempts = null;
+    S.attemptsSig = null; S.compare = null; S.compareText = null;
+    S.marks = new Map(); S.dirs = new Map(); S.seen = null;
+    S.liveCap = 20;
+    S.sigs = {};
+  }
+  if (next.view !== was.view || next.tab !== was.tab) S.viewKind = null;  // rebuild scaffold
+  S.route = next;
+  render();
+  tick();                                   // fetch the new focus immediately
+}
+/* ============================== net =================================== */
+async function jget<T>(url: string): Promise<T | null> {                   // 404 = absent state, not an error
+  const r = await fetch(q(url), { cache: 'no-store' });
+  return r.ok ? r.json() : null;
+}
+async function tget(url: string): Promise<string | null> {
+  const r = await fetch(q(url), { cache: 'no-store' });
+  return r.ok ? r.text() : null;
+}
+async function headSig(url: string): Promise<string | null> {                // cheap change gate for big JSONL files
+  const r = await fetch(q(url), { method: 'HEAD', cache: 'no-store' });
+  if (!r.ok) return null;
+  return (r.headers.get('content-length') || '') + '|' + (r.headers.get('last-modified') || '');
+}
+async function postJSON(path: string, body: unknown): Promise<boolean> {
+  try {
+    const r = await fetch(path, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return r.ok;
+  } catch (e) { return false; }
+}
+/* ============================== store ================================= */
+const S: Store = {
+  route: { view: null, asset: null, tab: null, design: null },
+  viewKind: null,                 // which scaffold #main currently holds
+  sigs: {},                       // render signature guards, cleared per view/asset
+  fleet: null, assetsOnDisk: [], pipes: new Map(),
+  champion: null, control: null, live: null,
+  attempts: null, attemptsSig: null,
+  compare: null, compareText: null, manifests: new Map(), champs: new Map(),
+  chat: [], pendingRows: [],
+  marks: new Map(), dirs: new Map(), signalsOK: true,
+  seen: null, announced: {},
+  failures: 0, tick: 0, ticking: false,
+};
+window.__gf = S;                  // debugging seam — verification reads parsed state here
+function sig(key: string, value: unknown): boolean {
+  const s = JSON.stringify(value ?? null);
+  if (S.sigs[key] === s) return false;
+  S.sigs[key] = s;
+  return true;
+}
+/* ============================== poller ================================ */
+async function tick() {
+  if (S.ticking) return;                    // a slow tick must not interleave with the next
+  S.ticking = true;
+  try { await tickBody(); } finally { S.ticking = false; }
+  try { render(); } catch (e) { console.error('render failed', e); }
+  refreshTimes();
+}
+async function tickBody() {
+  S.tick++;
+  const slow = S.tick % 5 === 1;
+  const R = S.route, asset = R.view === 'asset' ? R.asset : null;
+  try {
+    if (slow || !S.fleet) {
+      S.fleet = await jget<Fleet>('/fleet.json');
+      S.assetsOnDisk = (await jget<string[]>('/assets.json')) || [];
+      for (const a of (S.fleet?.assets || []))
+        if (a.asset !== asset) S.pipes.set(a.asset, await jget<Pipeline>(`/${a.asset}/pipeline.json`));
+      if (R.view === 'fleet')                // champion thumbs for the overview cards
+        for (const a of (S.fleet?.assets || []))
+          S.champs.set(a.asset, await jget<Champion>(`/${a.asset}/champion.json`));
+    }
+    if (asset) {
+      S.pipes.set(asset, await jget<Pipeline>(`/${asset}/pipeline.json`));
+      if (slow || !S.champion) S.champion = await jget<Champion>(`/${asset}/champion.json`);
+      if (slow || !S.control) S.control = await jget<Control>(`/${asset}/control.json`);
+      if (slow || !S.attempts) await pollAttempts(asset);
+      if (slow) { await pollSignals(asset); await pollDirectives(asset); }
+      if (R.tab === 'live') S.live = await jget<LiveFeed>(`/${asset}/live.json`);
+      if (R.tab === 'compare') await pollCompare(asset);
+    }
+    S.chat = mergeChat(await tget('/chat.jsonl'), await tget('/feed.jsonl'));
+    S.failures = 0;
+    $('dot').className = 'on';
+    $('net').classList.remove('on');
+  } catch (e) {                             // server unreachable — keep the last good state
+    S.failures++;
+    if (S.failures >= 3) { $('dot').className = 'err'; $('net').classList.add('on'); }
+  }
+}
+/* ======================= attempts data layer ==========================
+   attempts.jsonl is the durable record (record.py): one line per wave, one
+   per judge verdict, one per promotion. Everything the dossier, ratchet and
+   run-attribution show is a client-side join over it — no writer changes. */
+function parseAttempts(text: string | null): ParsedAttempts {
+  const waves: WaveLine[] = [], verdicts: VerdictLine[] = [], promos: PromotionLine[] = [];
+  for (const line of (text || '').split('\n')) {
+    if (!line.trim()) continue;
+    let r: AttemptsLine; try { r = JSON.parse(line); } catch (e) { continue; }   // torn tail line
+    if (r.kind === 'wave') waves.push(r);
+    else if (r.kind === 'verdict') verdicts.push(r);
+    else if (r.kind === 'promote' || r.kind === 'promotion' || r.kind === 'champion') promos.push(r);
+    // any other kind is recorded for the pipeline, not for us — skip silently
+  }
+  const vByRun = new Map<number, Verdict[]>();
+  for (const v of verdicts) {
+    if (!Number.isFinite(v.run)) continue;
+    if (!vByRun.has(v.run)) vByRun.set(v.run, []);
+    vByRun.get(v.run)!.push({ at: v.at || null, cell: v.cell ?? null,
+      vs: v.vs || 'incumbent', prefer: v.prefer || null,
+      margin: finite(v.margin) ? v.margin : null,
+      flip: v.flip ?? null, judge: v.judge || '?',
+      suggestion: typeof v.suggestion === 'string' ? v.suggestion : '',
+      note: typeof v.note === 'string' ? v.note : '' });
+  }
+  const designs = new Map<string, Attempt[]>(), byRun: ParsedAttempts['byRun'] = new Map();
+  for (const w of waves) {
+    const id = w.design || 'ungrouped';
+    if (!designs.has(id)) designs.set(id, []);
+    designs.get(id)!.push({ design: id, attempt: w.attempt ?? null, run: w.run,
+      tag: w.tag || '', seed: w.seed ?? null, scriptSha: w.script_sha || '',
+      at: w.at || null, draw: w.draw || null, note: w.note || '',
+      cells: Array.isArray(w.cells) ? w.cells : [],
+      verdicts: vByRun.get(w.run) || [] });
+    if (Number.isFinite(w.run)) byRun.set(w.run, { design: id, attempt: w.attempt ?? null });
+  }
+  for (const list of designs.values())
+    list.sort((a, b) => (a.attempt ?? 0) - (b.attempt ?? 0) || a.run - b.run);
+  return { designs, byRun, promos };
+}
+function rowKey(a: { design?: string; attempt?: number | null; run?: number }): string { return `${a.design}·a${a.attempt ?? '?'}·r${a.run}`; }
+function judgedCell(a: Attempt): number | null {                    // the cell the panel judged — mode of verdict cells
+  const counts = new Map<number, number>();
+  for (const v of a.verdicts) if (v.cell != null)
+    counts.set(v.cell, (counts.get(v.cell) || 0) + 1);
+  let best: number | null = null, n = 0;
+  for (const [c, k] of counts) if (k > n) { best = c; n = k; }
+  return best;
+}
+// MARGIN is a magnitude; the sign comes from PREFER (judge.py's convention —
+// see refine.py / selftest). Tolerate prefer-less rows by taking margin raw.
+function signedMargin(v: Verdict): number | null {
+  if (v.margin == null) return null;
+  if (!v.prefer) return v.margin;
+  return v.prefer === 'challenger' ? Math.abs(v.margin) : -Math.abs(v.margin);
+}
+function signedMean(verdicts: Verdict[]): number | null {
+  const vals = verdicts.map(signedMargin).filter(finite);
+  if (!vals.length) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+// The ratchet: 'origin' = judged against the design's first baseline (never
+// moves — the only true progress measure); 'incumbent' = against the moving
+// champion (decides acceptance, says nothing about direction).
+function marginSeries(attempts: Attempt[], kind: 'origin' | 'incumbent'): SeriesPoint[] {
+  const out: SeriesPoint[] = [];
+  for (const a of attempts) {
+    const vs = a.verdicts.filter(v => kind === 'origin' ? v.vs === 'origin' : v.vs !== 'origin');
+    const mean = signedMean(vs);
+    if (mean != null) out.push({ attempt: a.attempt, run: a.run, mean });
+  }
+  return out;
+}
+function runDir(n: number): string { return 'run-' + String(n).padStart(3, '0'); }
+function cellDir(n: number): string { return 'v' + n; }
+// Fallback chain for an attempt thumbnail: the judged cell's hero, then its
+// sheet, then the baseline cell's hero. Images are immutable — never busted.
+function thumbSrcs(asset: string, run: number, cell: number | null): string[] {
+  const rd = `/${asset}/${runDir(run)}/`;
+  const c = cell ?? 1;
+  return [rd + cellDir(c) + '/hero_34.png', rd + cellDir(c) + '/_sheet.png',
+          rd + 'v1/hero_34.png'];
+}
+function imgFallback(el: HTMLImageElement, srcs: string[], noimgText?: string): void {
+  let i = 0;
+  el.src = srcs[0];
+  el.onerror = () => {
+    if (++i < srcs.length) el.src = srcs[i];
+    else {
+      const d = h('div', { class: 'noimg', text: noimgText || 'no render' });
+      d.style.width = el.style.width || el.getAttribute('width') + 'px';
+      d.style.height = el.style.height || el.getAttribute('height') + 'px';
+      el.replaceWith(d);
+    }
+  };
+}
+async function pollAttempts(asset: string): Promise<void> {
+  const url = `/${asset}/attempts.jsonl`;
+  const head = await headSig(url);           // cheap gate — the file can reach hundreds of KB
+  if (asset !== S.route.asset) return;       // switched mid-flight
+  if (head === null) { S.attempts = { designs: new Map(), byRun: new Map(), promos: [] }; return; }
+  if (head === S.attemptsSig && S.attempts) return;
+  const text = await tget(url);
+  if (asset !== S.route.asset || text === null) return;
+  S.attemptsSig = head;
+  S.attempts = parseAttempts(text);
+  S.seen = loadSeen(asset, S.attempts);
+}
+/* =========================== watermark ================================
+   "What's new since I last looked": per-asset localStorage snapshot of
+   rowKey -> verdict signature. NEW = unseen row OR its verdicts changed.
+   A generation signature guards archive rotation — on mismatch, reset. */
+function seenKey(asset: string): string { return 'gf-seen-' + asset; }
+function verdictSig(a: Attempt): string {
+  return a.verdicts.length + '|' + a.verdicts.map(v => signedMargin(v)).join(',');
+}
+function loadSeen(asset: string, parsed: ParsedAttempts): Seen {
+  let firstWave: Attempt | null = null, firstV: Verdict | null = null;
+  for (const list of parsed.designs.values()) {
+    for (const a of list) {
+      if (!firstWave || a.run < firstWave.run) firstWave = a;
+      if (!firstV && a.verdicts.length) firstV = a.verdicts[0];
+    }
+  }
+  const gen = firstWave ? `${firstWave.design}|${firstWave.run}|${firstV?.at || ''}` : 'empty';
+  let s: Seen | null = null;
+  try { s = JSON.parse(lsGet(seenKey(asset)) || 'null'); } catch (e) {}
+  if (!s || s.gen !== gen) s = { gen, seen: {}, t: null };
+  return s;
+}
+function isNewRow(a: Attempt): boolean {
+  if (!S.seen) return false;
+  const k = rowKey(a);
+  return !(k in S.seen.seen) || S.seen.seen[k] !== verdictSig(a);
+}
+function newCount(): number {
+  if (!S.attempts || !S.seen) return 0;
+  let n = 0;
+  for (const list of S.attempts.designs.values())
+    for (const a of list) if (isNewRow(a)) n++;
+  return n;
+}
+function commitSeen() {
+  const asset = S.route.asset;
+  if (!asset || !S.attempts || !S.seen) return;
+  for (const list of S.attempts.designs.values())
+    for (const a of list) S.seen.seen[rowKey(a)] = verdictSig(a);
+  S.seen.t = new Date().toISOString();
+  lsSet(seenKey(asset), JSON.stringify(S.seen));
+}
+addEventListener('pagehide', commitSeen);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') commitSeen();
+  // Chrome throttles a hidden tab's timers to ~1/min; catch up the instant
+  // the user looks back at the page instead of waiting out the throttle.
+  else tick();
+});
+/* ======================= signals + directives =========================
+   Two separate doors on purpose (serve.py): star/cross are taste signals,
+   directives are instructions. The page POSTs and then reflects what the
+   files say — the files are the truth, not local state. */
+async function pollSignals(asset: string): Promise<void> {
+  const text = await tget(`/${asset}/user-signals.jsonl`);
+  if (asset !== S.route.asset) return;
+  const m = new Map<string, Mark>();
+  for (const s of parseJsonl<SignalLine>(text)) {
+    if (s.mark === 'clear') m.delete(s.attempt);
+    else if (s.mark) m.set(s.attempt, s.mark);
+  }
+  S.marks = m;
+}
+async function pollDirectives(asset: string): Promise<void> {
+  const text = await tget(`/${asset}/user-directives.jsonl`);
+  if (asset !== S.route.asset) return;
+  const m = new Map<string, PendingDirective>();
+  for (const d of parseJsonl<DirectiveLine>(text)) {
+    if (d.directive === 'withdraw') m.delete(d.attempt);
+    else if (d.directive) m.set(d.attempt, d);
+  }
+  S.dirs = m;
+}
+async function sendSignal(a: Attempt, mark: Mark): Promise<boolean> {         // toggle semantics: same mark again clears
+  const key = rowKey(a);
+  const next = S.marks.get(key) === mark ? 'clear' : mark;
+  const ok = await postJSON('/signal', { asset: S.route.asset, attempt: key,
+    design: a.design || '', run: a.run ?? '', mark: next });
+  if (!ok) return false;
+  if (next === 'clear') S.marks.delete(key); else S.marks.set(key, next);
+  return true;
+}
+async function sendDirective(a: Attempt, directive: Directive, note?: string): Promise<boolean> {
+  const key = rowKey(a);
+  const ok = await postJSON('/directive', { asset: S.route.asset, attempt: key,
+    design: a.design || '', run: a.run ?? '', directive, note: note || '' });
+  if (!ok) return false;
+  if (directive === 'withdraw') S.dirs.delete(key);
+  else S.dirs.set(key, { directive, note: note || '', at: new Date().toISOString() });
+  return true;
+}
+/* ======================== compare fetching ============================
+   latest.json is the current preview.py run; run-NNN manifests are immutable
+   once done, so history is fetched once per (asset, run) and memoized. */
+async function pollCompare(asset: string): Promise<void> {
+  const text = await tget(`/${asset}/latest.json`);
+  if (asset !== S.route.asset) return;
+  if (text === null) { S.compare = null; S.compareText = null; return; }
+  if (text !== S.compareText) {
+    try { S.compare = JSON.parse(text); S.compareText = text; }
+    catch (e) { return; }              // half-written — keep the previous good parse
+  }
+  const cur = S.compare?.run;
+  if (!finite(cur)) return;
+  for (let n = cur - 1; n >= 1 && n > cur - 12; n--) {
+    const key = asset + '|' + n;
+    if (S.manifests.has(key)) continue;
+    S.manifests.set(key, 'fetching');    // claim before await — ticks overlap
+    const m = await jget<Manifest>(`/${asset}/${runDir(n)}/manifest.json`);
+    if (asset !== S.route.asset) { S.manifests.delete(key); return; }
+    S.manifests.set(key, m || 'missing');
+  }
+}
+async function jumpToRun(asset: string, n: number): Promise<void> {
+  const key = asset + '|' + n;
+  if (!S.manifests.has(key) || S.manifests.get(key) === 'missing') {
+    S.manifests.set(key, 'fetching');
+    const m = await jget<Manifest>(`/${asset}/${runDir(n)}/manifest.json`);
+    S.manifests.set(key, m || 'missing');
+  }
+  S.cmpJump = n;
+  S.sigs = {}; render();
+}
+/* ============================== render ================================ */
+function ensureScaffold(kind: string, build: (main: HTMLElement) => void): void {
+  if (S.viewKind === kind) return;
+  S.viewKind = kind;
+  S.sigs = {};
+  const main = $('main');
+  main.textContent = '';
+  build(main);
+}
+function render() {
+  renderStrip();
+  renderBell();
+  if (S.route.view === 'fleet') renderFleetView();
+  else renderAssetView();
+  renderChat();
+}
+/* --- chrome: fleet strip (enriched in T6; minimal cards now) --- */
+function stateOf(a: FleetAsset | null | undefined): string {                        // fleet state wins; pipeline, then control fill in
+  return a?.state || S.pipes.get(a?.asset as string)?.state || 'unknown';
+}
+function renderStrip() {
+  const assets = S.fleet?.assets || [];
+  const hbs = assets.map(x => S.pipes.get(x.asset)?.heartbeat || null);
+  if (!sig('strip', [assets, hbs, S.route.asset])) return;
+  const host = $('strip');
+  host.textContent = '';
+  for (const a of assets) {
+    const st = ['run', 'pause', 'stop'].includes(a.state) ? a.state : 'unknown';
+    const age = hbAge(S.pipes.get(a.asset)?.heartbeat);
+    const hbCls = a.state !== 'run' || age == null ? 'faint'
+                : age < 90 ? 'hb-ok' : age < 300 ? 'hb-warn' : 'hb-stale';
+    const hbTxt = age == null ? 'hb —' : 'hb ' + fmtAge(age) + (age >= 300 && a.state === 'run' ? ' · stuck?' : '');
+    host.appendChild(h('button', { class: 'fcard', 'aria-current': String(a.asset === S.route.asset),
+                                   onclick: () => nav('#/a/' + a.asset) },
+      h('span', { class: 'l1' },
+        h('span', { class: 'name', text: a.asset }),
+        h('span', { class: 'pill st-' + st + (st === 'run' ? ' pulse' : ''), text: a.state || '?' })),
+      h('span', { class: 'l2 num' },
+        h('span', { title: 'accepted', text: '✓' + (a.accepted ?? '—') }),
+        h('span', { title: 'queue depth', text: 'q' + (a.queue ?? '—') }),
+        a.staged ? h('span', { class: 'chip amber', title: 'staged, awaiting promote', text: '⚑' + a.staged }) : null,
+        h('span', { class: hbCls, text: hbTxt }))));
+  }
+}
+function needsYou(): NeedsYouItem[] {                        // aggregated attention items (fleshed out in T6)
+  const items: NeedsYouItem[] = [];
+  for (const a of (S.fleet?.assets || [])) {
+    const p = S.pipes.get(a.asset);
+    for (const s of (p?.staged || []))
+      items.push({ asset: a.asset, kind: 'staged',
+                   label: `${a.asset} — ${s.design} staged ${fmtMargins(s.margins)}, awaiting promote`,
+                   href: '#/a/' + a.asset });
+    const age = hbAge(p?.heartbeat);
+    if (a.state === 'run' && age != null && age >= 300)
+      items.push({ asset: a.asset, kind: 'stale-hb',
+                   label: `${a.asset} — heartbeat ${fmtAge(age)} old while running: pipeline may be stuck`,
+                   href: '#/a/' + a.asset });
+    if (a.state === 'pause' && a.staged)
+      items.push({ asset: a.asset, kind: 'paused-staged',
+                   label: `${a.asset} — paused with ${a.staged} staged design${a.staged === 1 ? '' : 's'} waiting`,
+                   href: '#/a/' + a.asset });
+  }
+  return items;
+}
+function fmtMargins(ms: number[] | undefined): string {
+  return (ms || []).map(m => (m > 0 ? '+' : '') + m).join('/');
+}
+function renderBell() {
+  const n = needsYou().length;
+  if (!sig('bell', n)) return;
+  const bell = $('bell');
+  bell.hidden = !n;
+  bell.textContent = '';
+  if (n) {
+    bell.appendChild(h('span', { text: '⚑ ' }));
+    bell.appendChild(h('b', { class: 'num', text: String(n) }));
+    bell.appendChild(h('span', { text: ' need' + (n === 1 ? 's' : '') + ' you' }));
+    bell.onclick = () => nav('#/');
+    announce('bell', n + ' item' + (n === 1 ? '' : 's') + ' waiting on you');
+  } else announce('bell', '');
+}
+/* ============================ fleet view ============================== */
+function renderFleetView() {
+  ensureScaffold('fleet', main => {
+    main.appendChild(h('section', { class: 'zone', id: 'z-inbox' },
+      h('h2', { text: 'Needs you' }),
+      h('div', { class: 'card', id: 'fv-inbox' })));
+    main.appendChild(h('section', { class: 'zone' },
+      h('h2', { text: 'Fleet' }),
+      h('div', { id: 'fv-cards' }),
+      h('div', { class: 'card', id: 'fv-loose', style: 'margin-top:12px' })));
+  });
+  const items = needsYou();
+  if (sig('fv-inbox', items.map(i => i.kind + i.label))) {
+    const host = $('fv-inbox');
+    host.textContent = '';
+    if (!items.length)
+      host.appendChild(h('div', { class: 'empty', text: 'nothing waiting on you' }));
+    for (const it of items) {
+      const glyph = it.kind === 'staged' ? '⚑' : it.kind === 'stale-hb' ? '⏱' : '⏸';
+      host.appendChild(h('button', { class: 'item', onclick: () => nav(it.href) },
+        h('span', { class: 'glyph ' + it.kind, text: glyph }),
+        h('span', { class: 'lbl', text: it.label }),
+        h('span', { class: 'go', text: 'open →' })));
+    }
+  }
+  const assets = S.fleet?.assets || [];
+  const champSig = assets.map(a => JSON.stringify(S.champs.get(a.asset) || null));
+  const hbSig = assets.map(a => { const age = hbAge(S.pipes.get(a.asset)?.heartbeat);
+                                  return age == null ? '-' : Math.floor(age / 30); });
+  if (sig('fv-cards', [assets, champSig, hbSig])) {
+    const host = $('fv-cards');
+    host.textContent = '';
+    if (!assets.length)
+      host.appendChild(h('div', { class: 'card empty', style: 'grid-column:1/-1',
+        text: 'no fleet running — waiting for the supervisor to write fleet.json' }));
+    for (const a of assets) {
+      const st = ['run', 'pause', 'stop'].includes(a.state) ? a.state : 'unknown';
+      const c = S.champs.get(a.asset);
+      const age = hbAge(S.pipes.get(a.asset)?.heartbeat);
+      const hbCls = a.state !== 'run' || age == null ? 'faint'
+                  : age < 90 ? 'hb-ok' : age < 300 ? 'hb-warn' : 'hb-stale';
+      const thumb = h('span', { class: 'thumb' });
+      if (c && c.sheet) {
+        const img = h('img', { alt: a.asset + ' champion', loading: 'lazy' });
+        imgFallback(img, [`/${a.asset}/${runDir(c.run)}/${c.sheet}`], 'no champion');
+        thumb.appendChild(img);
+      } else thumb.appendChild(h('span', { class: 'noimg', text: 'no champion yet' }));
+      host.appendChild(h('button', { class: 'acard card', onclick: () => nav('#/a/' + a.asset) },
+        thumb,
+        h('span', { class: 'meta' },
+          h('span', { class: 'l1' },
+            h('span', { class: 'name', text: a.asset }),
+            h('span', { class: 'pill st-' + st + (st === 'run' ? ' pulse' : ''), text: a.state || '?' }),
+            h('span', { class: 'chip num ' + hbCls,
+                        text: age == null ? 'hb —' : 'hb ' + fmtAge(age)
+                              + (age >= 300 && a.state === 'run' ? ' · stuck?' : '') })),
+          h('span', { class: 'counters num' },
+            h('span', { class: 'chip', title: 'panel accepts landed' }, '✓ ', h('b', { text: String(a.accepted ?? '—') })),
+            h('span', { class: 'chip', title: 'designs queued' }, 'queue ', h('b', { text: String(a.queue ?? '—') })),
+            h('span', { class: 'chip', title: 'makers dialled' }, 'makers ', h('b', { text: String(a.makers ?? '—') })),
+            a.staged ? h('span', { class: 'chip amber' }, '⚑ staged ', h('b', { text: String(a.staged) })) : null),
+          h('span', { class: 'note', title: a.note || '', text: a.note || '' }))));
+    }
+  }
+  const loose = (S.assetsOnDisk || []).filter(n =>
+    !n.startsWith('_') && !assets.some(a => a.asset === n));
+  if (sig('fv-loose', loose)) {
+    const host = $('fv-loose');
+    host.style.display = loose.length ? '' : 'none';
+    host.textContent = '';
+    if (loose.length) {
+      host.appendChild(h('span', { text: 'on disk, not in the fleet:' }));
+      for (const n of loose)
+        host.appendChild(h('a', { class: 'chip', href: '#/a/' + n, text: n }));
+    }
+  }
+}
+function renderAssetView() {
+  const R = S.route as AssetRoute;
+  ensureScaffold('asset:' + R.asset, main => {
+    const head = h('div', { id: 'warhead' },
+      h('div', { class: 'row1' },
+        h('h1', { text: R.asset }),
+        h('span', { id: 'wh-state', class: 'pill st-unknown', text: '—' }),
+        h('span', { id: 'wh-hb', class: 'chip num', text: 'hb —' }),
+        h('span', { id: 'wh-note', class: 'note' }),
+        h('span', { class: 'spacer' }),
+        h('span', { id: 'seen-wrap', hidden: 'hidden' },
+          h('span', { id: 'wh-new', class: 'newdot' }),
+          h('button', { id: 'seen-btn', text: 'mark seen',
+            onclick: () => { commitSeen(); S.sigs = {}; render(); } }))),
+      h('nav', { id: 'tabs', role: 'tablist', 'aria-label': 'war room views' }));
+    main.appendChild(head);
+    main.appendChild(h('div', { id: 'tab-overview', role: 'tabpanel' }));
+    main.appendChild(h('div', { id: 'tab-live', role: 'tabpanel' }));
+    main.appendChild(h('div', { id: 'tab-compare', role: 'tabpanel' }));
+  });
+  // tab bar + panel visibility react to the route every render
+  if (sig('tabs', [R.asset, R.tab])) {
+    const tabs = $('tabs');
+    tabs.textContent = '';
+    for (const [key, label] of [['overview', 'Overview'], ['live', 'Live'], ['compare', 'Compare']]) {
+      tabs.appendChild(h('a', { role: 'tab', 'aria-selected': String(R.tab === key),
+        href: '#/a/' + R.asset + (key === 'overview' ? '' : '/' + key), text: label }));
+    }
+    for (const key of ['overview', 'live', 'compare'])
+      $('tab-' + key).style.display = R.tab === key ? '' : 'none';
+  }
+  renderWarHead();
+  if (R.tab === 'overview') renderOverview();
+  else if (R.tab === 'live') renderLive();
+  else renderCompare();
+  syncDossier();
+}
+function renderWarHead() {
+  const R = S.route as AssetRoute, p = S.pipes.get(R.asset);
+  const fleetRow = (S.fleet?.assets || []).find(x => x.asset === R.asset);
+  const state = fleetRow?.state || p?.state || S.control?.state || 'unknown';
+  if (!sig('warhead', [state, p?.heartbeat, p?.note, fleetRow?.note])) return;
+  const st = $('wh-state');
+  st.textContent = state;
+  st.className = 'pill st-' + (['run', 'pause', 'stop'].includes(state) ? state : 'unknown')
+    + (state === 'run' ? ' pulse' : '');
+  announce('state', R.asset + ' pipeline ' + state);
+  const age = hbAge(p?.heartbeat);
+  const hb = $('wh-hb');
+  if (age == null) { hb.textContent = 'hb —'; hb.className = 'chip num'; }
+  else {
+    const stuck = age >= 300 && state === 'run';
+    hb.textContent = 'hb ' + fmtAge(age) + (stuck ? ' · stuck?' : '');
+    hb.className = 'chip num ' + (state !== 'run' ? '' : age < 90 ? 'hb-ok' : age < 300 ? 'hb-warn' : 'hb-stale');
+    hb.title = 'shepherd heartbeat: ' + (p?.heartbeat ? new Date(p.heartbeat).toLocaleString() : '—');
+    announce('stuck', stuck ? 'shepherd heartbeat is stale — pipeline may be stuck' : '');
+  }
+  $('wh-note').textContent = p?.note || fleetRow?.note || '';
+  $('wh-note').title = $('wh-note').textContent;
+}
+function renderSeenPill() {
+  const n = newCount();
+  if (!sig('seenpill', n)) return;
+  const wrap = $('seen-wrap');
+  if (!wrap) return;
+  wrap.hidden = !n;
+  if (n) {
+    $('wh-new').textContent = n + ' new'
+      + (S.seen?.t ? ' since ' + (fmtRel(S.seen.t) || '') + ' ago' : '');
+    announce('new', n + ' new attempts since your last look');
+  }
+}
+/* ------------------------ overview components ------------------------ */
+function bands(): { accept: number; reject: number } {                          // the user's dials, with the documented defaults
+  return { accept: S.control?.accept_margin ?? 2, reject: S.control?.reject_margin ?? -2 };
+}
+function marginChip(v: number, title?: string): HTMLSpanElement {
+  const b = bands();
+  const cls = v >= b.accept ? 'pos' : v <= b.reject ? 'neg' : 'mid';
+  return h('span', { class: 'm num ' + cls, title: title || 'panel margin (toward the challenger)',
+                     text: (v > 0 ? '+' : '') + v });
+}
+function sparkline(series: SeriesPoint[]): SVGSVGElement | null {                // single series — no legend; the aria-label names it
+  if (!series || series.length < 2) return null;
+  const W = 132, H = 30, PAD = 4;
+  const vals = series.map(p => p.mean);
+  const max = Math.max(...vals, 0), min = Math.min(...vals, 0);
+  const span = (max - min) || 1;
+  const x = (i: number) => PAD + i * (W - 2 * PAD) / (series.length - 1);
+  const y = (v: number) => H - PAD - (v - min) / span * (H - 2 * PAD);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'spark');
+  svg.setAttribute('width', String(W)); svg.setAttribute('height', String(H));
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', 'margin vs origin across attempts: ' + vals.map(v => (v > 0 ? '+' : '') + v).join(', '));
+  if (min < 0 && max > 0) {                 // zero reference — polarity data needs its baseline
+    const z = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    z.setAttribute('class', 'zero');
+    z.setAttribute('x1', String(0)); z.setAttribute('x2', String(W));
+    z.setAttribute('y1', String(y(0))); z.setAttribute('y2', String(y(0)));
+    svg.appendChild(z);
+  }
+  const pl = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  pl.setAttribute('points', series.map((p, i) => `${x(i).toFixed(1)},${y(p.mean).toFixed(1)}`).join(' '));
+  svg.appendChild(pl);
+  const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  dot.setAttribute('cx', String(x(series.length - 1))); dot.setAttribute('cy', String(y(vals[vals.length - 1])));
+  dot.setAttribute('r', String(3));
+  svg.appendChild(dot);
+  const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+  t.textContent = 'vs origin: ' + series.map(p => `a${p.attempt} ${(p.mean > 0 ? '+' : '') + p.mean}`).join(' · ');
+  svg.appendChild(t);
+  return svg;
+}
+function ratchetBlock(attempts: Attempt[]): HTMLSpanElement {
+  const series = marginSeries(attempts || [], 'origin');
+  const wrap = h('span', { class: 'ratchet' });
+  wrap.appendChild(h('span', { class: 'lbl', text: 'RATCHET · VS ORIGIN' }));
+  if (!series.length) {
+    wrap.appendChild(h('span', { class: 'faint', style: 'font-size:11px',
+      text: 'no origin series recorded' }));
+    return wrap;
+  }
+  const last = series[series.length - 1].mean;
+  const b = bands();
+  const cls = last >= b.accept ? 'r-pos' : last <= b.reject ? 'r-neg' : 'r-mid';
+  const val = h('span', { class: 'val' },
+    h('b', { class: cls + ' num', text: (last > 0 ? '+' : '') + last }));
+  const sp = sparkline(series);
+  if (sp) val.appendChild(sp);
+  wrap.appendChild(val);
+  return wrap;
+}
+function stagedAttemptRow(s: StagedCard): Attempt | null {              // the attempts.jsonl row behind a staged card
+  const hit = S.attempts?.byRun.get(s.run);
+  if (!hit) return null;
+  const list = S.attempts!.designs.get(hit.design) || [];
+  return list.find(a => a.run === s.run) || null;
+}
+function markButtons(a: Attempt | null): HTMLSpanElement | null {                   // star/cross — pipeline-visible taste signals
+  if (!a) return null;
+  const cur = S.marks.get(rowKey(a));
+  const wrap = h('span', { class: 'row', role: 'group', 'aria-label': 'your reaction' });
+  wrap.appendChild(h('button', { class: 'reactbtn ' + (cur === 'star' ? 'starred' : 'faint'),
+    'aria-pressed': String(cur === 'star'), title: 'star — tell the pipeline you like this',
+    onclick: async e => { e.stopPropagation(); if (await sendSignal(a, 'star')) { S.sigs = {}; render(); } },
+    text: cur === 'star' ? '★ starred' : '☆' }));
+  wrap.appendChild(h('button', { class: 'reactbtn ' + (cur === 'cross' ? 'crossed' : 'faint'),
+    'aria-pressed': String(cur === 'cross'), title: 'cross — tell the pipeline you dislike this',
+    onclick: async e => { e.stopPropagation(); if (await sendSignal(a, 'cross')) { S.sigs = {}; render(); } },
+    text: cur === 'cross' ? '✗ crossed' : '✗' }));
+  return wrap;
+}
+function renderOverview() {
+  const R = S.route as AssetRoute, host = $('tab-overview');
+  if (!host.children.length) {
+    host.appendChild(h('section', { class: 'zone', id: 'z-needs', hidden: 'hidden' },
+      h('h2', { text: 'Needs you' }), h('div', { class: 'card', id: 'ov-needs' })));
+    host.appendChild(h('section', { class: 'zone' },
+      h('h2', { text: 'Champion' }), h('div', { class: 'card', id: 'ov-champ' })));
+    host.appendChild(h('section', { class: 'zone' },
+      h('div', { class: 'zonehead' }, h('h2', { text: 'Designs in flight' }),
+        h('span', { id: 'ov-makers', class: 'row' })),
+      h('div', { id: 'ov-designs' })));
+    host.appendChild(h('div', { class: 'grid2' },
+      h('section', { class: 'zone' },
+        h('div', { class: 'zonehead' }, h('h2', { text: 'Queue' }),
+          h('button', { text: '+ add design', onclick: () =>
+            prefillChat('add design ' + S.route.asset + ': ') })),
+        h('div', { class: 'card', id: 'ov-queue' })),
+      h('section', { class: 'zone' },
+        h('h2', { text: 'Events' }), h('div', { class: 'card', id: 'ov-events' }))));
+    host.appendChild(h('section', { class: 'zone' },
+      h('h2', { text: 'Dials (control.json — read-only)' }),
+      h('div', { class: 'card', id: 'ov-dials' })));
+  }
+  const p = S.pipes.get(R.asset);
+  renderSeenPill();
+  /* --- needs you (staged) --- */
+  const staged = p?.staged || [];
+  if (sig('ov-needs', [staged, staged.map(s => S.marks.get(rowKey(stagedAttemptRow(s) || {})))])) {
+    $('z-needs').hidden = !staged.length;
+    const el = $('ov-needs');
+    el.textContent = '';
+    for (const s of staged) {
+      const img = h('img', { alt: s.design + ' staged contact sheet', loading: 'lazy' });
+      const src = `/${R.asset}/${runDir(s.run)}/${cellDir(s.cell)}/_sheet.png`;
+      imgFallback(img, [src, `/${R.asset}/${runDir(s.run)}/${cellDir(s.cell)}/hero_34.png`], 'no sheet');
+      const aRow = stagedAttemptRow(s);
+      el.appendChild(h('div', { class: 'staged-e' },
+        h('button', { class: 'imgbtn', 'aria-label': 'enlarge staged sheet',
+          onclick: () => openViewer([{ src, caption: `${s.design} · run ${s.run} cell ${s.cell}` }], 0) }, img),
+        h('div', { class: 'body' },
+          h('div', { class: 'l1' },
+            h('span', { class: 'id', text: '⚑ ' + s.design }),
+            h('span', { text: 'panel accepted — waiting for you' }),
+            ...(s.margins || []).map(m => marginChip(m)),
+            ...((s.chips || []).map(c => h('span', { class: 'chip amber', text: c }))),
+            timeEl(s.at)),
+          h('div', { class: 'faint', text: `run ${s.run} · cell ${s.cell} — Promote pre-fills the chat; Enter sends it` }),
+          h('div', { class: 'row' },
+            h('button', { class: 'promote-btn', text: 'Promote ' + s.design,
+              onclick: () => prefillChat('promote ' + s.design) }),
+            h('button', { class: 'ghost-btn', text: 'discuss in chat',
+              onclick: () => prefillChat(s.design + ': ') }),
+            markButtons(aRow)))));
+    }
+  }
+  /* --- champion + lineage --- */
+  const c = S.champion, promos = S.attempts?.promos || [];
+  if (sig('ov-champ', [c, promos.length])) {
+    const el = $('ov-champ');
+    el.textContent = '';
+    if (!c) {
+      el.appendChild(h('div', { class: 'empty',
+        text: 'no champion yet — nothing has been promoted for this asset' }));
+    } else {
+      const src = `/${R.asset}/${runDir(c.run)}/${c.sheet}`;
+      const lineageItems = promos.map(pr => ({
+        src: `/${R.asset}/${runDir(pr.run)}/${cellDir(pr.cell ?? 1)}/_sheet.png`,
+        caption: `promotion · run ${pr.run} cell ${pr.cell}` }));
+      const items = [{ src, caption: `champion · run ${c.run} cell ${c.cell}` },
+                     ...lineageItems.filter(i => i.src !== src)];
+      const img = h('img', { alt: 'champion contact sheet' });
+      imgFallback(img, [src], 'champion sheet missing');
+      el.appendChild(h('div', { class: 'champ-body' },
+        h('button', { class: 'imgbtn', 'aria-label': 'enlarge champion',
+          onclick: () => openViewer(items, 0) }, img),
+        h('div', { class: 'champ-meta' },
+          h('div', { class: 'row' },
+            h('span', { class: 'chip' }, h('b', { class: 'num', text: 'run ' + c.run + ' · cell ' + c.cell })),
+            h('span', { class: 'chip', text: c.label || '' }),
+            c.seed != null ? h('span', { class: 'chip num', text: 'seed ' + c.seed }) : null),
+          h('div', { class: 'row dim' }, 'promoted by ', h('b', { text: c.by || '?' }), ' · ', timeEl(c.at)),
+          c.quote ? h('div', { class: 'quote', text: c.quote }) : null,
+          promos.length > 1 ? h('div', { class: 'lineage' },
+            h('span', { class: 'faint', style: 'font-size:10px', text: 'LINEAGE' }),
+            ...promos.map(pr => {
+              const isCur = pr.run === c.run && pr.cell === c.cell;
+              const im = h('img', { alt: '', loading: 'lazy' });
+              imgFallback(im, [`/${R.asset}/${runDir(pr.run)}/${cellDir(pr.cell ?? 1)}/_sheet.png`,
+                               `/${R.asset}/${runDir(pr.run)}/v1/_sheet.png`], 'r' + pr.run);
+              return h('button', { class: 'imgbtn' + (isCur ? ' cur' : ''),
+                title: `run ${pr.run} cell ${pr.cell}` + (isCur ? ' (current)' : ''),
+                onclick: () => openViewer(items, isCur ? 0 : Math.max(0, items.findIndex(x => x.caption.includes('run ' + pr.run)))) }, im);
+            })) : null)));
+    }
+  }
+  /* --- makers --- */
+  const makers = p?.makers || [];
+  if (sig('ov-makers', makers)) {
+    const el = $('ov-makers');
+    el.textContent = '';
+    for (const m of makers)
+      el.appendChild(h('span', { class: 'chip' },
+        h('b', { text: m.id || '?' }), ' · ' + (m.design || '—')
+        + (m.attempt ? ' a' + m.attempt : '') + ' · ' + (m.status || '')));
+  }
+  /* --- design board --- */
+  const designs = p?.designs || [];
+  const dSig = designs.map(d => {
+    const atts = S.attempts?.designs.get(d.id) || [];
+    return [d, atts.map(a => [rowKey(a), verdictSig(a), isNewRow(a)])];
+  });
+  if (sig('ov-designs', dSig)) {
+    const el = $('ov-designs');
+    el.textContent = '';
+    if (!designs.length && !staged.length)
+      el.appendChild(h('div', { class: 'card empty', text: 'no designs in flight — the queue below feeds this board' }));
+    for (const d of designs) {
+      const atts = S.attempts?.designs.get(d.id) || [];
+      const rail = h('span', { class: 'thumb-rail' });
+      for (const a of atts.slice(-8)) {
+        const inc = signedMean(a.verdicts.filter(v => v.vs !== 'origin'));
+        const b = bands();
+        const cls = inc == null ? '' : inc >= b.accept ? 'b-ok' : inc <= b.reject ? 'b-bad' : '';
+        const im = h('img', { alt: `attempt ${a.attempt}`, loading: 'lazy' });
+        imgFallback(im, thumbSrcs(R.asset, a.run, judgedCell(a)), 'building…');
+        const cell = h('span', { class: 'cellwrap ' + cls }, im,
+          h('span', { class: 'anum', text: 'a' + (a.attempt ?? '?') }));
+        if (isNewRow(a)) cell.appendChild(h('span', { class: 'newdot newflag', text: '' }));
+        rail.appendChild(cell);
+      }
+      el.appendChild(h('button', { class: 'dlane card',
+        'aria-label': `open design ${d.id} dossier`,
+        onclick: () => nav(`#/a/${R.asset}/d/${d.id}`) },
+        h('span', { class: 'head' },
+          h('span', { class: 'id', text: d.id }),
+          h('span', { class: 'chip origin-' + (d.origin === 'user' ? 'user' : 'agent'),
+                      text: d.origin === 'user' ? 'yours' : 'agent-authored' }),
+          d.status ? h('span', { class: 'chip', title: 'shepherd status (verbatim)', text: String(d.status).slice(0, 48) }) : null,
+          d.attempts ? h('span', { class: 'chip num', text: 'a' + d.attempts }) : null,
+          h('span', { class: 'sum', title: d.summary || '', text: d.summary || '' }),
+          ...(d.last_margins || []).map(m => marginChip(m, 'latest panel margins vs incumbent')),
+          ...((d.chips || []).map(ch => h('span', { class: 'chip amber', text: ch })))),
+        h('span', { class: 'body' }, rail, ratchetBlock(atts))));
+    }
+  }
+  /* --- queue --- */
+  const queue = p?.queue || [];
+  if (sig('ov-queue', queue)) {
+    const el = $('ov-queue');
+    el.textContent = '';
+    if (!queue.length) el.appendChild(h('div', { class: 'empty', text: 'queue is empty — agents will refill it' }));
+    for (const d of queue)
+      el.appendChild(h('div', { class: 'qrow' },
+        h('span', { class: 'chip' }, h('b', { text: d.id })),
+        h('span', { class: 'chip origin-' + (d.origin === 'user' ? 'user' : 'agent'),
+                    text: d.origin === 'user' ? 'yours' : 'agent' }),
+        h('span', { class: 'sum2', title: d.summary || '', text: d.summary || '' })));
+  }
+  /* --- events --- */
+  const events = p?.events || [];
+  if (sig('ov-events', events)) {
+    const el = $('ov-events');
+    el.textContent = '';
+    const evs = [...events].reverse().slice(0, 15);
+    if (!evs.length) el.appendChild(h('div', { class: 'faint', text: 'no events yet' }));
+    for (const e of evs)
+      el.appendChild(h('div', {},
+        h('span', { class: 'at', text: (e.at || '').replace('T', ' ').slice(5, 16) }),
+        e.text || ''));
+  }
+  /* --- dials --- */
+  const ctl = S.control;
+  if (sig('ov-dials', ctl)) {
+    const el = $('ov-dials');
+    el.textContent = '';
+    if (!ctl) { el.appendChild(h('span', { class: 'faint', text: 'no control.json for this asset' })); }
+    else {
+      const note = (ctl.notes || [])[(ctl.notes?.length as number) - 1] || '';
+      el.appendChild(h('span', { class: 'chip', text: 'state ' }, h('b', { text: ctl.state || '?' })));
+      el.appendChild(h('span', { class: 'chip num' }, 'makers ', h('b', { text: String(ctl.makers ?? '—') })));
+      el.appendChild(h('span', { class: 'chip num', title: 'parallel queue-top-up batches' },
+        'designers ', h('b', { text: String(ctl.designers ?? 1) })));
+      el.appendChild(h('span', { class: 'chip num' }, 'panel ', h('b', { text: (ctl.panel ?? '—') + ' → ' + (ctl.escalate_to ?? '—') })));
+      el.appendChild(h('span', { class: 'chip num' }, 'accept ≥ ', h('b', { text: '+' + (ctl.accept_margin ?? 2) })));
+      el.appendChild(h('span', { class: 'chip num' }, 'reject ≤ ', h('b', { text: String(ctl.reject_margin ?? -2) })));
+      if (note) el.appendChild(h('span', { class: 'note2', title: note, text: '“' + note + '”' }));
+    }
+  }
+}
+/* ============================= dossier ================================
+   The design's full story as a slide-over: the war room stays behind it.
+   Esc / scrim / ✕ close back to the war room; the URL deep-links it. */
+const DIRINFO: Record<string, [string, string]> = {
+  rework:    ['↻', 'needs more work'],
+  revert:    ['⎌', 'revert this change'],
+  resurrect: ['✓', 'mark good'],
+};
+function syncDossier() {
+  const dlg = $<HTMLDialogElement>('dossier');
+  if (!S.route.design) { if (dlg.open) dlg.close(); return; }
+  if (!dlg.open) dlg.showModal();
+  renderDossier();
+}
+$('dossier').addEventListener('close', () => {          // the native-Esc path
+  S.dirCompose = null;
+  if (S.route.design) nav('#/a/' + S.route.asset);
+});
+$('dossier').addEventListener('pointerdown', e => {
+  if (e.target === $('dossier')) nav('#/a/' + S.route.asset);   // backdrop clicks target the dialog itself
+});
+function ratchetChart(atts: Attempt[]): SVGSVGElement | null {
+  type Pt = { i: number; a: Attempt; org: number | null; inc: number | null };
+  const pts: Pt[] = atts.map((a, i) => ({ i, a,
+    org: signedMean(a.verdicts.filter(v => v.vs === 'origin')),
+    inc: signedMean(a.verdicts.filter(v => v.vs !== 'origin')) }));
+  if (!pts.some(p => p.org != null || p.inc != null)) return null;
+  const b = bands();
+  const W = Math.max(320, Math.min(560, 90 + atts.length * 64)), H = 150;
+  const ML = 30, MR = 92, MT = 12, MB = 22;
+  const x = (i: number) => ML + (atts.length === 1 ? 0 : i * (W - ML - MR) / (atts.length - 1));
+  const y = (v: number) => MT + (3 - v) / 6 * (H - MT - MB);        // fixed −3..+3 — margins are bounded
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('width', String(W)); svg.setAttribute('height', String(H));
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', 'margins per attempt — '
+    + pts.map(p => `a${p.a.attempt}: origin ${p.org == null ? '—' : (p.org > 0 ? '+' : '') + p.org}, `
+                 + `incumbent ${p.inc == null ? '—' : (p.inc > 0 ? '+' : '') + p.inc}`).join('; '));
+  const gline = (v: number, cls: string, lbl: string) => {
+    const l = document.createElementNS(NS, 'line');
+    l.setAttribute('class', cls);
+    l.setAttribute('x1', String(ML - 4)); l.setAttribute('x2', String(W - MR + 24));
+    l.setAttribute('y1', String(y(v))); l.setAttribute('y2', String(y(v)));
+    svg.appendChild(l);
+    const t = document.createElementNS(NS, 'text');
+    t.setAttribute('class', 'axis-lbl');
+    t.setAttribute('x', String(2)); t.setAttribute('y', String(y(v) + 3));
+    t.textContent = lbl;
+    svg.appendChild(t);
+  };
+  gline(b.accept, 'grid', '+' + b.accept);
+  gline(0, 'zero', '0');
+  gline(b.reject, 'grid', String(b.reject));
+  for (const p of pts) {                    // x tick labels: the attempt number
+    const t = document.createElementNS(NS, 'text');
+    t.setAttribute('class', 'axis-lbl');
+    t.setAttribute('x', String(x(p.i) - 5)); t.setAttribute('y', String(H - 6));
+    t.textContent = 'a' + (p.a.attempt ?? '?');
+    svg.appendChild(t);
+  }
+  const orgPts = pts.filter((p): p is Pt & { org: number } => p.org != null);
+  if (orgPts.length > 1) {
+    const pl = document.createElementNS(NS, 'polyline');
+    pl.setAttribute('class', 'origin-line');
+    pl.setAttribute('points', orgPts.map(p => `${x(p.i)},${y(p.org)}`).join(' '));
+    svg.appendChild(pl);
+  }
+  const mark = (px: number, py: number, cls: string, r: number, tip: string) => {
+    const c = document.createElementNS(NS, 'circle');
+    c.setAttribute('class', cls);
+    c.setAttribute('cx', String(px)); c.setAttribute('cy', String(py)); c.setAttribute('r', String(r));
+    const t = document.createElementNS(NS, 'title');
+    t.textContent = tip;
+    c.appendChild(t);
+    svg.appendChild(c);
+  };
+  for (const p of orgPts)
+    mark(x(p.i), y(p.org), 'origin-dot', 4,
+         `a${p.a.attempt} · vs origin ${(p.org > 0 ? '+' : '') + p.org}`);
+  for (const p of pts.filter((q): q is Pt & { inc: number } => q.inc != null))                 // dodge +7 so marks never occlude
+    mark(x(p.i) + 7, y(p.inc), 'inc-dot', 4,
+         `a${p.a.attempt} · vs incumbent ${(p.inc > 0 ? '+' : '') + p.inc}`);
+  const slbl = (py: number, txt: string, fill?: string) => {
+    const t = document.createElementNS(NS, 'text');
+    t.setAttribute('class', 'series-lbl');
+    t.setAttribute('x', String(W - MR + 30)); t.setAttribute('y', String(py + 3));
+    if (fill) t.setAttribute('fill', fill);
+    t.textContent = txt;
+    svg.appendChild(t);
+  };
+  const lastOrg = orgPts[orgPts.length - 1];
+  const incPts = pts.filter((q): q is Pt & { inc: number } => q.inc != null);
+  const lastInc = incPts[incPts.length - 1];
+  if (lastOrg) slbl(y(lastOrg.org), 'vs origin', 'var(--chart)');
+  if (lastInc) slbl(y(lastInc.inc) + (lastOrg && Math.abs(y(lastOrg.org) - y(lastInc.inc)) < 12 ? 12 : 0), 'vs incumbent');
+  return svg;
+}
+function directiveBlock(a: Attempt): HTMLDivElement {
+  const key = rowKey(a);
+  const wrap = h('div', { class: 'dirblock', role: 'group', 'aria-label': 'your verdict override' });
+  if (S.dirCompose && S.dirCompose.key === key) {
+    const [g, label] = DIRINFO[S.dirCompose.directive];
+    const input = h('input', { type: 'text', maxlength: '400',
+      placeholder: 'why? (this line goes to the shepherd)' });
+    wrap.appendChild(h('div', { class: 'row' }, h('b', { text: `${g} ${label} — add a note:` })));
+    wrap.appendChild(input);
+    wrap.appendChild(h('div', { class: 'row' },
+      h('button', { class: 'dirbtn confirm', text: 'confirm', onclick: async () => {
+        if (await sendDirective(a, S.dirCompose!.directive, input.value)) {
+          S.dirCompose = null; S.sigs = {}; render();
+        } } }),
+      h('button', { class: 'dirbtn', text: 'cancel',
+        onclick: () => { S.dirCompose = null; S.sigs = {}; render(); } })));
+    setTimeout(() => input.focus(), 0);
+    return wrap;
+  }
+  const pending = S.dirs.get(key);
+  if (pending) {
+    const [g, label] = DIRINFO[pending.directive] || ['⚑', pending.directive];
+    wrap.appendChild(h('div', { class: 'row' },
+      h('span', { class: 'chip dirchip', title: pending.note || '',
+                  text: `${g} ${label} · pending — the shepherd acts on its next cycle` }),
+      h('button', { class: 'dirbtn', text: 'withdraw', onclick: async () => {
+        if (await sendDirective(a, 'withdraw')) { S.sigs = {}; render(); } } })));
+    return wrap;
+  }
+  const incMean = signedMean(a.verdicts.filter(v => v.vs !== 'origin'));
+  const btns: Directive[] = incMean != null && incMean >= bands().accept ? ['rework', 'revert'] : ['resurrect'];
+  wrap.appendChild(h('div', { class: 'row' },
+    h('span', { class: 'faint', text: 'your call:' }),
+    ...btns.map(d => h('button', { class: 'dirbtn', text: `${DIRINFO[d][0]} ${DIRINFO[d][1]}`,
+      onclick: () => { S.dirCompose = { key, directive: d }; S.sigs = {}; render(); } }))));
+  return wrap;
+}
+function renderDossier() {
+  const R = S.route as AssetRoute & { design: string };   // syncDossier only calls this with a design
+  // never rebuild under a focused compose input — the note would be lost
+  // (buttons are fine: their clicks are what trigger legitimate rebuilds)
+  if ($('dossier').contains(document.activeElement)
+      && document.activeElement!.matches('input')) return;
+  const p = S.pipes.get(R.asset);
+  const meta: Design | null = (p?.designs || []).find(d => d.id === R.design)
+            || (p?.queue || []).find(d => d.id === R.design) || null;
+  const atts = S.attempts?.designs.get(R.design) || [];
+  const dsig = [meta, atts.map(a => [rowKey(a), verdictSig(a), S.marks.get(rowKey(a)),
+                                     S.dirs.get(rowKey(a))?.directive]), !!S.dirCompose];
+  if (!sig('dossier', dsig)) return;
+  const head = $('d-head'), body = $('d-body');
+  head.textContent = ''; body.textContent = '';
+  head.appendChild(h('span', { class: 'id', text: R.design }));
+  if (meta) {
+    head.appendChild(h('span', { class: 'chip origin-' + (meta.origin === 'user' ? 'user' : 'agent'),
+      text: meta.origin === 'user' ? 'yours' : 'agent-authored' }));
+    if (meta.status) head.appendChild(h('span', { class: 'chip', text: String(meta.status).slice(0, 60) }));
+    for (const c of (meta.chips || [])) head.appendChild(h('span', { class: 'chip amber', text: c }));
+  }
+  head.appendChild(h('button', { id: 'd-close', 'aria-label': 'close dossier', text: '✕',
+                                 onclick: () => nav('#/a/' + S.route.asset) }));
+  if (meta?.summary) head.appendChild(h('span', { class: 'sum', text: meta.summary }));
+  const chart = ratchetChart(atts);
+  if (chart) {
+    body.appendChild(h('section', { class: 'zone' },
+      h('h2', { text: 'The ratchet — vs origin decides progress, vs incumbent decides acceptance' }),
+      h('div', { class: 'card', id: 'd-chart', style: 'padding:8px 12px' }, chart)));
+  }
+  const zone = h('section', { class: 'zone' },
+    h('h2', { text: atts.length + ' attempt' + (atts.length === 1 ? '' : 's') + ' — newest first' }));
+  if (!atts.length)
+    zone.appendChild(h('div', { class: 'card empty',
+      text: 'no waves recorded for this design yet' }));
+  for (const a of [...atts].reverse()) {
+    const block = h('div', { class: 'att' });
+    block.appendChild(h('div', { class: 'ahead' },
+      h('span', { class: 'an', text: 'a' + (a.attempt ?? '?') }),
+      h('span', { class: 'num', text: 'run ' + a.run }),
+      a.tag ? h('span', { text: 'tag ' + a.tag }) : null,
+      a.seed != null ? h('span', { class: 'num', text: 'seed ' + a.seed }) : null,
+      a.scriptSha ? h('span', { class: 'faint', title: 'script sha — the era this attempt belongs to',
+                                text: a.scriptSha.slice(0, 8) }) : null,
+      h('span', { class: 'num', text: a.cells.length + ' cells' }),
+      isNewRow(a) ? h('span', { class: 'newdot', text: 'NEW' }) : null,
+      h('span', { style: 'margin-left:auto' }, timeEl(a.at))));
+    const abody = h('div', { class: 'abody' });
+    const judged = judgedCell(a);
+    const viewerItems = a.cells.filter(c => c.exit === 0).map(c => ({
+      src: `/${R.asset}/${runDir(a.run)}/${cellDir(c.n)}/hero_34.png`,
+      caption: `a${a.attempt} · run ${a.run} · cell ${c.n} ${c.label || ''}` }));
+    const grid = h('div', { class: 'cellgrid' });
+    for (const c of a.cells) {
+      const bad = c.exit !== 0 && c.exit !== null;
+      const chip = h('button', { class: 'cellchip' + (c.n === judged ? ' judged' : '') + (bad ? ' dead-cell' : ''),
+        title: bad ? `cell ${c.n} failed (exit ${c.exit})`
+             : c.n === judged ? `cell ${c.n} — the cell the panel judged` : `cell ${c.n}`,
+        onclick: () => {
+          const idx = viewerItems.findIndex(it => it.caption.includes('cell ' + c.n + ' '));
+          if (idx >= 0) openViewer(viewerItems, idx);
+        } },
+        h('span', { class: 'cl1' },
+          h('b', { text: String(c.n) }), (c.label || '') + (bad ? ' · exit ' + c.exit : '')
+          + (c.n === judged ? ' · judged' : '')),
+        (c.chips || []).length ? h('span', { class: 'amber', text: c.chips!.join(' · ') }) : null);
+      grid.appendChild(chip);
+    }
+    abody.appendChild(grid);
+    for (const v of a.verdicts) {
+      const sm = signedMargin(v);
+      abody.appendChild(h('div', { class: 'verdict' },
+        h('span', { class: 'vmeta' },
+          h('span', { class: 'chip' }, 'judge ', h('b', { text: v.judge })),
+          sm != null ? marginChip(sm, 'vs ' + v.vs) : null,
+          h('span', { class: 'chip', text: 'vs ' + v.vs }),
+          v.flip ? h('span', { class: 'chip', title: 'A/B sides were flipped for this judge', text: '⇄ flipped' }) : null),
+        h('span', { class: 'sugg', text: v.suggestion || v.note || '(no suggestion recorded)' })));
+    }
+    abody.appendChild(h('div', { class: 'row' }, markButtons(a), directiveBlock(a)));
+    block.appendChild(abody);
+    zone.appendChild(block);
+  }
+  body.appendChild(zone);
+}
+/* ============================= live tab ================================
+   The tap's raw feed, made legible: claimed runs carry their design/attempt
+   (joined from attempts.jsonl — the tap itself doesn't know), unclaimed runs
+   stay visible but dashed (rendered and never attributed is the thing this
+   feed exists to surface). Newest 20, Load more, never all 400+. */
+function liveFilters(): LiveFilter {
+  try { return JSON.parse(lsGet('gf-live-filter') || '{}') || {}; } catch (e) { return {}; }
+}
+function setLiveFilter(k: keyof LiveFilter, v: boolean): void {
+  const f = liveFilters(); f[k] = v;
+  lsSet('gf-live-filter', JSON.stringify(f));
+  S.sigs = {}; render();
+}
+function renderLive() {
+  const R = S.route as AssetRoute, host = $('tab-live');
+  const L = S.live;
+  if (!host.children.length) {
+    const f = liveFilters();
+    host.appendChild(h('div', { id: 'live-bar' },
+      h('span', { class: 'chip num', id: 'lb-total' }),
+      h('span', { class: 'chip num', id: 'lb-unclaimed' }),
+      h('span', { class: 'chip num', id: 'lb-stamp' }),
+      h('label', { class: 'togg' },
+        (() => { const c = h('input', { type: 'checkbox' });
+                 c.checked = !!f.claimed;
+                 c.addEventListener('change', () => setLiveFilter('claimed', c.checked));
+                 return c; })(),
+        'claimed only'),
+      h('label', { class: 'togg' },
+        (() => { const c = h('input', { type: 'checkbox' });
+                 c.checked = !!f.failures;
+                 c.addEventListener('change', () => setLiveFilter('failures', c.checked));
+                 return c; })(),
+        'failures only'),
+      h('span', { class: 'exp', text: 'unclaimed = rendered, never attributed to an attempt' })));
+    host.appendChild(h('div', { id: 'live-runs' }));
+  }
+  const runsHost = $('live-runs');
+  if (!L || !Array.isArray(L.runs)) {
+    if (!sig('live', 'absent')) return;
+    $('lb-total').textContent = 'runs —';
+    $('lb-unclaimed').textContent = 'unclaimed —';
+    $('lb-stamp').textContent = 'no feed';
+    runsHost.textContent = '';
+    runsHost.appendChild(h('div', { class: 'card empty' },
+      'no live feed — is the tap running?',
+      h('span', { class: 'cmd', text: `python Assets/Blender/_tools/tap.py ${R.asset}` })));
+    return;
+  }
+  const f = liveFilters();
+  let runs = L.runs;
+  if (f.claimed) runs = runs.filter(r => r.claimed);
+  if (f.failures) runs = runs.filter(r => (r.variants || []).some(v => v.exit !== 0 && v.exit !== null));
+  const cap = S.liveCap || 20;
+  const shown = runs.slice(0, cap);
+  if (!sig('live', [L.stamped, runs.length, cap, f, S.attempts?.byRun.size])) return;
+  $('lb-total').textContent = 'runs ' + (L.total_runs ?? runs.length);
+  $('lb-unclaimed').textContent = 'unclaimed ' + (L.unclaimed_runs ?? '—');
+  $('lb-stamp').textContent = (L.stamped || '').replace('T', ' ').slice(5);
+  runsHost.textContent = '';
+  if (!shown.length)
+    runsHost.appendChild(h('div', { class: 'card empty',
+      text: runs.length ? '' : 'nothing matches the filters — un-tick them to see all runs' }));
+  for (const r of shown) {
+    const el = h('section', { class: 'lrun' + (r.claimed ? '' : ' unclaimed') });
+    const who = S.attempts?.byRun.get(r.run);
+    const shots = (r.variants || []).flatMap(v => v.shots || []);
+    el.appendChild(h('div', { class: 'rhead' },
+      h('span', { class: 'rn', text: 'run-' + r.run }),
+      r.claimed
+        ? h('span', { class: 'attr', text: (r.tag ? r.tag + ' · ' : '')
+            + (who ? `${who.design} a${who.attempt}` : 'claimed') })
+        : h('span', { class: 'untag', text: 'unclaimed' }),
+      r.seed != null ? h('span', { class: 'dim num', text: 'seed ' + r.seed }) : null,
+      h('span', { class: 'dim num', text: shots.length + ' shot' + (shots.length === 1 ? '' : 's') }),
+      r.done === false ? h('span', { class: 'attr', text: 'rendering…' }) : null,
+      r.audit ? h('span', { class: 'chip', text: 'audit ' + String(r.audit).slice(0, 30) }) : null,
+      h('span', { style: 'margin-left:auto' }, timeEl(r.started))));
+    if (!shots.length) {
+      el.appendChild(h('div', { class: 'empty', text: 'no images on disk for this run' }));
+    } else {
+      const strip = h('div', { class: 'shots' });
+      const items = shots.map(p => ({ src: `/${R.asset}/${p}`,
+        caption: `run-${r.run} · ${p.split('/').slice(-2).join('/')}` }));
+      shots.forEach((p, i) => {
+        strip.appendChild(h('div', { class: 'shot' },
+          h('button', { class: 'imgbtn', 'aria-label': 'enlarge ' + p,
+            onclick: () => openViewer(items, i) },
+            h('img', { src: `/${R.asset}/${p}`, loading: 'lazy', alt: p })),
+          h('span', { text: p.split('/').pop() })));
+      });
+      el.appendChild(strip);
+    }
+    runsHost.appendChild(el);
+  }
+  if (runs.length > cap)
+    runsHost.appendChild(h('button', { id: 'live-more',
+      text: `Load ${Math.min(30, runs.length - cap)} more (${runs.length - cap} older)`,
+      onclick: () => { S.liveCap = cap + 30; S.sigs = {}; render(); } }));
+}
+/* ============================ compare tab ==============================
+   The preview.py --variants workflow, first-class: current run as columns,
+   prior manifests as collapsible history, renderer fingerprint on show. */
+function variantCol(asset: string, run: number, v: Variant): HTMLDivElement {
+  const bad = v.exit !== 0 && v.exit !== null;
+  const el = h('div', { class: 'col card' + (bad ? ' err' : '') });
+  el.appendChild(h('h3', {},
+    h('span', { class: 'chip num', text: String(v.n) }), v.label || ''));
+  if (Array.isArray(v.clauses) && v.clauses.length)
+    el.appendChild(h('div', { class: 'clauses', text: 'clauses: ' + v.clauses.join(' + ') }));
+  const dv = Object.entries(v.diff || {}).map(([k, val]) => `${k} = ${JSON.stringify(val)}`).join('\n');
+  el.appendChild(h('div', { class: 'diffvars', text: dv || 'baseline' }));
+  if (v.exit === null) el.appendChild(h('div', { class: 'pending2', text: 'building…' }));
+  else if (bad) el.appendChild(h('pre', { text: `exit ${v.exit}\n\n${v.stderr_tail || '(no stderr)'}` }));
+  else {
+    const items = (v.renders || []).map(r => ({ src: `/${asset}/${runDir(run)}/${r}`,
+      caption: `run ${run} · v${v.n} ${v.label || ''} · ${r}` }));
+    (v.renders || []).forEach((r, i) => {
+      el.appendChild(h('button', { class: 'imgbtn', 'aria-label': 'enlarge ' + r,
+        onclick: () => openViewer(items, i) },
+        h('img', { src: `/${asset}/${runDir(run)}/${r}`, loading: 'lazy', alt: r })));
+    });
+    const foot = h('div', { class: 'row' });
+    if (v.seconds != null) foot.appendChild(h('span', { class: 'chip num', text: v.seconds + 's' }));
+    // Known bug, kept as found by the move to TypeScript: chips.py writes {chip, detail}
+    // objects into a manifest, so a measured chip shows as "[object Object]" here.
+    for (const c of (v.chips || [])) foot.appendChild(h('span', { class: 'chip amber', text: c as string }));
+    el.appendChild(foot);
+  }
+  return el;
+}
+function manifestDetails(asset: string, m: Manifest, open: boolean): HTMLDetailsElement {
+  const labels = (m.variants || []).map(v => v.label).join(', ');
+  const d = h('details', open ? { open: 'open' } : {},
+    h('summary', { text: `run ${m.run} · ${(m.started || '').replace('T', ' ')} · ${labels}`
+      + (m.audit ? ` · audit ${String(m.audit).slice(0, 30)}` : '') }));
+  const cols = h('div', { class: 'cols' });
+  for (const v of (m.variants || [])) cols.appendChild(variantCol(asset, m.run, v));
+  d.appendChild(cols);
+  return d;
+}
+function fingerprint(m: Manifest | null): string | null {
+  const e = m?.render_env;
+  if (!e) return null;
+  return `renderer: ${e.blender || '?'} · ${e.gpu || '?'} · backend ${e.gpu_backend || '?'}`
+       + (m.script_sha ? ` · script ${String(m.script_sha).slice(0, 12)}` : '');
+}
+function renderCompare() {
+  const R = S.route as AssetRoute, host = $('tab-compare');
+  const m = S.compare;
+  const histKeys = m ? [...Array(11).keys()].map(i => m.run - 1 - i).filter(n => n >= 1) : [];
+  const histSig = histKeys.map(n => typeof S.manifests.get(R.asset + '|' + n));
+  if (!sig('cmp', [S.compareText, histSig, S.cmpJump])) return;
+  host.textContent = '';
+  if (!m) {
+    host.appendChild(h('div', { class: 'card empty' },
+      'no variant run for this asset — start one with',
+      h('span', { class: 'cmd', text: `python Assets/Blender/_tools/preview.py ${R.asset} --variants <file>.json` })));
+    return;
+  }
+  const head = h('div', { class: 'card', id: 'cmp-head' },
+    h('span', { class: 'chip num' }, h('b', { text: 'run ' + m.run })),
+    h('span', { class: 'pill ' + (m.done ? 'st-stop' : 'st-run'), text: m.done ? 'done' : 'building' }),
+    m.tag ? h('span', { class: 'chip', text: m.tag }) : null,
+    m.seed != null ? h('span', { class: 'chip num', text: 'seed ' + m.seed }) : null,
+    m.audit ? h('span', { class: 'chip' + (String(m.audit).includes('FAIL') ? ' amber' : ''),
+                          text: 'audit ' + String(m.audit).slice(0, 50) }) : null,
+    h('span', { class: 'dim' }, timeEl(m.started)));
+  const fp = fingerprint(m);
+  if (fp) head.appendChild(h('span', { class: 'fp', text: fp }));
+  host.appendChild(head);
+  const cols = h('div', { class: 'cols' });
+  for (const v of (m.variants || [])) cols.appendChild(variantCol(R.asset, m.run, v));
+  host.appendChild(cols);
+  const jump = h('div', { id: 'cmp-jump' },
+    h('span', { text: 'history — previous runs open below · jump to run' }));
+  const inp = h('input', { type: 'number', min: '1', 'aria-label': 'run number' });
+  jump.appendChild(inp);
+  jump.appendChild(h('button', { text: 'open', onclick: () => {
+    const n = parseInt(inp.value, 10);
+    if (Number.isFinite(n) && n >= 1) jumpToRun(R.asset, n);
+  } }));
+  host.appendChild(jump);
+  const hist = h('div', { id: 'cmp-hist' });
+  if (S.cmpJump && S.cmpJump !== m.run && !histKeys.includes(S.cmpJump)) {
+    const jm = S.manifests.get(R.asset + '|' + S.cmpJump);
+    if (jm && typeof jm === 'object') hist.appendChild(manifestDetails(R.asset, jm, true));
+    else hist.appendChild(h('div', { class: 'card empty', text: `run ${S.cmpJump}: no manifest on disk` }));
+  }
+  for (const n of histKeys) {
+    const hm = S.manifests.get(R.asset + '|' + n);
+    if (hm && typeof hm === 'object')
+      hist.appendChild(manifestDetails(R.asset, hm, S.cmpJump === n));
+  }
+  host.appendChild(hist);
+}
+/* ============================== viewer ================================
+   One lightbox for every image on the page. Filmstrip = whatever context
+   the click came from. "Pin as compare base" replaces the old page's
+   accepted-before rule: pin any image, then side-by-side / pixel-diff any
+   other against it. */
+const V: { items: ViewerItem[]; idx: number; mode: ViewMode; pin: ViewerItem | null;
+           opener: Element | null; gen: number }
+  = { items: [], idx: 0, mode: 'single', pin: null, opener: null, gen: 0 };
+function openViewer(items: ViewerItem[], idx?: number): void {
+  if (!items || !items.length) return;
+  V.items = items;
+  V.idx = Math.min(Math.max(0, idx ?? 0), items.length - 1);
+  V.mode = 'single';
+  V.opener = document.activeElement;
+  $<HTMLDialogElement>('viewer').showModal();
+  renderViewer();
+}
+$('viewer').addEventListener('close', () => {
+  if (V.opener && V.opener.isConnected) (V.opener as HTMLElement).focus();
+});
+function compareBase(): ViewerItem | null {                     // pinned image wins; else the previous item
+  if (V.pin && V.pin.src !== V.items[V.idx]?.src) return V.pin;
+  if (!V.pin && V.idx > 0) return V.items[V.idx - 1];
+  return null;
+}
+const DIFF_THRESHOLD = 24;    // below this is preview sampling noise, not change
+function loadImg(src: string): Promise<HTMLImageElement> {
+  return new Promise((res, rej) => { const i = new Image();
+    i.onload = () => res(i); i.onerror = () => rej(new Error('could not load ' + src)); i.src = src; });
+}
+async function drawDiff(stage: HTMLElement, beforeSrc: string, afterSrc: string,
+                        live: () => boolean): Promise<void> {
+  let a: HTMLImageElement, b: HTMLImageElement;
+  try { [a, b] = await Promise.all([loadImg(beforeSrc), loadImg(afterSrc)]); }
+  catch (e) { if (live()) stage.appendChild(h('div', { class: 'v-warn', text: (e as Error).message })); return; }
+  if (!live()) return;                       // user navigated while the PNGs loaded
+  if (a.naturalWidth !== b.naturalWidth || a.naturalHeight !== b.naturalHeight) {
+    stage.appendChild(h('div', { class: 'v-warn',
+      text: `Cannot diff: images are different sizes (${a.naturalWidth}×${a.naturalHeight} vs `
+          + `${b.naturalWidth}×${b.naturalHeight}). Side-by-side still works.` }));
+    return;
+  }
+  const w = a.naturalWidth, hgt = a.naturalHeight;
+  const mk = (img: HTMLImageElement) => { const c = document.createElement('canvas'); c.width = w; c.height = hgt;
+    const x = c.getContext('2d')!; x.drawImage(img, 0, 0); return x.getImageData(0, 0, w, hgt).data; };
+  const A = mk(a), B = mk(b);
+  const out = document.createElement('canvas'); out.width = w; out.height = hgt;
+  const ctx = out.getContext('2d')!; const img = ctx.createImageData(w, hgt); const D = img.data;
+  for (let i = 0; i < D.length; i += 4) {
+    const d = Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2]);
+    if (d > DIFF_THRESHOLD) {                // amber, hotter with bigger change, over the new image
+      const k = Math.min(1, d / 180);
+      D[i] = 255; D[i + 1] = 190 - 130 * k; D[i + 2] = 70 - 70 * k; D[i + 3] = 255;
+    } else { D[i] = B[i] * .22; D[i + 1] = B[i + 1] * .22; D[i + 2] = B[i + 2] * .22; D[i + 3] = 255; }
+  }
+  ctx.putImageData(img, 0, 0);
+  out.setAttribute('role', 'img');
+  out.setAttribute('aria-label', 'changed pixels highlighted over the newer image');
+  if (live()) stage.appendChild(h('div', { class: 'v-pane' },
+    h('b', { text: 'changed pixels over the current image' }), out));
+}
+async function renderViewer(): Promise<void> {
+  const gen = ++V.gen;                       // re-entrancy epoch for async image loads
+  const live = () => gen === V.gen && $<HTMLDialogElement>('viewer').open;
+  const cur = V.items[V.idx];
+  if (!cur) return;
+  const base = compareBase();
+  $('v-title').textContent = `${cur.caption || ''} — ${V.idx + 1}/${V.items.length}`;
+  $<HTMLButtonElement>('v-prev').disabled = V.idx <= 0;
+  $<HTMLButtonElement>('v-next').disabled = V.idx >= V.items.length - 1;
+  const pinned = V.pin?.src === cur.src;
+  $('v-pin').setAttribute('aria-pressed', String(!!V.pin));
+  $('v-pin').textContent = pinned ? '⌖ unpin' : V.pin ? '⌖ pinned: ' + (V.pin.caption || '').slice(0, 24) : '⌖ pin';
+  for (const b of document.querySelectorAll<HTMLButtonElement>('#v-modes [role=radio]')) {
+    b.disabled = b.dataset.mode !== 'single' && !base;
+    b.setAttribute('aria-checked', String(b.dataset.mode === V.mode));
+  }
+  const stage = $('v-stage');
+  stage.textContent = '';
+  if (V.mode === 'diff' && base) await drawDiff(stage, base.src, cur.src, live);
+  else if (V.mode === 'side' && base) {
+    stage.appendChild(h('div', { class: 'v-pane half' },
+      h('b', { text: (V.pin ? '⌖ ' : '') + (base.caption || 'previous') }),
+      h('img', { src: base.src, alt: base.caption || 'compare base' })));
+    stage.appendChild(h('div', { class: 'v-pane half' },
+      h('b', { text: cur.caption || '' }),
+      h('img', { src: cur.src, alt: cur.caption || 'current image' })));
+  } else {
+    const img = h('img', { src: cur.src, alt: cur.caption || 'image',
+      onerror: e => (e.target as HTMLImageElement).replaceWith(h('div', { class: 'v-warn',
+        text: 'render not on disk — unclaimed or cleaned up (' + cur.src + ')' })) });
+    stage.appendChild(h('div', { class: 'v-pane' },
+      h('b', { text: cur.caption || '' }), img));
+  }
+  if (!live()) return;
+  const strip = $('v-strip');
+  strip.textContent = '';
+  V.items.forEach((it, i) => {
+    const b = h('button', { 'aria-current': String(i === V.idx),
+      title: it.caption || '', 'aria-label': (it.caption || 'image ' + (i + 1)),
+      onclick: () => { V.idx = i; renderViewer(); } },
+      h('img', { src: it.src, alt: '', loading: 'lazy' }));
+    if (V.pin?.src === it.src) b.appendChild(h('span', { class: 'pinmark', text: '⌖' }));
+    strip.appendChild(b);
+  });
+  strip.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+}
+$('v-close').addEventListener('click', () => $<HTMLDialogElement>('viewer').close());
+$('v-prev').addEventListener('click', () => { if (V.idx > 0) { V.idx--; renderViewer(); } });
+$('v-next').addEventListener('click', () => { if (V.idx < V.items.length - 1) { V.idx++; renderViewer(); } });
+$('v-pin').addEventListener('click', () => {
+  const cur = V.items[V.idx];
+  V.pin = V.pin?.src === cur.src ? null : cur;
+  renderViewer();
+});
+for (const b of document.querySelectorAll<HTMLButtonElement>('#v-modes [role=radio]'))
+  b.addEventListener('click', () => { V.mode = b.dataset.mode as ViewMode; renderViewer(); });
+$('v-help').addEventListener('click', () => $<HTMLDialogElement>('shortcuts').showModal());
+$('sc-close').addEventListener('click', () => $<HTMLDialogElement>('shortcuts').close());
+$('shortcuts').addEventListener('pointerdown', e => {
+  if (!(e.target as Element).closest('table, h2')) $<HTMLDialogElement>('shortcuts').close();
+});
+// Any pointerdown inside the open dialog closes it UNLESS the target is
+// interactive (data-keep) or an image/canvas — clicks in stage gutters work.
+$('viewer').addEventListener('pointerdown', e => {
+  if ((e.target as Element).closest('[data-keep], img, canvas, button, a, input, select')) return;
+  $<HTMLDialogElement>('viewer').close();
+});
+$('viewer').addEventListener('cancel', e => {      // Esc: shortcuts overlay first
+  if ($<HTMLDialogElement>('shortcuts').open) { e.preventDefault(); $<HTMLDialogElement>('shortcuts').close(); }
+});
+document.addEventListener('keydown', e => {
+  if (e.target instanceof Element && e.target.matches('input, select, textarea')) return;
+  if ($<HTMLDialogElement>('shortcuts').open) {
+    if (e.key === '?' || e.key === 'Escape') { $<HTMLDialogElement>('shortcuts').close(); e.preventDefault(); }
+    return;
+  }
+  if (!$<HTMLDialogElement>('viewer').open) return;
+  if (e.key === '?') $<HTMLDialogElement>('shortcuts').showModal();
+  else if (e.key === 'ArrowLeft' && V.idx > 0) { V.idx--; renderViewer(); }
+  else if (e.key === 'ArrowRight' && V.idx < V.items.length - 1) { V.idx++; renderViewer(); }
+  else if (e.key === 'Home') { V.idx = 0; renderViewer(); }
+  else if (e.key === 'End') { V.idx = V.items.length - 1; renderViewer(); }
+  else if (e.key === 's' || e.key === 'S') { if (compareBase()) { V.mode = 'side'; renderViewer(); } }
+  else if (e.key === 'd' || e.key === 'D') { if (compareBase()) { V.mode = 'diff'; renderViewer(); } }
+  else if (e.key === '1') { V.mode = 'single'; renderViewer(); }
+  else if (e.key === 'p' || e.key === 'P') { $('v-pin').click(); }
+  else return;
+  e.preventDefault();
+});
+/* ============================== chat ================================== */
+function parseJsonl<T>(text: string | null): T[] {
+  return (text || '').split('\n').filter(l => l.trim()).map(l => {
+    try { return JSON.parse(l); } catch (e) { return null; }   // torn tail line
+  }).filter(Boolean);
+}
+function mergeChat(chatText: string | null, feedText: string | null): ChatLine[] {
+  const lines = [...parseJsonl<ChatLine>(chatText), ...parseJsonl<ChatLine>(feedText)];
+  lines.sort((a, b) => {
+    const ka = (a.at || '') + (a.from === 'user' ? '0' : '1');
+    const kb = (b.at || '') + (b.from === 'user' ? '0' : '1');
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
+  return lines;
+}
+function chatPinned(): boolean {
+  const m = $('msgs');
+  return m.scrollHeight - m.scrollTop - m.clientHeight < 40;
+}
+function renderChat() {
+  if (!sig('chat', [S.chat.length, S.chat[S.chat.length - 1]?.at, S.pendingRows.length])) return;
+  const m = $('msgs');
+  const pin = chatPinned();
+  m.textContent = '';
+  if (!S.chat.length)
+    m.appendChild(h('div', { class: 'empty', text: 'say something — the supervisor is listening' }));
+  for (const line of S.chat.slice(-200)) {
+    const who = line.from === 'user' ? 'user' : 'supervisor';
+    m.appendChild(h('div', { class: 'msg ' + who },
+      h('span', { class: 'who' },
+        (who === 'user' ? 'you' : 'supervisor') + (line.asset ? ' · ' + line.asset : '') + ' · ',
+        timeEl(line.at)),
+      line.text || ''));
+  }
+  for (const row of S.pendingRows) m.appendChild(row);
+  if (pin) m.scrollTop = m.scrollHeight;
+}
+function prefillChat(text: string): void {                 // verb buttons come here — never a silent POST
+  document.body.classList.remove('nochat');
+  $('chat-toggle').setAttribute('aria-pressed', 'true');
+  lsSet('gf-suite-chat', '');
+  const input = $<HTMLInputElement>('chat-in');
+  input.value = text;
+  input.focus();
+  input.setSelectionRange(text.length, text.length);
+}
+async function sendChat(ev: Event): Promise<void> {
+  ev.preventDefault();
+  const input = $<HTMLInputElement>('chat-in');
+  const text = input.value.trim();
+  if (!text) return;
+  const body: { text: string; asset?: string } = { text };
+  if ($<HTMLInputElement>('chat-scope').checked && S.route.asset) body.asset = S.route.asset;
+  if (await postJSON('/chat', body)) {
+    input.value = '';
+    tick();                                  // show the line immediately
+  } else {
+    const row = h('div', { class: 'msg undelivered', text: '⚠ not delivered — server down? ' + text });
+    S.pendingRows.push(row);
+    $('msgs').appendChild(row);
+    $('msgs').scrollTop = $('msgs').scrollHeight;
+    setTimeout(() => {
+      S.pendingRows = S.pendingRows.filter(x => x !== row);
+      row.remove();
+    }, 6000);
+  }
+}
+$('chat-form').addEventListener('submit', sendChat);
+$('chat-toggle').addEventListener('click', () => {
+  const hidden = document.body.classList.toggle('nochat');
+  $('chat-toggle').setAttribute('aria-pressed', String(!hidden));
+  lsSet('gf-suite-chat', hidden ? 'hidden' : '');
+});
+if (lsGet('gf-suite-chat') === 'hidden') {
+  document.body.classList.add('nochat');
+  $('chat-toggle').setAttribute('aria-pressed', 'false');
+}
+setInterval(() => {
+  $('scope-label').textContent = 'to ' + (S.route.asset || 'this asset');
+}, 2000);
+/* ============================== boot ================================== */
+addEventListener('hashchange', applyRoute);
+(function boot() {
+  // legacy deep links: ?asset=x → #/a/x (and the old live.html deep link shape)
+  const params = new URLSearchParams(location.search);
+  const legacy = params.get('asset');
+  if (legacy && !location.hash.startsWith('#/')) {
+    const clean = location.pathname + '#/a/' + encodeURIComponent(legacy);
+    history.replaceState(null, '', clean);
+  }
+  S.route = parseRoute();
+  render();
+  tick();
+  setInterval(tick, 1000);
+})();
