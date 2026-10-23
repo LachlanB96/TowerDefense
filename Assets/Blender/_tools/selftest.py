@@ -528,8 +528,8 @@ def _wait_for_server(base_url, deadline_seconds=10):
 def test_gallery_server_contract():
     """serve.py's whole job is a contract with gallery/index.html's poller:
 
-    - GET / must return the page itself (proves index.html got copied into
-      the previews root and stock http.server is serving it, not a 404).
+    - GET / must land on the suite page (serve.py redirects it to /v4.html,
+      which proves v4.html got copied into the previews root and is served).
     - GET /assets.json must be 200 and a JSON list (the page's findAsset()
       parses it with no error handling for "not a list").
     - every response carries Cache-Control: no-store (QuietHandler.end_headers
@@ -563,11 +563,12 @@ def test_gallery_server_contract():
         root_resp = _wait_for_server(base)
         root_body = root_resp.read().decode("utf-8")
         check("GET / is 200", root_resp.status == 200)
-        # index.html is a redirect stub since the suite (2026-08-12): the body
-        # must both name itself and point at /v4.html, or old bookmarks strand.
-        check("GET / body is the suite redirect stub",
-              "<title>Gloomfell → suite</title>" in root_body and "/v4.html" in root_body,
-              root_body[:200])
+        # serve.py redirects / to the suite (the index.html stub did until
+        # 2026-10-24); urlopen follows the redirect, so this is the page itself.
+        check("GET / redirects to the suite page",
+              root_resp.geturl().endswith("/v4.html")
+              and "Gloomfell · mission control" in root_body,
+              root_resp.geturl() + " " + root_body[:200])
         check("GET / carries Cache-Control: no-store",
               root_resp.headers.get("Cache-Control") == "no-store")
 
