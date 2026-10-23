@@ -181,6 +181,7 @@ test("the hero: the suite is up with a link to it, Unity closed, the fleet runni
   assert.ok(chips.includes("Unity closed"), chips.join(" | "));
   assert.ok(chips.includes("Fleet 1 running"), chips.join(" | "));
   assert.ok(chips.includes("Branches 2"), chips.join(" | "));
+  assert.match(text(p.$(".gf-hello")), /^1 asset modelling, the suite is up/);
   assert.strictEqual(text(p.$(".gf-pulse-value")), "1");
   assert.match(text(p.$(".gf-pulse-label")), /commit not pushed/);
   assert.strictEqual(p.$(".gf-hero [data-url]")!.getAttribute("data-url"), `http://localhost:${port}/v4.html`);

@@ -496,9 +496,12 @@ export async function page(ctx: GfCtx): Promise<string> {
     const line = (key: string, last: { ok: boolean; message: string | null; at: number } | null, busy: boolean): string => last && last.message && !busy
       ? `<div class="gf-outcome ${last.ok ? "ok" : "err"}" data-job="${key}">${esc(last.message)} <span class="gf-meta">${esc(fmtAgo(last.at))}</span></div>` : "";
     const unpushed = G.facts?.unpushed;
+    // the headline is what's live right now; the frame's title already says Gloomfell
+    const live = [fleet?.running ? `${plural(fleet.running, "asset")} modelling` : "", unity?.open ? "Unity has the project open" : "", P.up ? "the suite is up" : ""].filter(Boolean);
+    const hello = live.length ? live.join(", ").replace(/^./, c => c.toUpperCase()) : "All quiet";
     return `<div class="gf-hero">
       <div class="gf-hero-main">
-        <div class="gf-hello">Gloomfell<span>Unity 6 tower defence: gothic Templars and wooden tack launchers. The repo, the modelling fleet, the towers' tables and the editor, read from <code>${esc(slash(dir))}</code>.</span></div>
+        <div class="gf-hello">${esc(hello)}<span>Unity 6 tower defence: gothic Templars and wooden tack launchers. The repo, the modelling fleet, the towers' tables and the editor, read from <code>${esc(slash(dir))}</code>.</span></div>
         <div class="gf-chips">${chips}</div>
         <div class="gf-actions">${suiteBtn}${checkBtn}<button class="gf-btn ghost" data-action="refresh" title="Read git, the fleet and the suite again">↻ Refresh</button></div>
         ${line("suite", S.start.last, starting)}${line("check", checkJob.last, checkJob.state !== "idle")}
@@ -517,6 +520,8 @@ export async function page(ctx: GfCtx): Promise<string> {
     return tile("gf-tile--wide gf-git", "Git", meta, () => {
       if (!G.facts) return G.error ? `<div class="gf-err">⚠ git: ${esc(G.error)}</div>` : `<div class="gf-empty">Reading git…</div>`;
       const f = G.facts, others = f.branches.filter(b => b.name !== f.trunk), extraWt = f.worktrees.filter(w => !w.main);
+      // worktree paths read from the main checkout (".claude/worktrees/x"), whichever checkout this page is served from
+      const base = f.worktrees.find(w => w.main)?.path || dir;
       const kpi = (v: string | number, label: string, cls = "", title = ""): string => `<div class="gf-kpi ${cls}"${title ? ` title="${esc(title)}"` : ""}><div class="gf-kpi-value">${esc(v)}</div><div class="gf-kpi-label">${esc(label)}</div></div>`;
       const kpis = `<div class="gf-kpis">
         ${kpi(others.length, others.length === 1 ? "branch besides main" : "branches besides main")}
@@ -529,11 +534,11 @@ export async function page(ctx: GfCtx): Promise<string> {
         const vs = trunk ? `<span class="gf-faint">trunk</span>`
           : b.ahead == null ? `<span class="gf-faint">?</span>`
           : `<span class="gf-ahead${b.ahead ? "" : " zero"}" title="commits on ${esc(b.name)} that ${esc(f.trunk)} doesn't have">↑${b.ahead}</span> <span class="gf-behind${b.behind ? "" : " zero"}" title="commits on ${esc(f.trunk)} that ${esc(b.name)} doesn't have">↓${b.behind}</span>${b.ahead === 0 ? ` ${badge("faint", "merged")}` : ""}`;
-        const wt = b.worktree ? `<code title="${esc(b.worktree)}">${esc(rel(dir, b.worktree))}</code>` : `<span class="gf-faint">–</span>`;
+        const wt = b.worktree ? `<code title="${esc(b.worktree)}">${esc(rel(base, b.worktree))}</code>` : `<span class="gf-faint">–</span>`;
         return `<tr${trunk ? ` class="trunk"` : ""}><td class="gf-branch"><code>${esc(b.name)}</code></td><td class="gf-num">${vs}</td><td class="gf-when" title="${esc(fmtDate(b.date))}">${esc(fmtAgo(b.date))}</td><td class="gf-subject" title="${esc(b.subject)}">${esc(b.subject)}</td><td class="gf-wt">${wt}</td></tr>`;
       }).join("");
-      const loose = f.worktrees.filter(w => !w.main && !w.branch).map(w => `<li><code>${esc(rel(dir, w.path))}</code> <span class="gf-faint">detached at ${esc(w.head)}</span></li>`).join("");
-      const flags = f.worktrees.filter(w => w.prunable).map(w => `<li><code>${esc(rel(dir, w.path))}</code> ${badge("warn", "prunable", "its folder is gone: git worktree prune")}</li>`).join("");
+      const loose = f.worktrees.filter(w => !w.main && !w.branch).map(w => `<li><code>${esc(rel(base, w.path))}</code> <span class="gf-faint">detached at ${esc(w.head)}</span></li>`).join("");
+      const flags = f.worktrees.filter(w => w.prunable).map(w => `<li><code>${esc(rel(base, w.path))}</code> ${badge("warn", "prunable", "its folder is gone: git worktree prune")}</li>`).join("");
       return kpis + `<table class="gf-table"><thead><tr><th>Branch</th><th class="gf-num">vs ${esc(f.trunk || "main")}</th><th>Last commit</th><th>Subject</th><th>Worktree</th></tr></thead><tbody>${rows}</tbody></table>`
         + (loose || flags ? `<ul class="gf-list">${loose}${flags}</ul>` : "");
     });
