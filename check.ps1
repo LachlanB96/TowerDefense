@@ -133,6 +133,10 @@ function Invoke-Unity {
       foreach ($case in $run.SelectNodes("//test-case[@result='Failed']")) {
         Say "  FAILED $($case.fullname): $($case.failure.message.'#cdata-section' ?? $case.failure.message)"
       }
+    } elseif ((Test-Path -LiteralPath $log) -and (Select-String -LiteralPath $log -Pattern 'No valid Unity Editor license found' -Quiet)) {
+      # Batch mode runs on the entitlement license in %LOCALAPPDATA%\Unity\licenses, which only
+      # Unity Hub renews (signed in), about every 30 days (its UpdateDate). Seen 2026-10-24.
+      Say "unity: Unity's license has lapsed, so batch mode won't start. Open Unity Hub signed in (it renews $env:LOCALAPPDATA\Unity\licenses\UnityEntitlementLicense.xml), then run the check again."
     } else {
       Say "unity: no results file. The end of the log:"
       if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 40 | ForEach-Object { Write-Host "    $_" } }
