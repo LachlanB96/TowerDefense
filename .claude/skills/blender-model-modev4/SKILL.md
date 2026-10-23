@@ -55,12 +55,13 @@ the `.blend` or the `.fbx`. A panel accept is not finishing. The
 **On `finish <asset>`, in this order:** set that asset's `control.json` state to
 `stop` → wait for its shepherd to exit → run the real build **from the bake worktree's
 script** — that copy is the accepted state; the main checkout's copy is stale until
-the user merges (`shepherd.md`, "Your workspace"). Its output paths are hardcoded
-absolute, so the `.blend`/`.fbx` land in the real asset locations:
+the user merges (`shepherd.md`, "Your workspace"). Its output paths resolve to the main
+checkout even when it runs from a worktree, so the `.blend`/`.fbx` land in the real asset
+locations (`<repo>` is the main checkout, the folder holding this repo's `CLAUDE.md`):
 
 ```bash
 "/c/Program Files/Blender Foundation/Blender 5.1/blender.exe" -b \
-    -P "C:\Users\LachlanB\TD\.claude\worktrees\model-<asset>\Assets\Blender\blender_<asset>.py" \
+    -P "<repo>\.claude\worktrees\model-<asset>\Assets\Blender\blender_<asset>.py" \
     -- save export render
 ```
 
@@ -191,13 +192,14 @@ chat. GPU queueing makes the whole batch safe; the fleet strip makes it visible.
 
 One background agent per active asset. Resume by agent id when quiet; respawn only if
 resume fails (a fresh shepherd reconciles records against disk before dispatching
-anything). The template — fill every `<placeholder>` yourself:
+anything). The template — fill every `<placeholder>` yourself (`<repo>` is the main
+checkout's absolute path, the folder holding this repo's `CLAUDE.md`):
 
 > You are the SHEPHERD for Gloomfell asset `<asset>`. Read
-> `C:\Users\LachlanB\TD\.claude\skills\blender-model-modev4\references\shepherd.md`
+> `<repo>\.claude\skills\blender-model-modev4\references\shepherd.md`
 > in full — you are the only agent that ever reads it.
-> Asset script: `<abs path>`. Main repo: `C:\Users\LachlanB\TD`.
-> Previews root: `C:\Users\LachlanB\TD\Assets\Blender\_previews~`.
+> Asset script: `<abs path>`. Main repo: `<repo>`.
+> Previews root: `<repo>\Assets\Blender\_previews~`.
 > Character summary (reuse verbatim in every brief you write): `<2–3 sentences you
 > compose from the design doc>`.
 > Standing brief: `<the user's words, verbatim>`.

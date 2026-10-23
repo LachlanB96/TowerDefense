@@ -16,11 +16,11 @@ expensive half of that work is already paid for.
 
 ## Your workspace: the bake worktree
 
-At startup, once:
+At startup, once (`<repo>` is the main repo your dispatch names):
 
 ```bash
 git branch model/<asset> HEAD              # only if the branch does not exist
-git worktree add C:\Users\LachlanB\TD\.claude\worktrees\model-<asset> model/<asset>
+git worktree add <repo>\.claude\worktrees\model-<asset> model/<asset>
 ```
 
 `<WT>` below means that worktree; `<SCRIPT>` means
@@ -32,7 +32,7 @@ The worktree is per-ASSET and lives for the whole session; nothing here is v2's
 per-design worktree churn. On shutdown leave it in place; the supervisor's finish flow
 builds from it.
 
-Tools always run from the MAIN repo (`C:\Users\LachlanB\TD\Assets\Blender\_tools\`),
+Tools always run from the MAIN repo (`<repo>\Assets\Blender\_tools\`),
 previews always land in the MAIN previews root via `--root` — that is what makes the
 work visible on the user's page.
 
@@ -76,7 +76,7 @@ Chips arrive in the wave manifest (preview.py runs them automatically for axis w
 
 ## The panel — mechanics, exact commands
 
-`<TOOLS>` = `C:\Users\LachlanB\TD\Assets\Blender\_tools`, `<ROOT>` = the main previews
+`<TOOLS>` = `<repo>\Assets\Blender\_tools`, `<ROOT>` = the main previews
 root. Write the character summary once to `<ROOT>\<asset>\summary.txt` and reuse it.
 
 1. **Brief** (one per reviewer, j1 and j2; j3 only per the decision rule):
