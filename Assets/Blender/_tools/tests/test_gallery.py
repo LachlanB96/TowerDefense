@@ -501,3 +501,34 @@ def test_requests_for_the_page_bring_it_up_to_date(tmp_path):
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+# ------------------------------------------------------------------ old copies
+
+
+def test_stale_page_copies_are_removed_at_startup(tmp_path):
+    """Starts before 2026-10-24 copied index.html and live.html into the root;
+    serve.py deletes those two, at the top of its own root, and nothing else."""
+    root = tmp_path / "root"
+    (root / "mage000").mkdir(parents=True)
+    for name in ("index.html", "live.html", "keep.html", "index.htm"):
+        (root / name).write_text("<p>old</p>", encoding="utf-8")
+    for name in ("index.html", "live.html"):
+        (root / "mage000" / name).write_text("<p>an asset's own</p>", encoding="utf-8")
+    (root / "live.html.bak").mkdir()          # a folder by a similar name stays too
+    neighbour = tmp_path / "index.html"       # outside the root: not this server's
+    neighbour.write_text("<p>not ours</p>", encoding="utf-8")
+    with Served(root) as srv:
+        assert srv.request("GET", "/index.html")[0] == 302   # still a redirect
+    top = set(os.listdir(root))
+    assert not top & {"index.html", "live.html"}
+    assert {"keep.html", "index.htm", "mage000", "live.html.bak"} <= top
+    assert sorted(os.listdir(root / "mage000")) == ["index.html", "live.html"]
+    assert neighbour.exists()
+    assert "removed: index.html, live.html" in srv.output
+
+
+def test_a_root_without_old_copies_says_nothing_about_them(tmp_path):
+    with Served(tmp_path) as srv:
+        pass
+    assert "removed:" not in srv.output

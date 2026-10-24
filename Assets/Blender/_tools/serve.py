@@ -14,9 +14,12 @@ verdict and it is never control.json, which stays the supervisor's file alone.
 The suite lives in source control under _tools/gallery/: the page (v4.html)
 and its script (v4.ts, TypeScript). Every start copies the page into the
 previews root, so relative image paths just work, and bundles the script there
-as v4.js with Bun, so the served script is never older than its source. The
-bundle is build output: it is never written under _tools/ and never committed.
-The old pages (/, /index.html, /live.html) are redirects into the suite.
+as v4.js with Bun, with a linked source map (v4.js.map) for devtools. A request
+for the page or its script redoes either when its source has changed since, so
+an edit needs a reload, not a restart. The bundle is build output: it is never
+written under _tools/ and never committed. The old pages (/, /index.html,
+/live.html) are redirects into the suite, and the copies of them that earlier
+starts left in the previews root are deleted at startup.
 """
 
 import functools
@@ -58,6 +61,10 @@ DIRECTIVES = {"rework", "revert", "resurrect", "withdraw"}
 # live.html (v3's live view) were stub files doing this in the browser until
 # 2026-10-24; with the stubs gone, / would otherwise be a directory listing.
 LEGACY_PAGES = {"/": "", "/index.html": "", "/live.html": "/live"}
+# The copies of those stubs that every start before then left in the previews
+# root. The redirects make them unreachable, so they're only clutter that looks
+# current; remove_stale_pages() deletes these two names and nothing else.
+STALE_PAGES = ("index.html", "live.html")
 
 # The page script is TypeScript, and browsers run JavaScript, so it is bundled
 # at every start with the Bun the megaproject pins in ~/AI/.typescript (its
@@ -195,6 +202,24 @@ def install_page(dest_dir, banner=None, src_dir=None):
     with open(part, "w", encoding="utf-8", newline="") as fh:
         fh.write(page)
     _replace(part, dst)
+
+
+def remove_stale_pages(root):
+    """Delete the old pages' copies from the top of `root`. Returns the names removed.
+
+    Only index.html and live.html, only as files directly in the previews root
+    this server serves: an asset folder's own files are never touched.
+    """
+    removed = []
+    for name in STALE_PAGES:
+        path = os.path.join(root, name)
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+                removed.append(name)
+            except OSError as exc:
+                _say("could not remove the stale %s: %s" % (path, exc))
+    return removed
 
 
 def _sig(path):
@@ -442,6 +467,9 @@ def main():
     # on stdout (beside the banner below, which is where people look) and on
     # the page, and the server still starts: the data files and the POST doors
     # work without the page, and the pipeline reads and writes through them.
+    removed = remove_stale_pages(PREVIEW_ROOT)
+    if removed:
+        _say("removed: %s (copies of the old pages, which redirect now)" % ", ".join(removed))
     suite = Suite(PREVIEW_ROOT)
     bundle_error = suite.start()
     handler = functools.partial(QuietHandler, directory=PREVIEW_ROOT)
