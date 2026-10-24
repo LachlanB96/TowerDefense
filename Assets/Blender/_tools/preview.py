@@ -81,6 +81,12 @@ def granted_cpus():
         system_mask = ctypes.c_size_t()
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        # Declared, because the pseudo-handle is -1 as 64 bits, and an undeclared argument
+        # is squeezed into a C int ("int too long to convert").
+        kernel32.GetProcessAffinityMask.argtypes = [wintypes.HANDLE,
+                                                    ctypes.POINTER(ctypes.c_size_t),
+                                                    ctypes.POINTER(ctypes.c_size_t)]
+        kernel32.GetProcessAffinityMask.restype = wintypes.BOOL
         ok = kernel32.GetProcessAffinityMask(kernel32.GetCurrentProcess(),
                                              ctypes.byref(process_mask),
                                              ctypes.byref(system_mask))
