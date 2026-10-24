@@ -21,8 +21,9 @@ A worktree has no Library, and importing the project from scratch takes a long w
 worktree Library becomes a junction to one shared cache, %LOCALAPPDATA%\GloomFell\check-library,
 copied once from the main checkout's Library. Each check then reimports only what its branch
 changed. One check uses the cache at a time (a lock file beside it). land unlinks junctions
-before it removes a worktree, and the folders Unity leaves in a worktree (Logs, UserSettings,
-Temp) are removed again here, so land can take the worktree afterwards.
+before it removes a worktree, and what the harness and Unity leave in a worktree that git
+ignores (Temp, Logs, UserSettings, .csproj, .slnx, _previews~) is removed again here, so land
+can take the worktree afterwards. The .meta files Unity writes for new files are not: commit them.
 #>
 param(
   [ValidateSet('ts', 'harness', 'unity')]
@@ -90,14 +91,12 @@ function Invoke-Unity {
 
   $main = Get-MainCheckout
   $lockStream = $null
-  $made = @()
   try {
     if ($main) {
       # A worktree: borrow the shared Library cache (see the header).
       $cache = Join-Path $env:LOCALAPPDATA 'GloomFell\check-library'
       try { $lockStream = [IO.File]::Open("$cache.lock", 'OpenOrCreate', 'ReadWrite', 'None') }
       catch { Say "unity: another check is using the shared Library ($cache); run this one when it's done"; return 'failed' }
-      foreach ($d in 'Logs', 'UserSettings', 'Temp') { if (-not (Test-Path -LiteralPath (Join-Path $root $d))) { $made += $d } }
 
       $library = Join-Path $root 'Library'
       if (-not (Test-Path -LiteralPath $library)) {
@@ -143,20 +142,33 @@ function Invoke-Unity {
     }
     if ($code -eq 0 -and (Test-Path -LiteralPath $xml)) { 'passed' } else { 'failed' }
   } finally {
-    if ($main) {
-      # What Unity left in the worktree that git ignores, so land can remove the worktree.
-      foreach ($d in $made) {
-        $p = Join-Path $root $d
-        if ((Test-Path -LiteralPath $p) -and ((Resolve-Path -LiteralPath $p).Path.StartsWith($root))) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
-      }
-    }
     if ($lockStream) { $lockStream.Dispose() }
   }
 }
 
+# What git ignores in $root, as git lists it (folders as "name/").
+function Get-Ignored { @(git -C $root ls-files --others --ignored --exclude-standard --directory) }
+
+# In a worktree, remove what a part left that git ignores and that wasn't there before it ran:
+# Unity's Temp, Logs, UserSettings, .csproj and .slnx, the harness's _previews~. Otherwise land
+# keeps the worktree for them. Never Library (the cache's junction, which land unlinks) and never
+# any other link: Remove-Item must not reach through a junction into what it points at.
+function Remove-LeftBehind([string[]]$before) {
+  foreach ($rel in (Get-Ignored)) {
+    if ($before -contains $rel -or $rel -eq 'Library/') { continue }
+    $full = Join-Path $root ($rel.TrimEnd('/') -replace '/', '\')
+    if (-not $full.StartsWith($root + '\')) { continue }
+    $item = Get-Item -LiteralPath $full -Force -ErrorAction SilentlyContinue
+    if (-not $item -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue }
+    Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
+
+$inWorktree = [bool](Get-MainCheckout)
 foreach ($part in 'ts', 'harness', 'unity') {
   if ($Only -notcontains $part) { continue }
   Say "--- $part"
+  $before = if ($inWorktree) { Get-Ignored } else { @() }
   try {
     $results[$part] = switch ($part) {
       'ts' { Invoke-TypeScript }
@@ -166,6 +178,8 @@ foreach ($part in 'ts', 'harness', 'unity') {
   } catch {
     Say "$part couldn't run: $_"
     $results[$part] = 'failed'
+  } finally {
+    if ($inWorktree -and $part -ne 'ts') { Remove-LeftBehind $before }
   }
 }
 
