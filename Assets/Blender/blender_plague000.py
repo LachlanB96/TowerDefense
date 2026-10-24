@@ -129,21 +129,28 @@ HEAD_SCALE = (1.00, 1.05, 1.08)
 # hardest-won structural lesson and it transfers unchanged.
 BODY_DEPTH = 0.800
 
-# (z, radius across X, fold amplitude). The coat is a heavy waxed bell: widest at
-# the hem where it pools, pinched at the waist under the pack straps, and swelling
-# again across the chest.
+# The coat stops WELL clear of the ground and the boots show under it.
+#
+# The first blockout ran it to z=0.008 at a 0.40 radius and the whole figure read
+# as a chess pawn: a 0.83 m bell on a 1.64 m body is a 2:1 envelope where a person
+# is nearer 4:1, and it swallowed the legs, the arms and half the pack, leaving
+# nothing but a cone with a beak. Two numbers fix it and both are load-bearing -
+# the hem HEIGHT (so there are legs) and the hem RADIUS (so there is a body).
+Z_HEM = 0.400
+
+# (z, radius across X, fold amplitude). A long narrow greatcoat, near-straight
+# down its length, pinched at the waist under the pack straps and swelling again
+# across the chest. Shoulder at 0.250 keeps the coat INSIDE the 0.268 shoulder
+# joint, which is what lets the arms read as arms instead of as bulges in cloth.
 COAT_TABLE = [
-    (0.008, 0.396, 0.026),
-    (0.160, 0.416, 0.030),    # the pool. Wider than the hem itself, so the cloth
-                              # reads as resting ON the ground, not cut off by it.
-    (0.340, 0.374, 0.026),
-    (0.600, 0.340, 0.022),
-    (0.845, 0.312, 0.018),
-    (0.965, 0.300, 0.015),    # waist, under the strap
-    (1.100, 0.318, 0.013),
-    (1.225, 0.336, 0.011),    # chest
-    (1.305, 0.330, 0.009),    # shoulder
-    (1.395, 0.212, 0.007),    # neck
+    (0.400, 0.268, 0.020),    # hem
+    (0.600, 0.256, 0.018),
+    (0.845, 0.240, 0.016),    # hip
+    (0.965, 0.229, 0.013),    # waist, under the strap
+    (1.100, 0.244, 0.011),
+    (1.225, 0.256, 0.010),    # chest
+    (1.305, 0.250, 0.008),    # shoulder
+    (1.395, 0.170, 0.006),    # neck
 ]
 
 # Fold parameters. Cusped, not sinusoidal: heavy waxed canvas hangs in broad flat
@@ -191,14 +198,18 @@ Y_STILL   = 0.285
 Z_BOILER  = 1.150         # boiler centre
 Z_FIREBOX = 0.880         # firebox centre, slung under it
 
+# Shorter, thicker and leaning harder than the first blockout, which rendered as
+# a thin vertical stick and read as a periscope. It is a stove pipe: it should
+# look like it could carry smoke, and it should lean off the vertical, because a
+# vertical line above the head is the mage's staff silhouette.
 CHIMNEY_SPINE = [
-    (0.020, 0.278, 1.392),
-    (0.062, 0.252, 1.600),
-    (0.104, 0.214, 1.800),
-    (0.136, 0.186, 1.950),
-    (0.150, 0.172, 2.040),
+    (0.030, 0.272, 1.372),
+    (0.086, 0.246, 1.560),
+    (0.146, 0.212, 1.730),
+    (0.196, 0.186, 1.858),
+    (0.222, 0.172, 1.930),
 ]
-CHIMNEY_RADII = [0.052, 0.046, 0.042, 0.039, 0.037]
+CHIMNEY_RADII = [0.064, 0.058, 0.052, 0.048, 0.045]
 
 # The swan neck. Leaves the boiler top, arcs over his RIGHT shoulder (-X) and
 # comes down to a spout on the right of the chest. Opposite side from the chimney
@@ -907,7 +918,7 @@ def coat_point(theta, z, offset=0.0):
 
 
 def coat_z_samples(step=0.030):
-    zs, z = [], Z_GROUND
+    zs, z = [], Z_HEM
     top = COAT_TABLE[-1][0]
     while z < top - 1e-6:
         zs.append(z)
@@ -939,14 +950,17 @@ HOOD_SEGS  = 30
 
 # (z, radius, extra y pushed BACKWARD). The cowl bulges back at the crown, which
 # is what makes it read as cloth hung off the head rather than as a helmet.
+# Narrowed from the first blockout, where a 0.236 bottom radius on a 0.098 head
+# read as a flat shield strapped to his shoulders rather than as cloth over a
+# skull. The cowl should clear the mask by about 40 mm and no more.
 HOOD_TABLE = [
-    (1.330, 0.236, 0.048),
-    (1.395, 0.198, 0.038),
-    (1.462, 0.178, 0.026),
-    (1.530, 0.168, 0.014),
-    (1.592, 0.150, 0.004),
-    (1.640, 0.104, -0.012),
-    (1.656, 0.046, -0.020),
+    (1.360, 0.190, 0.042),
+    (1.418, 0.166, 0.034),
+    (1.470, 0.152, 0.024),
+    (1.530, 0.146, 0.013),
+    (1.592, 0.134, 0.003),
+    (1.640, 0.096, -0.012),
+    (1.656, 0.042, -0.018),
 ]
 HOOD_OPEN = 0.680   # radians of half-gap at the front. The goggles sit ~30 deg
                     # off the centreline and the hood edge lands at ~39 deg, so
@@ -1006,11 +1020,11 @@ def build_apron():
     """The one mid-value mass on the figure. Without it he is a black blob with
     metal on it - the canvas is what gives the eye a middle step between the
     tarred leather and the copper."""
-    zs = [z for z in coat_z_samples(0.034) if 0.215 <= z <= 1.205]
+    zs = [z for z in coat_z_samples(0.034) if Z_HEM + 0.03 <= z <= 1.205]
     rings = []
     for z in zs:
         # Widens as it falls: a constant-width apron reads as a tabard.
-        half = 0.950 * lerp(0.720, 1.000, smoothstep((1.205 - z) / 0.990))
+        half = 0.980 * lerp(0.700, 1.000, smoothstep((1.205 - z) / 0.775))
         ring = []
         for k in range(APRON_SEGS):
             t = 2.0 * k / (APRON_SEGS - 1) - 1.0
@@ -1173,10 +1187,10 @@ def build_still():
                 M_COPPER, segs=16)
     # Hollow flared cowl: down the outside, back up the inside, closed by a pole
     # at each end. A cone capped with a disc reads as a nail head.
-    cowl = [(0.000, 2.012), (0.040, 2.016), (0.046, 2.046), (0.074, 2.084),
-            (0.066, 2.086), (0.040, 2.056), (0.034, 2.030), (0.000, 2.026)]
+    cowl = [(0.000, 1.902), (0.048, 1.906), (0.056, 1.936), (0.090, 1.976),
+            (0.081, 1.978), (0.049, 1.946), (0.042, 1.920), (0.000, 1.916)]
     revolve("ChimneyCowl", cowl, segments=22, mat=M_COPPER_D,
-            origin=(0.150, 0.172, 0.0))
+            origin=(0.222, 0.172, 0.0))
 
     # -- Swan neck over his RIGHT shoulder, ending in a spout at the chest.
     swept_taper("SwanNeck", [Vector(p) for p in SWAN_SPINE], SWAN_RADII,
@@ -1224,7 +1238,7 @@ def build_censer():
     planted in the ground. It hangs OUT and FORWARD of the hand, not below it: a
     plumb-vertical chain reads as a dropped object, where the whole idea is a
     pendulum caught mid-arc."""
-    top = CENSER_POS + Vector((0.0, 0.0, 0.100))
+    top = CENSER_POS + Vector((0.0, 0.0, 0.122))
     spine = [HAND_R_POS + Vector((-0.006, -0.020, -0.038)),
              HAND_R_POS + Vector((-0.030, -0.086, -0.150)),
              CENSER_POS + Vector((-0.006, 0.010, 0.210)),
@@ -1234,17 +1248,19 @@ def build_censer():
         p = spine[0].lerp(top, t)
         ring_on("ChainLink%d" % i, p, (top - spine[0]), 0.017, 0.005, M_IRON,
                 mseg=14)
-    body = [(0.000, -0.076), (0.038, -0.072), (0.062, -0.048), (0.074, -0.012),
-            (0.076, 0.006), (0.070, 0.030), (0.054, 0.052), (0.032, 0.068),
-            (0.018, 0.082), (0.024, 0.092), (0.010, 0.102), (0.000, 0.104)]
+    # Scaled up ~22% from the first blockout. It is one of the three features that
+    # has to name him at 184x184 and it was rendering as a bead on a string.
+    body = [(0.000, -0.093), (0.046, -0.088), (0.076, -0.059), (0.090, -0.015),
+            (0.093, 0.007), (0.085, 0.037), (0.066, 0.063), (0.039, 0.083),
+            (0.022, 0.100), (0.029, 0.112), (0.012, 0.124), (0.000, 0.127)]
     ob = revolve("Censer", body, segments=24, mat=M_BRASS, origin=CENSER_POS)
     bevel(ob, 0.004)
     # The seam the smoke leaves by. Quieter than the firebox on purpose - three
     # equally bright greens and the eye has nowhere to land.
-    ring_on("CenserSeam", CENSER_POS + Vector((0.0, 0.0, 0.006)), (0, 0, 1),
-            0.078, 0.008, M_GLOW, mseg=24)
-    ring_on("CenserBail", CENSER_POS + Vector((0.0, 0.0, 0.100)), (0, 1, 0),
-            0.016, 0.005, M_IRON, mseg=14)
+    ring_on("CenserSeam", CENSER_POS + Vector((0.0, 0.0, 0.007)), (0, 0, 1),
+            0.095, 0.009, M_GLOW, mseg=24)
+    ring_on("CenserBail", CENSER_POS + Vector((0.0, 0.0, 0.122)), (0, 1, 0),
+            0.018, 0.006, M_IRON, mseg=14)
 
 
 def build_flask():
@@ -1316,7 +1332,7 @@ def build_doctor():
 
     add_empty("Attach_Censer", CENSER_POS)
     add_empty("Attach_BeakTip", HEAD_C + Vector(BEAK_SPINE[-1]))
-    add_empty("Attach_Chimney", (0.150, 0.172, 2.086))
+    add_empty("Attach_Chimney", (0.222, 0.172, 1.978))
     add_empty("Attach_Flask", HAND_L_POS)
     add_empty("Attach_Ground", (0.0, 0.0, 0.0), size=0.25)
 
@@ -1390,19 +1406,27 @@ def build_rig():
     # answer where a highlight lands, while the coat is a dielectric at base value
     # 0.030 that answers Lambertian everywhere. Lit at the mage's cloth levels the
     # metal goes dead; lit at the knight's the leather turns to grey felt.
+    #
+    # Measured down from the first blockout's 145/30/110/82, which rendered the
+    # coat as milk chocolate. The base colour is 0.030 and it was arriving on
+    # screen at roughly a mid value - at that point "tarred black leather" is
+    # gone and the figure is one warm brown mass with no recesses left for the
+    # green to glow against. Turning the key down is the fix; lightening the
+    # leather to compensate would have been the exact mistake the knight's
+    # "chrome blob" note records.
     aim = (0.0, 0.0, 1.00)
-    area("Key",   (-1.95, -2.35, 2.60), aim, 145, (1.00, 0.86, 0.66), 2.0)
-    area("Fill",  ( 2.20, -1.85, 1.15), aim,  30, (0.62, 0.74, 1.00), 2.4)
-    area("RimL",  ( 1.70,  2.00, 2.15), aim, 110, (0.50, 0.66, 1.00), 1.3)
-    area("RimR",  (-1.85,  1.80, 1.85), aim,  82, (0.52, 0.70, 1.00), 1.3)
+    area("Key",   (-1.95, -2.35, 2.60), aim,  88, (1.00, 0.86, 0.66), 2.0)
+    area("Fill",  ( 2.20, -1.85, 1.15), aim,  20, (0.62, 0.74, 1.00), 2.4)
+    area("RimL",  ( 1.70,  2.00, 2.15), aim,  74, (0.50, 0.66, 1.00), 1.3)
+    area("RimR",  (-1.85,  1.80, 1.85), aim,  54, (0.52, 0.70, 1.00), 1.3)
     # Green bounce off the ground, standing in for the firebox's own spill. Placed
     # LOW and BEHIND, where the grate actually is. Without it the green appears
     # only on the emitters themselves and reads as decals rather than as light.
-    area("FireSpill", (0.30, 1.55, 0.55), (0.0, 0.35, 1.00), 26,
+    area("FireSpill", (0.30, 1.55, 0.55), (0.0, 0.35, 1.00), 15,
          (0.36, 1.00, 0.30), 1.6)
     # Warm kicker low at the front to keep the copper alive below the belt, where
     # the key does not reach past the pack.
-    area("CopperKick", (-1.15, -1.70, 0.42), (0.0, -0.20, 0.70), 20,
+    area("CopperKick", (-1.15, -1.70, 0.42), (0.0, -0.20, 0.70), 13,
          (1.00, 0.62, 0.34), 1.4)
 
     floor_mat = make_material("RigFloor", (0.019, 0.021, 0.024, 1.0), 0.0, 0.44)
