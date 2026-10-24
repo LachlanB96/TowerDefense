@@ -124,6 +124,17 @@ __pycache__.meta
 /[Aa]ssets/Blender/_tools/gallery/*.js.map
 /[Aa]ssets/Blender/_tools/gallery/*.js.map.meta
 
+# The asset scripts' own review renders (RENDER_DIR, Assets/Blender/_<asset>/): made again
+# by any build, so they stay out of git. The audit scripts that sit beside them are tracked.
+# (2026-10-24: 73 MB of them had piled up uncommitted; they moved to _previews~/legacy/.)
+/[Aa]ssets/Blender/_*[0-9][0-9][0-9]/**/*.png
+/[Aa]ssets/Blender/_*[0-9][0-9][0-9]/**/*.png.meta
+/[Aa]ssets/Blender/_*[0-9][0-9][0-9]/_*/
+/[Aa]ssets/Blender/_*[0-9][0-9][0-9]/_*.meta
+
+# The superpowers plugin's brainstorm and plan working files (per machine).
+/.superpowers/
+
 # Written by Unity's IDE integration each time a checkout opens: the solution is named after
 # the folder (TD.slnx, check.slnx in a worktree) and VS Code's settings point at it.
 /*.slnx

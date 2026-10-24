@@ -1,9 +1,9 @@
 # Reviewers (modev4) — why the panel works the way it does
 
-Reviewers never read this file: their entire brief is `judge.py` output plus one
-return-format line, generated and recorded by the shepherd (`shepherd.md`, "The panel"
-is the operating copy). This file records why each constraint exists, so nobody
-"improves" one away.
+Reviewers never read this file: their entire brief is `judge.py` output plus two
+closing lines (the return format, then `Subagents: start none.`), generated and
+recorded by the asset's session (`SKILL.md`, "The panel" is the operating copy). This
+file records why each constraint exists, so nobody "improves" one away.
 
 ## Fresh, blind, taste-only — each for a measured reason
 
@@ -25,6 +25,12 @@ is the operating copy). This file records why each constraint exists, so nobody
 - **SUGGESTION is asked last**, after the verdict, so it cannot become the thing the
   judge optimises. It must be an observable outcome, never a parameter — a judge
   cannot inspect the model, and panels have been unanimously wrong about mechanism.
+- **No helpers.** A reviewer starts no subagent of its own: the session holds the
+  cap (8 at once, all kinds together) by counting what it started, and a judge that
+  delegated would also stop being one judgement. The closing line says so; it is
+  logistics, not a criterion, so it does not break "no rubrics".
+- **Spawned as slots allow.** A verdict's reviewers may start one at a time when the
+  session is at its cap; they are independent and blind, so nothing is lost by it.
 - **Same seed, or no comparison.** `judge.py` refuses a pair whose sheets come from
   different orbit draws — that would compare two cameras wearing a model's name. This
   is why the incumbent is always cell 1 of the challenger's own wave.

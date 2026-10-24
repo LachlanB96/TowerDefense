@@ -1,5 +1,11 @@
 # The Silent Knight
 
+> **Superseded 2026-07-30.** This file is the original visual brief. The model
+> built from it (`char_knight.blend` / `char_knight2.blend`) has been replaced by
+> `blender_knight000.py` → `knight000.blend` → `Assets/Models/knight000.fbx`.
+> The full visual spec, the legibility rules behind it and the known gotchas now
+> live in `Obsidian/TD/Heroes/Silent Knight.md` under "Model".
+
 The Silent Knight is a feared hero among monsters. A knight in shiny medieval armour, trimmed with the finest gold stolen from the monsters he has slain. The knight bears the emblem of the Templar, a shiny T of pure gold. The Silent Knight has bedazzled his own rubies into the T, signifying the Knight's lust for blood. In his right hand he holds his Golden Sword, a gift from the elves for an old quest. The knight's left hand holds The Templar's Book — a magic book written by Old Knights who seemed to never die. Although none of the knight's body is visible, covered in shiny armour, a red glow emits from within the helmet; one can only guess this power emanates from their eyes.
 
 ## Key visual elements

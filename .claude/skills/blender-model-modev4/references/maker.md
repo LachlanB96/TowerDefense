@@ -1,8 +1,8 @@
 # Maker discipline (modev4) — reference copy
 
-Makers never read this file (or any skill file): the shepherd inlines the template
+Makers never read this file (or any skill file): the session inlines the template
 below, filled, into each maker's dispatch. This is the annotated reference; the
-operating copy lives in `shepherd.md` ("Dispatching a maker") and **the two must stay
+operating copy lives in `SKILL.md` ("Dispatching a maker") and **the two must stay
 identical** — when you change one, change the other in the same commit.
 
 ## Why rows, not edits
@@ -18,19 +18,37 @@ worktree-per-design, no rebase archaeology.
 
 The maker owns the design's meaning: it knows which gene values were the clause and
 which were scaffolding, and whether a `patch` builder replaces or augments. The
-shepherd verifies the bake mechanically (re-render + measure) precisely so the maker's
+session verifies the bake mechanically (re-render + measure) precisely so the maker's
 judgment here does not need to be trusted blindly.
+
+## Why the wave is a detached warden job
+
+Every Blender run on this PC queues with the Process Warden, and `preview.py` starts
+its Blenders out of the hook's sight, so the maker submits the wave itself through
+`warden-run`: `--cpus` is the cell count (one Blender per granted CPU), `--mem` 2 GB a
+cell, at least 4, and `--gpu`. `--detach` makes the wave outlive the maker: a maker
+that dies after rendering has still done the work, and the manifest's `tag` and
+`design` attribute it. `warden-run wait` in the foreground keeps the maker's turn open
+until the render is done, so it never ends a turn with a render still running in its
+own shell; a wait that times out (exit 124) is a wave still queued or rendering, and
+the maker waits again.
+
+## Why makers start none
+
+The cap gives the session 8 subagents and each of those 1 (Lachlan, 2026-10-21). A
+maker needs no helper, and nothing below the session spawning keeps the count exact:
+the session can only hold a ceiling it can see.
 
 ## Mechanical discoveries
 
 Any rig fact a maker finds the hard way (a clamp that does not bound the specular, a
 camera that cannot see a region, a mesh below a feature's sampling limit) returns in
-its report; the shepherd curates `asset-facts.md`. Facts pass the substitution test —
+its report; the session curates `asset-facts.md`. Facts pass the substitution test —
 if a different camera, size or engine would change whether it is true, it is a
 rendering preference, not a fact — and the file is capped and regenerated per session,
 never grow-only.
 
-## The template (verbatim from shepherd.md)
+## The template (verbatim from SKILL.md)
 
 > You are a MAKER for Gloomfell asset `<asset>`, owning design `<design-id>`.
 >
@@ -47,7 +65,7 @@ never grow-only.
 > branch in its own worktree; nothing else writes there. MAP OF IT: `<symbol index>`.
 > You edit it ONLY when I say "bake". For attempts you write rows, not edits.
 >
-> EACH ATTEMPT:
+> EACH ATTEMPT (I give its number every time; this is attempt `<attempt>`):
 > 1. Design a row: `{"label": "...", "clauses": [{"name": "...", "vars": {...}} or
 >    {"name": "...", "patch": "<python source>"}]}` — at most 3 clauses, each clause a
 >    separable idea (the expansion renders each alone and combined).
@@ -55,13 +73,19 @@ never grow-only.
 >    A refusal names the fix — use `patch` to recompute derived genes, NEVER to route
 >    around a refusal.
 > 3. `python <TOOLS>/axis.py <SCRIPT> row.json --seed <wave-seed> --dist <dist>
->    --aim-z <aimz> --out wave.json`
-> 4. `python <TOOLS>/preview.py <SCRIPT> --variants wave.json --samples 0.3
->    --tag <maker-id> --design <design-id> --root <ROOT>`
->    Report the run number the moment it prints.
-> 5. Nominate your best cell. Return: the row spec, the run number, the nominated
->    cell, what you expect it shows, and any mechanical discovery about this rig not
->    already in ASSET FACTS.
+>    --aim-z <aimz> --out wave.json` — it prints how many cells it wrote: that is C.
+> 4. Render through the Process Warden, detached, so the wave survives you:
+>    `warden-run --name <asset>-<design-id>-a<attempt> --cpus C --mem M --gpu --max 30m
+>    --detach -- python <TOOLS>/preview.py <SCRIPT> --variants wave.json --samples 0.3
+>    --tag <maker-id> --design <design-id> --root <ROOT>`, where M is 2 × C, at least 4.
+>    It prints the job id and its log. Then `warden-run wait <job id>`, with a 600000 ms
+>    tool timeout: exit 124 means still queued or rendering (the PC renders one wave at
+>    a time, and none while a game runs) — wait again; never start a second render
+>    meanwhile. Exit 0 is done; anything else failed, and the log's tail says why. The
+>    run number is in the log.
+> 5. Nominate your best cell. Return, job id and run number first: the row spec, the
+>    run number, the nominated cell, what you expect it shows, and any mechanical
+>    discovery about this rig not already in ASSET FACTS.
 >
 > ON A RETRY: the refine packet below is the judges' words, verbatim. Take at most
 > THREE points; a point two judges raise outranks one; you may CONTEST a point with a
@@ -80,4 +104,7 @@ never grow-only.
 > checkout, merge, rebase or push.
 >
 > NEVER: save or export; run `--audit`; touch any other file; render without
-> `--root <ROOT>`; or write a `patch` whose purpose is to bypass a genes.py refusal.
+> `--root <ROOT>`; run `preview.py`, `build_one.py` or Blender outside `warden-run`; or
+> write a `patch` whose purpose is to bypass a genes.py refusal.
+>
+> Subagents: start none.

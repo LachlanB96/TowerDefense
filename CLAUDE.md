@@ -21,6 +21,12 @@ The harness and Unity parts start Blender and Unity, so `check.ps1` queues them 
 
 In a worktree, `Library` becomes a junction to one shared cache, `%LOCALAPPDATA%\GloomFell\check-library` (copied once from the main checkout's), so a branch reimports only what it changed instead of the whole project. Results and logs go to `%LOCALAPPDATA%\GloomFell\check\`.
 
+## The dashboard
+
+**Dashboard:** `gloomfell-dashboard.ts` (styled by `gloomfell-dashboard.css`), on the Dashboards server at http://127.0.0.1:27151/d/gloomfell (`gloomfell` in `Dashboards/dashboards.json`, with a card on the home page). It shows git (branches ahead of and behind main with their worktrees, commits not on GitHub, uncommitted files), the modelling fleet (`Assets/Blender/_previews~/fleet.json` and each `<asset>/pipeline.json`, heartbeat ages, whether serve.py answers on 8777), the Blender scripts (hook marker, FBX in `Assets/Models`), the towers (`TowerCosts.cs`'s `_towerInfo` and `_upgrades`, with the TBDs in `Obsidian/TD/Towers/<Name>/`), Unity (whether the editor holds `Temp/UnityLockfile`) and the last check. Its test is `test/dashboard.test.ts`, against a made-up repo; the check's ts part runs it.
+
+**Actions:** every button is `bun server.ts action gloomfell <action>` from `~\AI\Dashboards`, and `bun server.ts render gloomfell` shows the page. `startSuite` starts `python Assets/Blender/_tools/serve.py` from the repo root with no window, outside any session, through Start-Unfocused (`~\AI\Terminal\code\LBTerm\lbterm\motion\start-unfocused.ps1`, `-NoConsole`), and waits for http://localhost:8777/v4.html to answer; `check` runs `pwsh -NoProfile -NonInteractive -File check.ps1` as a job; `refresh` re-reads git, the fleet and serve.py. Everything else Lachlan does here, Claude does through UnityMCP (the editor), the Blender MCP and headless Blender through `warden-run` (models), and serve.py's endpoints (the suite).
+
 ## Working with Unity
 
 All iteration happens inside the Unity Editor via the **UnityMCP** package (`com.coplaydev.unity-mcp`, listed in `Packages/manifest.json`), which is how Claude Code drives the editor. The only command-line runs are the check's.
@@ -137,7 +143,8 @@ A script is "conforming" (drivable by the harness) if its tunables are module-le
 globals, it has a single top-level build call with the `# --- variant hook ---`
 block immediately above it, its `render_view()` honours `RENDER_ONLY`, and its own
 save/export are behind `DO_SAVE` / `DO_EXPORT`. `_tools/_selftest_asset.py` is the
-shortest complete example. **Only `blender_knight000.py` conforms.**
+shortest complete example. **Five conform** (knight000, mage000, evilMage000, plague000,
+plaguedoc000; the dashboard's Blender scripts tile shows which, live).
 
 The other eight scripts save and/or export unconditionally at module scope, so a
 preview would rebuild the asset and overwrite the real `.blend` and `.fbx` with no
@@ -148,6 +155,12 @@ above its top-level build call, and put its `save_as_mainfile` / `export_scene.f
 calls behind `DO_SAVE` / `DO_EXPORT` (see `blender_knight000.py`'s `_flag()`).
 
 After changing anything in `_tools/`, run the harness tests: `pwsh -File check.ps1 -Only harness`.
+
+The modelling fleet is `/blender-model-modev4`, typed by Lachlan (never auto-invoked). Since
+2026-10-24 it runs **one asset per session**: the session is the shepherd, and its makers,
+designer batches and reviewers are its own subagents, at most 8 at once (4 while the warden
+halves the cap), each told to start none. A second asset is a second session in its own LBTerm
+tab. v1 to v3 of the skill are retired in `docs/shelved/skills/`.
 
 ## Design documentation
 
@@ -161,7 +174,7 @@ When the user asks about tower behaviour, **read the Obsidian doc before the cod
 ## Git conventions
 
 - Rule 4 of the global CLAUDE.md, like every project in the megaproject (Lachlan, 2026-10-24): work happens on a branch (`feat/...`, `fix/...`) in a worktree under `.claude/worktrees/`, never in the main checkout, which stays on `main`. Drive a worktree with `git -C` and full paths; never `cd` into it. Commit each working step on the branch, then land it with `land <branch> -m "<what it does>. Check passed"` once `check.ps1` passes there. Never `git merge` into `main` by hand.
-- The junction `.claude/worktrees/.typescript` (to `~\AI\.typescript`) gives worktrees the shared TypeScript; it's gitignored and made once per machine (`~\.claude\reference\typescript.md`).
+- The junctions `.claude/worktrees/.typescript` (to `~\AI\.typescript`) and `.claude/worktrees/Dashboards` (to `~\AI\Dashboards`, for the dashboard's `../Dashboards/contract` import) give worktrees the shared TypeScript; they're gitignored and made once per machine (`~\.claude\reference\typescript.md`). Remove a junction with `rmdir`, never `rm -r`.
 - The blender-model-modev4 fleet keeps its own `mage000/dNN` and `model/<asset>` branches and worktrees while a design is in flight; it lands them the same way.
 - Commit messages are short and lowercase (e.g. `"added models for 5 heroes. introduced obsidian as LM"`, `"updated graphics"`).
 - The repo is public (`LachlanB96/TowerDefense` on GitHub): it's pushed only when Lachlan asks, and nothing private goes in it. `.claude/settings.local.json` is per-machine and git-ignored.
