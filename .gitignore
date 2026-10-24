@@ -116,6 +116,14 @@ Obsidian/TD/.obsidian/
 __pycache__/
 __pycache__.meta
 
+# The suite's script is TypeScript (gallery/v4.ts); serve.py bundles it into
+# _previews~ as v4.js (and its v4.js.map) at every start. A .js or .js.map
+# under gallery/ is a stray hand build of that output: never commit one.
+/[Aa]ssets/Blender/_tools/gallery/*.js
+/[Aa]ssets/Blender/_tools/gallery/*.js.meta
+/[Aa]ssets/Blender/_tools/gallery/*.js.map
+/[Aa]ssets/Blender/_tools/gallery/*.js.map.meta
+
 # The asset scripts' own review renders (RENDER_DIR, Assets/Blender/_<asset>/): made again
 # by any build, so they stay out of git. The audit scripts that sit beside them are tracked.
 # (2026-10-24: 73 MB of them had piled up uncommitted; they moved to _previews~/legacy/.)

@@ -97,13 +97,27 @@ Tower/unit meshes are authored in Blender via scripts in `Assets/Blender/blender
 `Assets/Blender/_tools/` renders variants of an asset in parallel and shows them in
 **the Gloomfell suite** — one page for everything: fleet overview → per-asset war room
 (tabs Overview · Live · Compare) → design dossier. Start the server once and leave it
-running:
+running (the dashboard's Start suite does it with no window, outside any session, which
+the warden would otherwise clean up when that session ends):
 
     python Assets/Blender/_tools/serve.py        # suite: http://localhost:8777/v4.html
 
-Old bookmarks (`/` and `/live.html`) redirect into the suite. Page contract:
-`.claude/skills/blender-model-modev4/references/page.md`. `GLOOMFELL_PREVIEW_ROOT`
-points the server at a scratch root for testing (never POST against the live root).
+The suite is `_tools/gallery/v4.html` and its script `_tools/gallery/v4.ts` (TypeScript 7).
+`serve.py` copies the page into the previews root and bundles `v4.ts` there as `v4.js`, with
+a linked source map `v4.js.map` so devtools show `v4.ts`, using the Bun pinned in
+`..\.typescript` (`GLOOMFELL_BUN` overrides it). It does that at startup and again whenever a
+request for the page or its script finds `v4.ts`, `v4.html` or Bun changed, so reload after
+editing; no restart is needed. `v4.js` and `v4.js.map` are build output: never edit them,
+commit them or build them under `_tools/`. A failed build prints `!! PAGE SCRIPT NOT BUILT`
+at startup (no bundle is served) or `!! PAGE SCRIPT NOT REBUILT` later (the last good bundle
+stays), puts a red banner on the page, and leaves the data files and POST doors working.
+`serve.py` redirects the old URLs (`/`, `/index.html`, `/live.html`) into the suite, keeping
+their `?asset=` deep links, and deletes the copies of those pages earlier starts left in the
+previews root. Page contract: `.claude/skills/blender-model-modev4/references/page.md`.
+`GLOOMFELL_PREVIEW_ROOT` points the server at a scratch root for testing (never POST against
+the live root). The gallery's tests are `_tools/tests/test_gallery.py` (no Blender; one runs
+the page in headless Edge or Chrome, `GLOOMFELL_BROWSER` overrides it, and skips without one),
+in the check's harness part.
 
 Then, to compare alternatives (it starts Blender, one per variant, so it's queued with the
 Process Warden: `--cpus` one per variant, 2 GB each, never a bare run):
