@@ -176,23 +176,115 @@ def build_bundle(dest_dir, src_dir=None, keep_last_good=False):
     return error
 
 
-def install_page(dest_dir, bundle_error):
-    """Copy v4.html into the previews root, with a banner when its script didn't build.
+def install_page(dest_dir, banner=None, src_dir=None):
+    """Copy v4.html into the previews root, with `banner` across its top if given.
 
-    Without its script the page is an empty frame, and whoever is looking at it may
-    never see this server's console, so the page says what happened too.
+    The banner says what's wrong with the page's script. Without the script the
+    page is an empty frame (or an old one), and whoever is looking at it may never
+    see this server's console. Swapped in like the bundle, so no request sees half
+    a page.
     """
-    src, dst = os.path.join(GALLERY, "v4.html"), os.path.join(dest_dir, "v4.html")
-    if not bundle_error:
-        shutil.copyfile(src, dst)
-        return
+    src = os.path.join(src_dir or GALLERY, "v4.html")
+    dst = os.path.join(dest_dir, "v4.html")
     with open(src, encoding="utf-8", newline="") as fh:
         page = fh.read()
-    banner = ('<div class="banner on" role="alert">page script not built: %s. '
-              'Fix it and restart serve.py; its console has the details.</div>\n'
-              % html.escape(bundle_error.splitlines()[0]))
-    with open(dst, "w", encoding="utf-8", newline="") as fh:
-        fh.write(page.replace('<div id="net"', banner + '<div id="net"', 1))
+    if banner:
+        page = page.replace('<div id="net"', '<div class="banner on" role="alert">%s</div>\n'
+                            '<div id="net"' % html.escape(banner, quote=False), 1)
+    part = dst + ".part"
+    with open(part, "w", encoding="utf-8", newline="") as fh:
+        fh.write(page)
+    _replace(part, dst)
+
+
+def _sig(path):
+    """What a cheap look says about a file: (mtime_ns, size), or None when it's gone."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return st.st_mtime_ns, st.st_size
+
+
+def _say(*lines):
+    # flush: stdout is normally redirected to a file; without it these lines
+    # sit in the block buffer for the life of the process
+    for line in lines:
+        print(line, flush=True)
+
+
+class Suite:
+    """The page and its script in a previews root, kept in step with their sources.
+
+    start() builds both once. refresh() runs before every request for v4.html,
+    v4.js or v4.js.map and redoes whatever changed since this server last built
+    (or tried to build) it: v4.ts, or the bun it builds with, means a rebuild;
+    v4.html means a fresh copy. When nothing changed that's a few stat calls.
+    "Changed" rather than "newer": a checkout or copy can give a file an older
+    time. One lock, and a second look inside it, mean a burst of requests after
+    an edit costs one rebuild, not one each; a source that failed to build isn't
+    tried again until it changes again.
+    """
+    PATHS = {"/v4.html", "/" + BUNDLE, "/" + SOURCE_MAP}
+
+    def __init__(self, root, src_dir=None):
+        self.root = root
+        self.src = src_dir or GALLERY
+        self.lock = threading.Lock()
+        self.script_key = None    # v4.ts and bun, as the bundle was last built (or tried) from
+        self.page_key = None      # v4.html, as last copied
+        self.built = False        # the root holds a bundle this server built
+        self.banner = None        # what the page says about its script, when something's wrong
+
+    def _keys(self):
+        return ((_sig(os.path.join(self.src, "v4.ts")), _sig(find_bun())),
+                _sig(os.path.join(self.src, "v4.html")))
+
+    def start(self):
+        """Build the bundle and copy the page. Returns None, or why the build failed."""
+        with self.lock:
+            script_key, page_key = self._keys()
+            error = self._build(script_key, keep_last_good=False)
+            self._copy(page_key)
+            return error
+
+    def refresh(self):
+        if self._keys() == (self.script_key, self.page_key):
+            return
+        with self.lock:
+            script_key, page_key = self._keys()   # another request may have done it meanwhile
+            banner = self.banner
+            if script_key != self.script_key:
+                if self._build(script_key, keep_last_good=self.built) is None:
+                    _say("script:  %s rebuilt: gallery/v4.ts changed" % BUNDLE)
+            if page_key != self.page_key:
+                _say("page:    v4.html copied again: it changed")
+            if page_key != self.page_key or self.banner != banner:
+                self._copy(page_key)
+
+    def _build(self, script_key, keep_last_good):
+        error = build_bundle(self.root, self.src, keep_last_good)
+        self.script_key = script_key
+        if error is None:
+            self.built, self.banner = True, None
+            return None
+        first = error.splitlines()[0]
+        if keep_last_good:
+            self.banner = ("page script not rebuilt: %s. This is the last good build; fix it "
+                           "and reload. serve.py's console has the details." % first)
+            headline = "PAGE SCRIPT NOT REBUILT: still serving the last good build"
+        else:
+            self.built = False
+            self.banner = ("page script not built: %s. Fix it and reload; serve.py's console "
+                           "has the details." % first)
+            headline = "PAGE SCRIPT NOT BUILT: the suite will load as an empty frame"
+        _say("!! " + headline, *["!!   " + line for line in error.splitlines()])
+        _say("!! Fix that and reload the page: serve.py rebuilds when v4.ts or bun changes.")
+        return error
+
+    def _copy(self, page_key):
+        install_page(self.root, self.banner, self.src)
+        self.page_key = page_key
 
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
@@ -213,11 +305,23 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         if not self._redirect_legacy():
+            self._refresh_suite()
             super().do_GET()
 
     def do_HEAD(self):
         if not self._redirect_legacy():
+            self._refresh_suite()
             super().do_HEAD()
+
+    def _refresh_suite(self):
+        """Bring the page and its script up to date before serving either of them."""
+        suite = getattr(self.server, "suite", None)
+        if suite is None or urllib.parse.urlsplit(self.path).path not in Suite.PATHS:
+            return
+        try:
+            suite.refresh()
+        except Exception as exc:     # a rebuild gone wrong must not take the request with it
+            _say("!! bringing the page up to date failed: %r" % (exc,))
 
     def _redirect_legacy(self):
         """Send an old page's URL into the suite, as its stub file used to.
@@ -332,27 +436,21 @@ def main():
         sys.stdout.reconfigure(errors="backslashreplace")
     os.makedirs(PREVIEW_ROOT, exist_ok=True)
     # The page and its bundled script go into the previews root so the page's
-    # relative image paths resolve. Rebuilt on every start, never served from
-    # under _tools/, so what the browser runs always matches v4.ts.
-    bundle_error = build_bundle(PREVIEW_ROOT)
-    install_page(PREVIEW_ROOT, bundle_error)
-    # flush: stdout is normally redirected to a file; without it these lines
-    # sit in the block buffer for the life of the process
-    if bundle_error:
-        # Loud, and on stdout beside the banner, which is where people look.
-        # The server still starts: the data files and the POST doors work
-        # without the page, and the pipeline reads and writes through them.
-        print("!! PAGE SCRIPT NOT BUILT: the suite will load as an empty frame", flush=True)
-        for line in bundle_error.splitlines():
-            print("!!   " + line, flush=True)
-        print("!! Fix that and restart serve.py.", flush=True)
+    # relative image paths resolve: built now, and again whenever a request for
+    # either finds its source changed. Never served from under _tools/, so what
+    # the browser runs always matches v4.ts. A build that fails says so loudly
+    # on stdout (beside the banner below, which is where people look) and on
+    # the page, and the server still starts: the data files and the POST doors
+    # work without the page, and the pipeline reads and writes through them.
+    suite = Suite(PREVIEW_ROOT)
+    bundle_error = suite.start()
     handler = functools.partial(QuietHandler, directory=PREVIEW_ROOT)
     with Server(("127.0.0.1", PORT), handler) as httpd:
-        print("suite:   http://localhost:%d/v4.html   (/, /index.html, /live.html redirect here)" % PORT,
-              flush=True)
-        print("root:    %s" % PREVIEW_ROOT, flush=True)
-        print("script:  %s" % ("NOT BUILT, see above" if bundle_error
-                               else "%s, bundled from gallery/v4.ts" % BUNDLE), flush=True)
+        httpd.suite = suite
+        _say("suite:   http://localhost:%d/v4.html   (/, /index.html, /live.html redirect here)" % PORT,
+             "root:    %s" % PREVIEW_ROOT,
+             "script:  %s" % ("NOT BUILT, see above" if bundle_error
+                              else "%s, bundled from gallery/v4.ts" % BUNDLE))
         httpd.serve_forever()
 
 

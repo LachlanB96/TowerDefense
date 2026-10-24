@@ -11,6 +11,7 @@ they never land on 8777 (the live gallery) or 8778/8779 (selftest.py's).
 Nothing here runs Blender.
 """
 
+import functools
 import http.client
 import importlib.util
 import json
@@ -19,6 +20,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -320,3 +322,182 @@ def test_compare_tab_shows_chip_names_with_details(tmp_path):
     assert '<span class="chip amber">inert</span>' in dom
     assert '<span class="chip amber" title="leans 9 degrees">INV-2 lean</span>' in dom
     assert "[object Object]" not in dom
+
+
+# ------------------------------------------------------- rebuilds while serving
+# These drive serve.py's Suite in-process against a gallery of their own: a
+# copy of the real v4.html and a tiny v4.ts they can edit and break.
+
+BROKEN_TS = "const broken: number = ;\n"
+
+
+def _ts(marker):
+    return "const marker: string = '%s';\nconsole.log(marker);\nexport {};\n" % marker
+
+
+def _gallery(tmp_path, ts):
+    src, root = tmp_path / "src", tmp_path / "root"
+    src.mkdir()
+    root.mkdir()
+    shutil.copyfile(os.path.join(GALLERY, "v4.html"), src / "v4.html")
+    (src / "v4.ts").write_text(ts, encoding="utf-8", newline="")
+    return src, root
+
+
+def _edit(path, text):
+    """Rewrite a source with a clearly later mtime, whatever the clock's resolution."""
+    later = os.stat(path).st_mtime_ns + 2_000_000_000
+    path.write_text(text, encoding="utf-8", newline="")   # exactly these bytes, no CRLF
+    os.utime(path, ns=(later, later))
+
+
+def _count_builds(serve, monkeypatch, delay=0.0):
+    """Every build_bundle call the Suite makes, optionally slowed to widen a race."""
+    calls = []
+    real = serve.build_bundle
+
+    def counted(*args, **kwargs):
+        calls.append(args)
+        time.sleep(delay)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(serve, "build_bundle", counted)
+    return calls
+
+
+def _text(path):
+    with open(path, encoding="utf-8", newline="") as fh:
+        return fh.read()
+
+
+def test_v4_js_is_rebuilt_when_v4_ts_changes(tmp_path, monkeypatch, capsys):
+    serve = _load_serve()
+    src, root = _gallery(tmp_path, _ts("marker-alpha"))
+    builds = _count_builds(serve, monkeypatch)
+    suite = serve.Suite(str(root), str(src))
+    assert suite.start() is None
+    assert "marker-alpha" in _text(root / "v4.js")
+    suite.refresh()
+    suite.refresh()
+    assert len(builds) == 1                   # nothing changed, nothing rebuilt
+    _edit(src / "v4.ts", _ts("marker-beta"))
+    suite.refresh()
+    assert len(builds) == 2
+    js = _text(root / "v4.js")
+    assert "marker-beta" in js and "marker-alpha" not in js
+    assert json.loads(_text(root / "v4.js.map"))["sourcesContent"] == [_ts("marker-beta")]
+    assert "script:  v4.js rebuilt: gallery/v4.ts changed" in capsys.readouterr().out
+
+
+def test_failed_rebuild_keeps_the_last_good_bundle(tmp_path, monkeypatch, capsys):
+    serve = _load_serve()
+    src, root = _gallery(tmp_path, _ts("marker-alpha"))
+    builds = _count_builds(serve, monkeypatch)
+    suite = serve.Suite(str(root), str(src))
+    assert suite.start() is None
+    _edit(src / "v4.ts", BROKEN_TS)
+    suite.refresh()
+    assert "marker-alpha" in _text(root / "v4.js")          # still the last good build
+    assert (root / "v4.js.map").exists()
+    page = _text(root / "v4.html")
+    assert 'role="alert">page script not rebuilt: bun build failed' in page
+    assert "This is the last good build" in page
+    out = capsys.readouterr().out
+    assert "!! PAGE SCRIPT NOT REBUILT: still serving the last good build" in out
+    assert "Unexpected" in out                # bun's own message, in the log
+    # the broken source isn't tried again on every request, only once it changes
+    tried = len(builds)
+    suite.refresh()
+    suite.refresh()
+    assert len(builds) == tried
+    _edit(src / "v4.ts", _ts("marker-gamma"))
+    suite.refresh()
+    assert "marker-gamma" in _text(root / "v4.js")
+    assert "page script not" not in _text(root / "v4.html")   # the banner goes with the fix
+
+
+def test_a_failed_start_recovers_when_v4_ts_is_fixed(tmp_path, monkeypatch):
+    serve = _load_serve()
+    src, root = _gallery(tmp_path, BROKEN_TS)
+    suite = serve.Suite(str(root), str(src))
+    assert suite.start().startswith("bun build failed")
+    assert not (root / "v4.js").exists()
+    assert 'role="alert">page script not built:' in _text(root / "v4.html")
+    _edit(src / "v4.ts", _ts("marker-alpha"))
+    suite.refresh()
+    assert "marker-alpha" in _text(root / "v4.js")
+    assert "page script not" not in _text(root / "v4.html")
+
+
+def test_a_burst_of_requests_after_an_edit_rebuilds_once(tmp_path, monkeypatch):
+    serve = _load_serve()
+    src, root = _gallery(tmp_path, _ts("marker-alpha"))
+    builds = _count_builds(serve, monkeypatch, delay=0.3)   # a slow build: a wide race
+    suite = serve.Suite(str(root), str(src))
+    assert suite.start() is None
+    _edit(src / "v4.ts", _ts("marker-beta"))
+    gate = threading.Barrier(8)
+
+    def request():
+        gate.wait()
+        suite.refresh()
+
+    threads = [threading.Thread(target=request) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+    assert len(builds) == 2                   # the start, and one rebuild for all eight
+    assert "marker-beta" in _text(root / "v4.js")
+
+
+def test_v4_html_is_copied_again_when_it_changes(tmp_path, monkeypatch, capsys):
+    serve = _load_serve()
+    src, root = _gallery(tmp_path, _ts("marker-alpha"))
+    builds = _count_builds(serve, monkeypatch)
+    suite = serve.Suite(str(root), str(src))
+    assert suite.start() is None
+    _edit(src / "v4.html", _text(src / "v4.html") + "<!-- edited -->\n")
+    suite.refresh()
+    assert _text(root / "v4.html").endswith("<!-- edited -->\n")
+    assert len(builds) == 1                   # the page alone: no rebuild
+    assert "page:    v4.html copied again: it changed" in capsys.readouterr().out
+
+
+def _get(port, path):
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        assert resp.status == 200, (path, resp.status)
+        return resp.read()
+    finally:
+        conn.close()
+
+
+def test_requests_for_the_page_bring_it_up_to_date(tmp_path):
+    """Over HTTP: a request for v4.js or v4.html picks up an edit; others don't look."""
+    serve = _load_serve()
+    src, root = _gallery(tmp_path, _ts("marker-alpha"))
+    suite = serve.Suite(str(root), str(src))
+    assert suite.start() is None
+    port = _free_port()
+    httpd = serve.Server(("127.0.0.1", port),
+                         functools.partial(serve.QuietHandler, directory=str(root)))
+    httpd.suite = suite
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        assert b"marker-alpha" in _get(port, "/v4.js")
+        _edit(src / "v4.ts", _ts("marker-beta"))
+        assert b"marker-beta" in _get(port, "/v4.js")
+        _edit(src / "v4.html", _text(src / "v4.html") + "<!-- edited -->\n")
+        assert _get(port, "/v4.html").endswith(b"<!-- edited -->\n")
+        # the 1 Hz JSON polls never touch the sources
+        (root / "assets.json").write_text("[]", encoding="utf-8")
+        _edit(src / "v4.ts", _ts("marker-gamma"))
+        _get(port, "/assets.json")
+        assert "marker-beta" in _text(root / "v4.js")
+        assert b"marker-gamma" in _get(port, "/v4.js.map")
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
