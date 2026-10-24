@@ -126,3 +126,8 @@ __pycache__.meta
 
 # The superpowers plugin's brainstorm and plan working files (per machine).
 /.superpowers/
+
+# Written by Unity's IDE integration each time a checkout opens: the solution is named after
+# the folder (TD.slnx, check.slnx in a worktree) and VS Code's settings point at it.
+/*.slnx
+/.vscode/settings.json

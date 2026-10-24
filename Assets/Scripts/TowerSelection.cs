@@ -24,7 +24,20 @@ public class TowerSelection : MonoBehaviour
     {
         _outline = new SelectionOutline();
 
-        var upgradePrefabs = new Dictionary<string, GameObject>
+        BuildUpgradeTables(out var upgradePrefabs, out var upgradeSetup);
+        BuildUI(upgradePrefabs, upgradeSetup);
+    }
+
+    /// <summary>
+    /// The upgraded-code → prefab and upgraded-code → setup tables. Kept apart from Start() so the
+    /// EditMode tests (Assets/Tests/Editor/TowerTablesTests.cs) can check them against TowerCosts on
+    /// the scene's TowerSelection without building the selection UI. The tests call it by name
+    /// through reflection, so renaming it means renaming it there too.
+    /// </summary>
+    void BuildUpgradeTables(out Dictionary<string, GameObject> upgradePrefabs,
+                            out Dictionary<string, Action<GameObject>> upgradeSetup)
+    {
+        upgradePrefabs = new Dictionary<string, GameObject>
         {
             { "tack100", tack100Prefab },
             { "tack200", tack200Prefab },
@@ -32,7 +45,7 @@ public class TowerSelection : MonoBehaviour
             { "tack001", tack001Prefab },
         };
 
-        var upgradeSetup = new Dictionary<string, Action<GameObject>>
+        upgradeSetup = new Dictionary<string, Action<GameObject>>
         {
             { "tack100", tower =>
                 {
@@ -72,8 +85,6 @@ public class TowerSelection : MonoBehaviour
                 }
             },
         };
-
-        BuildUI(upgradePrefabs, upgradeSetup);
     }
 
     void BuildUI(Dictionary<string, GameObject> upgradePrefabs, Dictionary<string, Action<GameObject>> upgradeSetup)
