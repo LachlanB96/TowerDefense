@@ -7,18 +7,25 @@
 // so everything here reaches the game code through reflection by type and member name. A rename
 // in the game code therefore fails a test with "not found" instead of quietly skipping a check.
 //
+// The prefab fields come from game.unity as the scene file holds them (its YAML), not from opening
+// the scene. In batch mode the scene's script references sometimes fail to bind to their classes
+// (MonoScript.GetClass() comes back null, every behaviour loads as a missing script; seen on
+// 2026-10-24 after the check's shared Library cache moved between worktrees), which would fail
+// these tests for a reason that has nothing to do with the game. The file needs no binding.
+//
 // Run by check.ps1 (Unity batch mode, -runTests -testPlatform EditMode), or from the editor's
 // Test Runner window / UnityMCP's run_tests.
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Serialization;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
-using UnityEditor.SceneManagement;
+using UnityEditor;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 public class TowerTablesTests
 {
@@ -47,31 +54,6 @@ public class TowerTablesTests
 
     // A tower code is a name followed by three digits, one tier per path (CLAUDE.md, "Towers").
     static readonly Regex Code = new(@"^([a-z]+)([0-9])([0-9])([0-9])$");
-
-    Scene _scene;
-    bool _openedByTest;
-
-    [OneTimeSetUp]
-    public void OpenGameScene()
-    {
-        // Additive, so running these from an open editor doesn't throw away whatever scene is up.
-        _scene = SceneManager.GetSceneByPath(GameScene);
-        if (!_scene.isLoaded)
-        {
-            _scene = EditorSceneManager.OpenScene(GameScene, OpenSceneMode.Additive);
-            _openedByTest = true;
-        }
-        Assert.IsTrue(_scene.isLoaded, $"couldn't open {GameScene}");
-    }
-
-    [OneTimeTearDown]
-    public void CloseGameScene()
-    {
-        // Never saved: BuildTables() only fills private dictionaries, but nothing here should
-        // ever reach the scene file.
-        if (_openedByTest && _scene.isLoaded && SceneManager.sceneCount > 1)
-            EditorSceneManager.CloseScene(_scene, true);
-    }
 
     [Test]
     public void BaseTowersAreCostedAndHaveIcons()
@@ -120,7 +102,7 @@ public class TowerTablesTests
     [Test]
     public void BaseTowersHaveAPrefabAndASetupAction()
     {
-        var placer = SceneComponent("TowerPlacer");
+        var placer = FromScene("TowerPlacer");
         Invoke(placer, "BuildTables");
         var prefabs = (IDictionary)InstanceField(placer, "_prefabs");
         var setup = (IDictionary)InstanceField(placer, "_placementSetup");
@@ -136,7 +118,7 @@ public class TowerTablesTests
     [Test]
     public void UpgradesHaveAPrefabAndASetupAction()
     {
-        var selection = SceneComponent("TowerSelection");
+        var selection = FromScene("TowerSelection");
         var args = new object[2];   // the two out parameters
         Invoke(selection, "BuildUpgradeTables", args);
         var prefabs = (IDictionary)args[0];
@@ -216,13 +198,54 @@ public class TowerTablesTests
         return list;
     }
 
-    Component SceneComponent(string typeName)
+    // ── the scene's behaviours, from game.unity's YAML ──────────
+
+    /// <summary>
+    /// The scene's one <paramref name="typeName"/> as a bare instance of its class, with its
+    /// GameObject fields set from what game.unity holds. Only managed code runs on it (the
+    /// Build*Tables methods fill dictionaries and make lambdas), so it needs no native object.
+    /// </summary>
+    static object FromScene(string typeName)
     {
         var type = GameType(typeName);
-        var found = _scene.GetRootGameObjects()
-            .SelectMany(root => root.GetComponentsInChildren(type, true))
+        var fields = SceneBehaviourFields(typeName);
+        var obj = FormatterServices.GetUninitializedObject(type);
+        foreach (var f in type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            if (f.FieldType == typeof(GameObject) && fields.TryGetValue(f.Name, out var value))
+                f.SetValue(obj, LoadReference(value));
+        return obj;
+    }
+
+    /// <summary>
+    /// The top-level fields of the one MonoBehaviour in game.unity whose m_Script is the
+    /// script for <paramref name="typeName"/>, as raw YAML values ("{fileID: ..., guid: ..., type: 3}").
+    /// </summary>
+    static Dictionary<string, string> SceneBehaviourFields(string typeName)
+    {
+        string script = AssetDatabase.FindAssets($"t:MonoScript {typeName}")
+            .Select(AssetDatabase.GUIDToAssetPath)
+            .FirstOrDefault(p => Path.GetFileNameWithoutExtension(p) == typeName);
+        Assert.IsNotNull(script, $"no script asset named {typeName}.cs");
+        string guid = AssetDatabase.AssetPathToGUID(script);
+
+        // A scene file is a run of YAML documents, each "--- !u!<classID> &<fileID>"; 114 is a MonoBehaviour.
+        string text = File.ReadAllText(GameScene).Replace("\r\n", "\n");
+        var matches = text.Split(new[] { "\n--- !u!" }, StringSplitOptions.None)
+            .Where(doc => doc.StartsWith("114 ") && doc.Contains($"m_Script: {{fileID: 11500000, guid: {guid},"))
             .ToList();
-        Assert.AreEqual(1, found.Count, $"{GameScene} should hold exactly one {typeName}");
-        return found[0];
+        Assert.AreEqual(1, matches.Count, $"{GameScene} should hold exactly one {typeName}");
+
+        var fields = new Dictionary<string, string>();
+        foreach (Match m in Regex.Matches(matches[0], @"^  ([A-Za-z_]\w*): (.*)$", RegexOptions.Multiline))
+            fields[m.Groups[1].Value] = m.Groups[2].Value.Trim();
+        return fields;
+    }
+
+    /// <summary>The prefab a "{fileID: N, guid: G, type: 3}" reference points at, or null for an empty field.</summary>
+    static GameObject LoadReference(string yaml)
+    {
+        var guid = Regex.Match(yaml, @"guid:\s*([0-9a-f]{32})");
+        if (!guid.Success) return null;   // {fileID: 0}: nothing assigned
+        return AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(guid.Groups[1].Value));
     }
 }
