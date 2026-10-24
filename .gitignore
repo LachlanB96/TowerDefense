@@ -115,3 +115,14 @@ Obsidian/TD/.obsidian/
 # Python bytecode from the preview harness, and the .meta Unity generates for it.
 __pycache__/
 __pycache__.meta
+
+# The asset scripts' own review renders (RENDER_DIR, Assets/Blender/_<asset>/): made again
+# by any build, so they stay out of git. The audit scripts that sit beside them are tracked.
+# (2026-10-24: 73 MB of them had piled up uncommitted; they moved to _previews~/legacy/.)
+/[Aa]ssets/Blender/_*[0-9][0-9][0-9]/**/*.png
+/[Aa]ssets/Blender/_*[0-9][0-9][0-9]/**/*.png.meta
+/[Aa]ssets/Blender/_*[0-9][0-9][0-9]/_*/
+/[Aa]ssets/Blender/_*[0-9][0-9][0-9]/_*.meta
+
+# The superpowers plugin's brainstorm and plan working files (per machine).
+/.superpowers/
