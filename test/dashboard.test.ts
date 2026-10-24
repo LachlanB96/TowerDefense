@@ -162,7 +162,7 @@ test("the parser skips comments, takes the long UpgradeInfo form, and finds noth
 });
 
 test("fbxNames: every quoted .fbx outside comments, Windows raw paths too, else the script's own name", () => {
-  assert.deepStrictEqual(mod.fbxNames(`FBX_PATH   = r"C:\\Users\\LachlanB\\TD\\Assets\\Models\\sniper000.fbx"\n`, "blender_sniper000.py"), ["sniper000.fbx"]);
+  assert.deepStrictEqual(mod.fbxNames(`FBX_PATH   = r"C:\\Games\\Gloomfell\\Assets\\Models\\sniper000.fbx"\n`, "blender_sniper000.py"), ["sniper000.fbx"]);
   assert.deepStrictEqual(mod.fbxNames(`A = "x/tack_shoot.fbx"\nB = 'wood_disk.fbx'\n# C = "nope.fbx"\n`, "blender_tack_shoot.py"), ["tack_shoot.fbx", "wood_disk.fbx"]);
   assert.deepStrictEqual(mod.fbxNames("import bpy\n", "blender_lake.py"), ["lake.fbx"]);
 });
