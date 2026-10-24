@@ -15,7 +15,7 @@ and the panel. Two jobs:
      mask was provably zero. Facts are observations, not targets — they do not fall
      under the "never put a number in a brief" rule, which is about targets.
 
-See .claude/skills/blender-model-modev2/orchestrator.md, "The verdict".
+See docs/shelved/skills/blender-model-modev2/orchestrator.md, "The verdict" (v2 retired 2026-10-24).
 """
 
 import argparse
