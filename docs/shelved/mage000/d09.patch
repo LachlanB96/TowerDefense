@@ -1,0 +1,1458 @@
+diff --git a/Assets/Blender/blender_mage000.py b/Assets/Blender/blender_mage000.py
+index 6f7b4f9..f864b31 100644
+--- a/Assets/Blender/blender_mage000.py
++++ b/Assets/Blender/blender_mage000.py
+@@ -222,6 +222,61 @@ UNDER_INSET = 0.020       # under-robe radius offset. MUST be a touch larger tha
+                           # count as touching under rule 1. Equal values leave
+                           # them coincident, larger ones float the under-robe.
+ 
++# -- the exposed under-robe column ---------------------------------------------
++# Below the raked hem the under-robe stops being a lining held 2 mm off the silk
++# and becomes a surface in its own right, seen in full for a third of a metre.
++# The three constants here are the answer to the sharpest note any panel has
++# given this design, delivered 3/3 and about the very surface the previous panel
++# had ordered built: "a pale ribbed barrel or tree stump the robe has been hiked
++# up onto", "a squat flat-sided drum", "nearly as wide as the robe base".
++#
++# The mistake was treating "exposed" as a MATERIAL problem. It is a silhouette
++# problem first. A lining follows the garment's own profile, and the garment's
++# profile at the hem is a FLARE - cloth that has hit the floor and spread - so
++# inheriting it gave the column the widest radius on the model at the one height
++# where it is fully visible. That inverts the taper: the silhouette goes narrow
++# at the waist, wide at the hem, narrower at the cut, then wide again at the
++# floor. Nothing about the value would have fixed that.
++UNDER_NARROW   = 0.190    # inward pull at the floor, blended out by
++                          # UNDER_NARROW_Z. It REPLACES the front tuck rather
++                          # than stacking on it (see hem_rake) - below the raked
++                          # hem there is no outer shell left to stay parallel to,
++                          # so the "hold them UNDER_INSET apart" rule has nothing
++                          # to hold and the column is free to be its own shape.
++                          #
++                          # Sized against the review's "roughly half the robe
++                          # base width, and narrower than the outer hem at every
++                          # height": it takes the column from r 0.41 to r ~0.21
++                          # against a robe base of r 0.43, i.e. a hair under half
++                          # the width, and turns the flare into a taper so the
++                          # silhouette reads narrow-wide-narrow from the floor up
++                          # instead of alternating.
++UNDER_NARROW_Z = 0.620    # height by which the narrowing has died out. Well
++                          # above the raked hem so the taper is a long clean line
++                          # rather than a waist, and smoothstepped at both ends
++                          # so it cannot crease where it meets the lining proper.
++UNDER_SMOOTH   = 0.18     # fold amplitude retained on the exposed column.
++                          #
++                          # "Its vertical corrugation runs at the same frequency
++                          # as the robe's own fluting, so the two surfaces
++                          # separate on value alone - and at 184 that cue is
++                          # gone entirely." Exactly right, and it was designed in:
++                          # the under-robe deliberately shares robe_fold() so the
++                          # two shells stay parallel. Parallel is what a LINING
++                          # needs; an exposed column needs to be a different
++                          # fabric. Flattening the fold to 18 percent leaves a
++                          # trace of vertical structure - enough that it is not a
++                          # bare cylinder - while separating it from the silk by
++                          # texture as well as by value, which is the cue that
++                          # survives downsampling.
++UNDER_CONTACT  = 0.075    # height of the contact darkening where the column
++                          # meets the floor. "Add contact darkening where it
++                          # meets the floor" - the rig has no light low enough to
++                          # produce one, so it is painted in by grading the
++                          # bottom of the column back down to the lining's near
++                          # black. Also stops the base of the column reading as a
++                          # cut-off cylinder floating on a bright floor.
++
+ # How far the robe is open at the front, as a half-angle in radians per height.
+ # Wide V at the collar, pinched shut at the sash, parting again down the skirt.
+ ROBE_OPEN = [
+@@ -239,8 +294,500 @@ ROBE_OPEN = [
+ 
+ TRIM_R = 0.0075           # silver piping radius
+ HEM_BAND = 0.105          # depth of the darker border round the bottom
++HEM_BAND_FRONT = 0.030    # ...but only this much of it across the RAKED front.
++                          # The border is a deep, quiet cloth, and directly above
++                          # a silver cord that has a near-black under-skirt below
++                          # it, 10 cm of deep cloth is what turned a real 14 cm
++                          # cut-away into "one dark mass with no layering". See
++                          # build_robe_trim.
+ LAPEL_STUDS = 6           # fastenings down the right-hand lapel edge
+ 
++# -- The raked train -----------------------------------------------------------
++# The hem is cut away at the front and drawn out behind, so the base of the
++# figure stops being a rotationally symmetric bell - which at 184x184 is a blob
++# with a hat on it - and becomes a wedge that points.
++#
++# It is a per-vertex WARP of the existing hem (hem_rake(), applied inside
++# robe_point()) rather than a new lofted flap, and that is the important
++# decision. Everything that lies on the robe already goes through robe_point():
++# the outer shell, the under-robe, the dark hem border and the silver hem trim.
++# Warping the one function they share means the trim follows the new hem line
++# for free. A separate train object would need its own copy of the fold function
++# and its own piping, and the two would part company the first time either was
++# retuned.
++#
++# He faces -Y (see THETA_FRONT and the `front` camera at y=-5.6), so the train
++# runs BEHIND him, and hem_arc() measures from THETA_FRONT so that is true by
++# construction rather than by a sign somebody has to remember.
++#
++# TWO EARLIER VERSIONS FAILED REVIEW. Both failures were about VALUE, in
++# opposite directions, and the numbers below only make sense read as that
++# argument:
++#   * v1 used the robe's own silk and came back the BRIGHTEST large area on the
++#     model. A run of cloth going away across the floor, seen from a camera a
++#     few degrees above the horizon, is grazing incidence almost everywhere, and
++#     every angle-driven term (the nacre band, sheen, coat, thin film) fires
++#     hardest exactly there.
++#   * v2 over-corrected to a matt near-black and came back DARKER THAN ITS OWN
++#     BACKGROUND - it merged with the floor shadow and the backdrop and stopped
++#     having a describable shape at all.
++# The settled answer is in the materials section: the train keeps the robe's own
++# base colour and a DAMPED nacre band (the same trick the hat brim already uses,
++# NACRE_STR_QUIET, for the same reason - a broad near-horizontal surface is past
++# the band's knee across its whole area), plus a small flat unlit lift on
++# upward-facing planes only. Darkest large area on the MODEL, clearly lighter
++# than the FLOOR it lies on.
++TRAIN_Z_FADE   = 0.950    # height at which the rake has died out completely. At
++                          # the hip, not the knee: the sweep has to start high or
++                          # the train reads as a separate object stuck on the
++                          # bottom of a skirt. Everything above - sash, belt kit,
++                          # yoke, collar, every trim - is untouched, which is why
++                          # hem_rake() can cheaply early-out.
++TRAIN_SWING    = radians(70.0)    # the train's axis, swung off dead-astern
++                          # toward +X (his left). This number is not taste, it is
++                          # the answer to a measured visibility problem, and the
++                          # naive value is badly wrong.
++                          #
++                          # The hero camera sits ~6 degrees above the horizon, so
++                          # anything lying on the floor behind him is inside his
++                          # own silhouette. Dead astern (swing 0) projects to the
++                          # LEFT of frame - straight onto the staff, which is why
++                          # the first version was reported as cut in half by the
++                          # shaft. Swinging a little (34 deg was tried) only walks
++                          # the run from behind the staff to behind the BODY,
++                          # where none of it can be seen. Sampling the outer half
++                          # of the run against the robe's own projected footprint:
++                          # at 34 deg, 0 of 15 sample points visible; at 58 deg,
++                          # 3; at 70 deg, 11. Below about 60 degrees a train on
++                          # this camera is decoration nobody will ever see.
++                          # Confirmed clear of the staff by all three reviewers at
++                          # 70, so this one is settled - do not "tidy" it.
++                          #
++                          # Bounded above by the `front` camera, which crops the
++                          # tip at roughly 72 deg with this reach.
++TRAIN_BACK_ARC = radians(52.0)    # half-angle of the arc drawn into the train.
++                          # This is a HERO-CAMERA number, not a plan-view one.
++                          # The train's axis points 85 percent away from that
++                          # camera and only 52 percent across it, so length
++                          # foreshortens almost to nothing while WIDTH - which is
++                          # perpendicular to the axis - is seen nearly in full.
++                          # Narrowing this to 36 was tried and the train shrank to
++                          # a tongue; the mass on screen comes from the arc.
++TRAIN_BACK_FLAT = 0.15    # ...but only a little of it is at FULL reach. The
++                          # previous 0.30 gave a 26 degree band all displaced by
++                          # the same amount, i.e. a terminal edge that is a
++                          # straight cut, which is what read as "a plank or a
++                          # shoebox". At 0.15 the reach starts falling off almost
++                          # immediately and the plan outline is a tapering lobe
++                          # with a rounded apex - smoothstep being flat at 0 is
++                          # what rounds it. Kept as a tunable because the opposite
++                          # failure, a single sharp spike, is one number away.
++# THE ARCS ARE NARROW, AND THE REASON IS THE MOST USEFUL THING LEARNED THIS PASS.
++#
++# The previous version ran 72 deg left / 115 deg right and MEASURED 14.7 percent
++# of body height at the centreline - inside the 10-15 percent band the review had
++# asked for. All three readers then independently reported a quarter, a fifth and
++# a fifth of body height, across "nearly the whole front". Three readers against
++# one measurement means the measurement answered the wrong question, and it did:
++#
++#   APPARENT lift height is driven by the ARC the lift spans, not by the lift.
++#
++# A cut-away carried round 190 degrees of a 360 degree hem leaves no un-lifted
++# side hem anywhere in the front view, so the eye has no baseline to measure the
++# opening against and reads it against the whole figure instead. The number was
++# right and the shape was wrong. Narrowing the arc to ~70 degrees total, so real
++# hem still pools on the floor at BOTH sides of the front view, is what gives the
++# opening something to be short relative to - and it lets the lift itself come
++# DOWN as well, because it no longer has to be tall to be seen.
++#
++# This also un-picks the previous pass's overlap problem for free. At 32 deg the
++# leading arc stops well short of the train (which starts at 58 deg), so the two
++# displacements no longer stack and the hem returns to the floor in between - the
++# "real hem touching the floor at both sides" the review asked for is the same
++# geometry as the handover gap. hem_rake()'s remap of the already-lifted height
++# is kept anyway: it costs nothing and it is what stops a crease if either arc is
++# ever widened again.
++TRAIN_FRONT_ARC = radians(32.0)                              # his left, LEADING
++# The TRAILING side (his right) is the longer of the two, and the asymmetry is
++# now deliberate rather than a decay tail - see TRAIN_LIFT_LEAD. "The current
++# perfect left-right symmetry reads as a proscenium arch and fights the very
++# asymmetry this design exists to introduce."
++TRAIN_FRONT_ARC_R = radians(40.0)
++TRAIN_FRONT_FLAT = 0.30   # a short flat top on the front lift. It exists so the
++                          # opening is a hem cut short rather than a scoop at
++                          # twelve o'clock, but it is deliberately SHORTER than
++                          # the 0.40 that came back as "a symmetric proscenium
++                          # arch": with the arcs now narrow, a long flat top is
++                          # most of the span and the apex stops being an apex.
++                          # At 0.30 of a 32/40 deg arc the crown holds for about
++                          # 22 degrees and falls away over the rest.
++TRAIN_LIFT     = 0.300    # front hem ends at z ~0.28 on the trailing side, i.e.
++                          # 11.4 percent of the model's measured 2.479 m, and
++                          # ~9 percent by the leading edge - see TRAIN_LIFT_LEAD
++                          # for why those differ and the probe table below for
++                          # the measured profile.
++                          #
++                          # DOWN from 0.345, which measured 14.7 percent and was
++                          # read by all three reviewers as a fifth to a quarter
++                          # of body height. The gap between 14.7 measured and
++                          # ~20 perceived is the arc-width effect written up at
++                          # TRAIN_FRONT_ARC; narrowing the arc is most of the
++                          # fix, and this is the rest of it. The review's
++                          # restated target is 10-12 percent, which is what the
++                          # trailing side now sits at.
++TRAIN_LIFT_LEAD = 0.55    # ...and the lift is not the same height on both sides.
++                          # Scaled to this fraction at the LEADING (his left)
++                          # edge of the arc and to full at the TRAILING (his
++                          # right) edge, blended smoothly across the front so
++                          # there is no step on the centreline.
++                          #
++                          # "Make it ASYMMETRIC - higher on the trailing side,
++                          # dropping toward the leading side - because the
++                          # current perfect left-right symmetry reads as a
++                          # proscenium arch and fights the very asymmetry this
++                          # design exists to introduce." It is also what the
++                          # cloth would do: the train is dragging the hem away
++                          # to his left, so the silk that remains hangs lowest
++                          # on the side it is being pulled toward and rides
++                          # highest on the side it is being pulled from.
++                          #
++                          # MEASURED on the built mesh, hem height as a fraction
++                          # of 2.479 m, by arc from the front centreline:
++                          #
++                          #   -12   11.4%  (apex, trailing side of the crown)
++                          #     0   10.2%
++                          #   +10    9.0%  (leading edge of the crown)
++                          #   -40 / +32   0%  - hem back on the floor, both sides
++TRAIN_LIFT_EASE = 1.35    # exponent on the lift/tuck profile. It has to be > 1
++                          # so the profile leaves the hip with zero slope - at
++                          # exponent 1 the rake is a straight taper that meets
++                          # the untouched skirt at a 20 percent slope break, and
++                          # that break renders as a horizontal crease right round
++                          # the front of the garment at hip height.
++TRAIN_TUCK     = 0.135    # and the lifted front draws IN as well as up - by a
++                          # LOT more than the 0.048 the previous pass used, and
++                          # this is the fix for a specific review finding: "it
++                          # tilted the front skirt panels up into the key light,
++                          # making them the second-brightest area on the model".
++                          #
++                          # Cause: ROBE_TABLE's bottom rows flare hard (0.354 ->
++                          # 0.442 over the last 17 cm) because cloth that has hit
++                          # the floor spreads. Lift those rows to shin height
++                          # without withdrawing the flare and the front of the
++                          # skirt becomes a cone leaning outward, whose normal
++                          # points UP - straight into the key. 0.135 puts the
++                          # raked hem at r ~0.31 under a hip at r ~0.235, i.e. a
++                          # panel about 6 degrees off vertical, whose normal is
++                          # near horizontal and which therefore catches the key on
++                          # its edge instead of on its face.
++TRAIN_UNDER_LIFT = 0.0    # the under-robe does NOT follow the front lift. This
++                          # is the "commit either way" call on the cut-away.
++                          #
++                          # The review offered two ends: raise it far enough to
++                          # show a boot and an ankle shadow, or drop the front
++                          # back to the floor. Boots were costed and rejected -
++                          # there are no legs on this model, so a pair of boots
++                          # under the skirt is 25 cm from the nearest geometry
++                          # and the audit's rule-1 levitation check fails them;
++                          # making them touch means modelling legs thick enough
++                          # to reach the under-robe, which then punch through its
++                          # fold valleys. That is a different, larger change.
++                          #
++                          # So the cut-away reveals the garment the character
++                          # sheet already says is under there: "open down the
++                          # front over a near-black under-robe". The outer silk
++                          # rakes up to mid-shin, the near-black under-robe runs
++                          # on to the floor behind it in a visibly different
++                          # material, and the outer hem's 2 cm overhang casts the
++                          # shadow line along the whole cut. That is a layered
++                          # read rather than a hole, and it is consistent all the
++                          # way round instead of only at the front.
++TRAIN_REACH    = 0.400    # run past the hem along the train's axis.
++                          #
++                          # CUT from 0.585, and this is the resolution of a
++                          # constraint the last two passes had backwards. All
++                          # three reviewers: the train "fans out sideways rather
++                          # than sweeping back" and "runs all the way out of
++                          # frame" in the front view.
++                          #
++                          # The tempting fix is to swing the axis back toward
++                          # dead astern, and it is the wrong one. TRAIN_SWING is
++                          # not taste - the measurement recorded there (34 deg:
++                          # 0 of 15 sample points visible; 58: 3; 70: 11) says
++                          # that below about 60 degrees the run is inside the
++                          # figure's own silhouette at the hero camera, which is
++                          # the angle this character is judged on. Swinging back
++                          # trades a front-view complaint for an invisible
++                          # train.
++                          #
++                          # The two constraints are not actually in conflict,
++                          # because they are about different quantities: the
++                          # panel's complaint is about LENGTH, not aim. At 0.585
++                          # the furthest cusp measured 1.083 m from the body
++                          # axis - and TRAIN_FLUTE_R scallops the reach, so the
++                          # longest cusp overshoots the nominal figure by 15
++                          # percent, which is what put it through the front
++                          # crop. 0.400 puts the furthest cusp at ~0.91, inside
++                          # the crop with margin, while the axis stays where the
++                          # hero camera needs it. It also directly answers the
++                          # "reads shorter and heavier at 184" note: this is the
++                          # single largest piece of low horizontal mass on the
++                          # model.
++TRAIN_RUN_EASE = 1.45     # exponent on the run profile, and the fix for the
++                          # single worst defect of the previous pass: "a
++                          # hard-edged boxy slab... a flat plane read nearly
++                          # edge-on with a bright specular strip along its top
++                          # edge".
++                          #
++                          # That was not a shading problem, it was a DEGENERATE
++                          # MESH. The old profile smoothstepped a quantity that
++                          # was itself smoothstepped in z, so its derivative went
++                          # to zero at the hem: the bottom four rings of the
++                          # robe all landed within 0.1% of the same reach, i.e.
++                          # inside a millimetre of each other, and the last
++                          # 25 cm of the train was one quad wide. A plain power
++                          # keeps a non-zero slope at the hem so every ring
++                          # lands somewhere different and the run has real
++                          # geometry all the way out, while still leaving the
++                          # hip end with zero slope where it needs it.
++                          #
++                          # Lowered from 1.70 to widen and lift the ROOT, which
++                          # is where two reviewers said the train comes apart:
++                          # "a small folded fin at lower right, like a detached
++                          # bow or leaf", "the sweep between hem and tip is
++                          # compressed to nothing". A lower exponent engages the
++                          # run higher up the skirt, so the cloth starts leaving
++                          # the body well above the hem and the train grows out
++                          # of the garment instead of abutting it. Still > 1, so
++                          # the hip end keeps its zero slope and no crease forms
++                          # where the rake blends into untouched cloth.
++TRAIN_LAND     = 0.62     # fraction of the run over which the cloth descends to
++                          # the floor. Height and reach are DECOUPLED on purpose:
++                          # tying the descent to the reach is what produced
++                          # either a train floating 7 cm off the floor along its
++                          # whole length, or the degenerate slab above.
++                          #
++                          # Raised from 0.50, the other half of the detached-fin
++                          # fix. At 0.50 the cloth was already flat on the floor
++                          # by the mid-point of a run that is now much shorter,
++                          # so the part of the train that reads as a SWEEP - the
++                          # bit still in the air, catching a rim on its upper
++                          # surface - had almost no length left. Descending over
++                          # 62 percent of the run keeps the root airborne and
++                          # still leaves a third of the run lying flat.
++TRAIN_TAIL_Z   = 0.024    # where the run settles. NOT zero, for the reason given
++                          # on ROBE_TABLE: solidify and bevel push boundary verts
++                          # down by the wall thickness projected onto z, and the
++                          # flatter the cloth is where it ends the more of that
++                          # points straight down. TRAIN_THIN buys most of it back.
++                          #
++                          # Down from 0.036: "the tip lacks contact shading so it
++                          # looks like it hovers". Nothing in this rig casts a
++                          # tight enough contact shadow to sell 36 mm of air
++                          # under a flat piece of cloth, so the honest fix is to
++                          # put the cloth on the floor. 24 mm matches the pooled
++                          # hem's own z0, i.e. the tip now settles at exactly the
++                          # height the rest of the garment already rests at.
++TRAIN_BILLOW   = 0.015    # a bulge on the middle of the descent, so the run
++                          # lifts off the straight line between skirt and floor
++                          # instead of being a taut ramp.
++                          #
++                          # Cut from 0.050. sin(pi*land) peaks at land=0.5, which
++                          # is thigh height directly behind the near hip, and two
++                          # reviewers named exactly that spot: "a smooth pale
++                          # bulge with a broad specular highlight - an inflated
++                          # blob, not gathered silk". A single convex swell of
++                          # cloth facing up and out is the one shape in this rig
++                          # guaranteed to catch the key across its whole width.
++                          # That transition needed STRUCTURE rather than less
++                          # volume, so most of the amplitude moved into
++                          # TRAIN_GATHER below.
++# -- the tip -------------------------------------------------------------------
++# "The tip does not point... at full size it reads as a plank or a shoebox, not
++# cloth." Three things answer that together: TRAIN_BACK_ARC/FLAT above narrow
++# and round the outline in plan, TRAIN_RUN_EASE gives the end real geometry, and
++# the curl below rolls the last of the run over on itself so the outer boundary
++# is a turned lip rather than a straight cut. The lip also guarantees that no
++# face out there sits near-perpendicular to the key: it sweeps the normals of
++# the terminal rows through a quarter turn.
++TRAIN_CURL_AT   = 0.70    # where along the run the roll starts
++TRAIN_CURL_PULL = 0.070   # how far the very edge is drawn back in as it rolls
++TRAIN_CURL_LIFT = 0.036   # and how far up. Both were half again as large and the
++                          # tip stood up into a tall narrow tongue that read as a
++                          # separate flap rather than as the end of the cloth. A
++                          # roll only has to turn the surface; it does not have to
++                          # be tall enough to see through.
++TRAIN_FLUTE    = 0.082    # depth of the cusped flutes carried out along the run,
++                          # driven by the robe's OWN fold function - same lobes,
++                          # same second harmonic, same cusped FOLD_POWER. Scaled
++                          # by the run weight and NOT by the billow, so the ridges
++                          # reach the tip instead of fading out where they are
++                          # most needed. One-sided (ridges rise from the baseline,
++                          # valleys sit on it) so no flute can push the tip
++                          # through the floor.
++                          #
++                          # Bounded ABOVE at about 0.09 by the hero camera: at
++                          # 0.105 the ridges stood 10 cm proud over a run 60 cm
++                          # long and the whole thing read as a corrugated shell
++                          # standing on the floor rather than cloth lying on it.
++                          # The review asked for deeper flutes and the answer was
++                          # mostly FEWER of them (TRAIN_LOBES), not taller ones.
++TRAIN_FLUTE_R  = 0.380    # and the scallop cuts the run itself, so the tip
++                          # OUTLINE is cusped rather than a smooth curve. Deeper
++                          # than the 0.200 that came back as "a gentle wobble
++                          # rather than the robe's cusped scallop", and deeper
++                          # again than the 0.300 that came back as "one soft
++                          # floppy fold... not legible in any view".
++                          #
++                          # The review offered two ways out - three or four LARGE
++                          # lobes, or drop the scallop for a single clean rolled
++                          # edge - and this takes the first. TRAIN_LOBES is
++                          # already down at 5, which puts about three cusps
++                          # across the arc; what was missing was depth, not
++                          # count. Deepening the radial cut rather than raising
++                          # TRAIN_FLUTE is deliberate: the outline is what has to
++                          # survive 184 px, and the vertical flute is already at
++                          # its own ceiling (see there).
++TRAIN_FOLD_GAIN = 2.30    # ...and the OTHER half of "the flutes still die".
++                          #
++                          # Fold amplitude is looked up from ROBE_TABLE at the
++                          # NOMINAL z, and the bottom rows carry the smallest
++                          # amplitude in the table (0.030 at the hem, against
++                          # 0.060 at z=0.19) because pooled cloth spreads and
++                          # flattens. Rake those rows up to knee height and they
++                          # take their pooled, nearly-smooth fold with them -
++                          # which is exactly the review's "the lower quarter of
++                          # the robe front is now a smooth featureless panel".
++                          # This scales the amplitude back up in proportion to
++                          # how far the cloth has been moved, so a raked panel
++                          # folds like the cloth it is now level with.
++                          #
++                          # 1.90 was the ratio the table itself gives (0.057 at
++                          # knee height over 0.030 at the hem) and it came back
++                          # "a gentle wobble rather than the cusped scallop",
++                          # so the table ratio is the FLOOR of this number, not
++                          # the answer. It restores the fold the cloth would
++                          # have had standing up; it does not pay for the fact
++                          # that the run is then read end-on from a camera six
++                          # degrees off the horizon, where a crease presents a
++                          # fraction of its true depth. 2.30 is that ratio plus
++                          # the foreshortening, and it is bounded above by
++                          # TRAIN_FLUTE's own ceiling rather than by taste -
++                          # past about 2.5 the ridges and the flute depth
++                          # compound into the corrugated shell noted there.
++# -- how coarse the train's own folds are ---------------------------------------
++# The run does NOT keep the robe's fold frequency all the way out, and that is a
++# 184-pixel decision rather than a cloth-simulation one. The robe folds at 7
++# lobes plus a 13-lobe harmonic - fourteen-odd creases around the body, which is
++# right on a vertical surface a metre tall and wrong on an outline seen from
++# forty pixels away: "the scallops dissolve into a slightly restless silver
++# squiggle instead of resolving as a scalloped edge".
++#
++# So the flutes CONSOLIDATE as they run out, which is also what gathered cloth
++# does. Near the hip the surface still carries the robe's own fold, so nothing
++# stops at the transition; by the tip it has crossed over to this coarse scallop,
++# which puts about three cusps across the train's arc - the "three or four flutes
++# to the tip" the brief asked for, and wide enough to survive the icon. Must stay
++# an integer or the section stops being 2*pi periodic and the loft seam tears.
++TRAIN_LOBES    = 5
++TRAIN_GATHER   = 0.045    # ...and the same scallop pulls the cloth radially IN
++                          # at its valleys where the run leaves the body, so the
++                          # transition is three deep gathers instead of one
++                          # inflated bulge. This is the replacement for most of
++                          # TRAIN_BILLOW: the same volume of cloth, broken into
++                          # folds that each have a lit face and a shadowed one,
++                          # rather than pooled into a single convex swell.
++TRAIN_GATHER_AT = 0.55    # where along the run the gathering has died away. An
++                          # UPPER-run effect on purpose: out on the floor the
++                          # cloth has spread, and a radial pull there would only
++                          # narrow the wedge.
++TRAIN_UNDER_RUN = 0.0     # the under-robe does not follow the run either, and
++                          # this one was learned from a masked render rather than
++                          # reasoned out. Carried along at full strength it sits
++                          # UNDER_INSET from the outer shell - but UNDER_INSET is
++                          # a RADIUS offset, and out where the train has flattened
++                          # onto the floor a radial offset slides the under-robe
++                          # along the same plane as the shell above it instead of
++                          # away from it. The two go coplanar, and at the rolled
++                          # tip they cross outright: the mask showed near-black
++                          # under-robe surfacing through the middle of the curl.
++                          #
++                          # Left behind, it is a plain cone that reaches the floor
++                          # at the old hem radius, and the outer robe's train
++                          # sweeps out over and past it. Checked at every table
++                          # row: at equal HEIGHT the train is always further out
++                          # than the cone (0.02 m at the hip, 0.15 m at the knee),
++                          # so the two never intersect, and the dark cavity that
++                          # opens between them is exactly what rule 4 wants under
++                          # a lifted train. The train's own underside is already
++                          # lined - solidify() gives it M_ROBE_IN - so nothing is
++                          # lost by not doubling it.
++TRAIN_THIN     = 0.26     # shell thickness at the tip as a fraction of
++                          # ROBE_THICK, driven by a vertex group on the solidify
++                          # modifier. 18 mm of wall seen edge-on at the tip read
++                          # as carved stone; 5 mm reads as cloth. Not zero - a
++                          # zero-thickness rim is degenerate and the audit's
++                          # manifold check would fail it.
++TRAIN_THIN_AT  = 0.450
++TRAIN_THIN_W   = 0.500
++TRAIN_BAND_Z   = 0.200    # how deep the hem border reaches, in nominal z, over
++                          # the train. HEM_BAND cannot be used out there: nominal
++                          # z is not arc length, and the run saturates near the
++                          # hem, so 10 cm of nominal z maps to about 3 mm of
++                          # actual cloth and the border collapses into a crushed
++                          # bead. This is the nominal depth that maps back to
++                          # roughly HEM_BAND of real length at the tip, so the
++                          # border comes out one uniform width the whole way
++                          # round.
++TRAIN_TRIM_TAPER = 0.26   # the silver hem cord thins to this fraction along the
++                          # ground run. It stays unbroken from the front cut-away
++                          # right round to the point - every panel so far has
++                          # named the OUTLINE, not the fill, as the thing
++                          # carrying the wedge at 184, and the cord has been
++                          # praised in three consecutive rounds ("the best single
++                          # new line on the model"), so nothing here shortens it
++                          # or touches the front.
++                          #
++                          # What keeps changing is WHERE and HOW HARD it thins.
++                          # Now 0.26, down from 0.42: "the silver cord is the
++                          # largest bright mass on the model and it is at floor
++                          # level, dragging the eye down and undoing the vertical
++                          # climb toward the gem." A cord that traces the whole
++                          # of a wide hem is LONG, so even a modest width makes
++                          # it the biggest bright area on the figure by simple
++                          # area - which is the one thing that must never be true
++                          # of anything but the gem.
++TRAIN_TRIM_AT  = 0.05     # ...and the taper now runs from here to TRAIN_TRIM_TO
++TRAIN_TRIM_TO  = 0.45     # on the train's ARC weight, i.e. it is fully thinned
++                          # by roughly the mid-point of the run rather than
++                          # easing out over the whole of it. "Taper it out by the
++                          # mid-point of the run and reserve full brightness for
++                          # where it turns the front opening."
++# Where the tonal blend starts and finishes, measured along the train's own axis
++# (see train_depth). The hem on that axis sits at 0.43 and the furthest cusp of
++# the tip now at ~0.91, so the fade occupies the first quarter of the run - the
++# part still standing up off the floor, where the nacre band is not firing hard
++# and the steps are least visible - and the whole ground run past 0.66 is fully
++# in the train's own cloth. Deliberately front-loaded: the blend must be finished
++# BEFORE the cloth lies down, because that is where every angle-driven term fires
++# at once and a half-faded step would be visible as a band across the widest part
++# of the wedge.
++#
++# UNCHANGED THIS PASS, ON PURPOSE. The train's cloth value is the one thing this
++# design has got right by consensus - "it sits in the same family as the robe
++# instead of reading as a separate darker or lighter object" - so the span and
++# the materials it grades between are left exactly alone.
++TRAIN_DIM_AT   = 0.340
++TRAIN_DARK_AT  = 0.660
++# The CORD grades over its own, later, harder span rather than sharing the
++# cloth's. Two reviewers want the metal killed along the ground run; the third
++# praised the cord outright and the front must not move. Sharing one span would
++# have meant dragging the cloth's blend around to fix the metal - so the metal
++# gets its own, starting just past the hem at 0.43 and finished well before the
++# tip.
++TRIM_DIM_AT    = 0.460
++TRIM_DARK_AT   = 0.680
++
+ # -- Mantle / collar -----------------------------------------------------------
+ # The shoulder mantle was removed on 2026-08-01 - see build_yoke() for why. Its
+ # MANTLE_* tunables went with it rather than being left behind as dead globals a
+@@ -831,6 +1378,89 @@ FILM_IOR = 1.92
+ # face void lost the lit boundary that is the best idea on the model. There is
+ # no add_nacre_band() call for this material, and that is deliberate.
+ C_ROBE_IN  = (0.0010, 0.0011, 0.0026, 1.0)
++
++# -- The train's cloth ---------------------------------------------------------
++# The train keeps C_ROBE. It is the same garment, and giving it a colour of its
++# own is what turned it into a separate black prop last time. What changes is how
++# much ANGLE-DRIVEN value it is allowed, and that is the whole argument:
++#
++# The nacre band is gated on Layer Weight's Facing, which is 1 - |cos t|^0.36
++# (NACRE_BLEND). On a vertical panel seen head-on that stays near zero and the
++# robe renders at C_ROBE. On a sheet lying on the floor, seen from a camera
++# looking down at it by ~17 degrees, |cos t| is 0.29 and Facing is 0.36 - past
++# NACRE_FLOOR, inside the band, over the sheet's entire area at once. This is
++# the same geometry problem NACRE_STR_QUIET already exists for (the hat brim:
++# "a broad disc seen almost edge-on... is past the knee across its entire top
++# surface"), so it gets the same answer, a shade stronger because the train is
++# larger and further from the eye.
++NACRE_STR_TRAIN = 0.26
++# ...and then a flat, unlit lift on UPWARD-facing planes only.
++#
++# This exists because of a measurement, not a preference. The rig floor is
++# (0.020, 0.023, 0.033) and the world background is (0.030, 0.034, 0.052); the
++# robe's own C_ROBE has a luminance of 0.012, i.e. HALF the floor's. A big matt
++# sheet of it lying on that floor, in the figure's own shadow, is darker than
++# everything it is seen against - which is precisely what the review reported:
++# "making it the darkest thing was correct in principle; making it darker than
++# its own background destroyed it". The lift puts the train's upward-facing
++# planes about a quarter above the floor's albedo, so the wedge separates from
++# the floor and the backdrop while still sitting below every lit surface on the
++# figure. Undersides get none of it (Math/MAXIMUM against 0), so rule 4 holds and
++# the roll at the tip keeps a dark underside to turn against.
++C_TRAIN_LIFT  = (0.55, 0.62, 1.00, 1.0)   # cold, and a near-neighbour of the
++                                          # robe's own indigo, so the lift reads
++                                          # as light on cloth rather than as a
++                                          # second colour
++TRAIN_UP_LIFT = 0.008     # measured, and then measured again when the panel put
++                          # the number in dispute. Removing it OUTRIGHT moves the
++                          # train's rendered mean by 1.5 sRGB points out of 40 -
++                          # it is not what makes the train bright, and it was
++                          # blamed for it twice. What it does do is stop the run
++                          # dying where the figure shadows it, which is the
++                          # failure this whole constant exists to prevent, so it
++                          # stays. The brightness lever is sheen and specular,
++                          # and the working is in _train_blend().
++
++# -- what the front cut-away reveals -------------------------------------------
++# The under-robe's exposed SKIRT is not the same material as the under-robe's
++# lining, and splitting them is the whole reason the cut-away works at all.
++#
++# M_ROBE_IN is deliberately the darkest thing on the model - it lines the
++# sleeves, the under-brim and the face void, and its value is what the gem glows
++# against. Perfect for a recess a few centimetres deep; a disaster for a quarter
++# of a metre of skirt in full view, which is what raking the silk off it creates.
++# Measured on the render: 9.3 against a floor at 37 and a backdrop at 33, over
++# four times the train's area. That is the "darker than its own background"
++# failure the review named, just moved to a different garment.
++#
++# So the skirt below the raked hem gets its own cloth, zoned by height per
++# polygon (see build_underrobe) with the blend band hidden BEHIND the outer hem,
++# so the recesses keep M_ROBE_IN untouched and nothing about the chest opening or
++# the face void moves.
++#
++# WHAT THAT CLOTH IS HAS NOW SWUNG BACK, AND THE SWING IS THE LESSON. The first
++# version gave it fold structure and enough nacre for the pleats to catch a rim -
++# reasonable-sounding, and it came back 3/3 as "the second-brightest mass on the
++# model, at the ankles, competing with the gem". A surface that is 4x the lining
++# AND takes a nacre band AND takes sheen is three multiplications away from near
++# black, and the third one is always the one that gets you.
++#
++# The review's instruction is unambiguous and it is taken literally: "at least two
++# values below the outer robe's darkest passage, specular stripped, so it reads as
++# void." The robe's darkest passage is the hem border at ~26; two values below is
++# roughly half, so ~13. This lands there by cutting all three terms at once rather
++# than arguing about which one did the damage: albedo down to ~2x the lining
++# instead of 4x, nacre down to a whisper, sheen and specular effectively gone.
++#
++# It is NOT taken all the way back to M_ROBE_IN itself (9.3, and rejected two
++# rounds ago as "darker than its own background"). ~13 is the gap between those
++# two failures: still unmistakably a void against a floor at 37, but no longer a
++# hole punched in the model.
++C_UNDER_SKIRT   = (0.0022, 0.0021, 0.0062, 1.0)   # ~2x the lining, ~0.2x C_ROBE
++NACRE_STR_SKIRT = 0.10
++UNDER_SKIRT_ZONES = 4
++UNDER_SKIRT_FADE  = 0.10  # how far ABOVE the raked hem the blend finishes, i.e.
++                          # how much of it is hidden behind the silk
+ # Silver as a cold mirror. At roughness 0.06 it is mostly reflecting the dark
+ # world rather than generating its own value, which is precisely what makes it
+ # read as precious metal instead of grey paint - a rough silver has to be lit to
+@@ -1143,6 +1773,84 @@ def add_nacre_band(mat, core, strength=1.0, blend=NACRE_BLEND):
+     return mat
+ 
+ 
++def add_up_lift(mat, amount, tint=None, power=2.0):
++    """Add a flat, angle-INDEPENDENT value to upward-facing surfaces only.
++
++    The one thing on this model that is allowed to brighten without being earned
++    at the silhouette, and it exists to solve a problem no fresnel term can:
++    cloth lying on the floor is dark on its own terms and dark in its
++    surroundings at the same time, so nothing separates it from the floor.
++    Anything angle-driven makes that worse rather than better - a grazing ramp
++    fires hardest exactly where the surface is flattest, which is how the first
++    version of the train came back brighter than the gem.
++
++    So: world normal Z, clamped at zero (undersides get nothing - rule 4 still
++    holds and the rolled tip keeps a dark interior), raised to `power` so only
++    genuinely up-facing cloth is lifted and the vertical skirt above is not, then
++    scaled and ADDED to whatever is already driving Base Color. Additive rather
++    than mixed on purpose: it must not be able to wash out the nacre hue, only
++    to raise the floor under it.
++
++    GOTCHA: this must be called AFTER add_nacre_band(), because it splices itself
++    into the existing Base Color link. Called first, the nacre band would then
++    overwrite the link and the lift would silently do nothing.
++    """
++    if amount <= 0.0:
++        return mat
++    tint = tint or C_TRAIN_LIFT
++    nt = mat.node_tree
++    b = nt.nodes["Principled BSDF"]
++
++    geo = nt.nodes.new("ShaderNodeNewGeometry")
++    geo.location = (-1220, -560)
++    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
++    sep.location = (-1020, -560)
++    nt.links.new(geo.outputs["Normal"], sep.inputs["Vector"])
++
++    up = nt.nodes.new("ShaderNodeMath")
++    up.location = (-840, -560)
++    up.operation = 'MAXIMUM'
++    up.inputs[1].default_value = 0.0
++    nt.links.new(sep.outputs["Z"], up.inputs[0])
++
++    shp = nt.nodes.new("ShaderNodeMath")
++    shp.location = (-660, -560)
++    shp.operation = 'POWER'
++    shp.inputs[1].default_value = power
++    nt.links.new(up.outputs["Value"], shp.inputs[0])
++
++    amt = nt.nodes.new("ShaderNodeMath")
++    amt.location = (-480, -560)
++    amt.operation = 'MULTIPLY'
++    amt.inputs[1].default_value = amount
++    nt.links.new(shp.outputs["Value"], amt.inputs[0])
++
++    col = nt.nodes.new("ShaderNodeVectorMath")
++    col.location = (-300, -560)
++    col.operation = 'SCALE'
++    col.inputs[0].default_value = tint[:3]
++    nt.links.new(amt.outputs["Value"], col.inputs["Scale"])
++
++    add = nt.nodes.new("ShaderNodeVectorMath")
++    add.location = (-100, -300)
++    add.operation = 'ADD'
++    src = b.inputs["Base Color"]
++    if src.is_linked:
++        link = src.links[0]
++        nt.links.new(link.from_socket, add.inputs[0])
++        nt.links.remove(link)
++    else:
++        add.inputs[0].default_value = src.default_value[:3]
++    nt.links.new(col.outputs["Vector"], add.inputs[1])
++    nt.links.new(add.outputs["Vector"], src)
++
++    # The FBX export carries one flat colour per material, so hand Unity a value
++    # that includes the lift - otherwise the train exports as plain robe silk.
++    mat.diffuse_color = tuple(min(1.0, c + t * amount) for c, t
++                              in zip(mat.diffuse_color[:3], tint[:3])) + (1.0,)
++    return mat
++
++
+ def add_grain_glow(mat, colour, strength, scale=9.0, threshold=0.62,
+                    stretch=0.16):
+     """Faint light living in the grain of the wood.
+@@ -1235,8 +1943,168 @@ add_nacre_band(M_ROBE_D, C_ROBE_D, strength=NACRE_STR_DEEP)
+ # stops functioning as a void. It also lines the sleeves and the under-brim, so
+ # whatever happens here happens to every dark recess on the model at once.
+ M_ROBE_IN = make_material("MageRobeLining", C_ROBE_IN, 0.0, 0.880, sheen=0.08)
++
++
++def _skirt_blend(t, i):
++    """One step of the lining -> exposed-under-skirt blend. See C_UNDER_SKIRT."""
++    def f(a, b):
++        return a + (b - a) * t
++
++    def c(a, b):
++        return tuple(x + (y - x) * t for x, y in zip(a, b))
++
++    # ROUGHNESS GOES UP with exposure, not down, and the sheen goes DOWN. Both
++    # were the wrong way round: the exposed end had the LOWEST roughness and the
++    # HIGHEST sheen on a broad near-vertical surface standing in the key, which
++    # is the recipe for the broad soft highlight two reviewers read as "a pale
++    # ribbed barrel". "Specular stripped, so it reads as void" - so this end is
++    # flat matte cloth with no fibre lobe worth the name, and the only thing
++    # separating it from true black is its albedo.
++    mat = make_material("MageUnderSkirt%d" % i, c(C_ROBE_IN, C_UNDER_SKIRT), 0.0,
++                        f(0.880, 0.930), sheen=f(0.08, 0.03),
++                        sheen_tint=(0.72, 0.86, 1.00, 1.0), sheen_roughness=0.42,
++                        specular=f(0.50, 0.02))
++    # Skipped entirely at the lining end rather than called with strength 0: at
++    # zero the VALUE ramp flattens but the HUE ramp still travels, so the lining
++    # would quietly turn silver-blue at grazing angles with no change in value -
++    # exactly the drift the face void must not have.
++    if t * NACRE_STR_SKIRT > 0.02:
++        add_nacre_band(mat, c(C_ROBE_IN, C_UNDER_SKIRT),
++                       strength=t * NACRE_STR_SKIRT)
++    return mat
++
++
++M_UNDER_SKIRT = [_skirt_blend(i / (UNDER_SKIRT_ZONES - 1.0), i)
++                 for i in range(UNDER_SKIRT_ZONES)]
++
++
++# -- the train's cloth, and the fade into it -----------------------------------
++# The cloth does not change material on a LINE, it fades over one.
++#
++# A single hard swap was tried and rejected on the render: the boundary showed up
++# as an obvious staircase across the middle of the train, because a threshold on
++# world position cuts diagonally across a quad grid and every quad flips as a
++# unit. Six steps, each carrying a sixth of the difference, read as a gradient
++# instead - the review of that version confirmed "no join, no staircase, no
++# material seam anywhere on the robe", so this machinery stays.
++#
++# What each step interpolates matters as much as that it interpolates. Every
++# angle-driven term has to travel: the nacre STRENGTH, the sheen, the coat, the
++# specular level and the thin film. Fading the base colour alone leaves all the
++# fresnel terms firing at full strength and the train stays pale, which is how
++# the first version failed. The base colour itself does NOT travel any more - it
++# is C_ROBE from end to end, because a second, darker cloth colour is what made
++# the second version read as a shadow instead of a garment.
++TRAIN_ZONES = 6
++
++
++def _train_blend(t, i):
++    """One step of the silk -> train blend. t=0 is M_ROBE, t=1 is the train."""
++    def f(a, b):
++        return a + (b - a) * t
++
++    # SHEEN and SPECULAR are the levers here, and NOTHING ELSE IS. That is not a
++    # guess, it is four builds of identical geometry differing only in this
++    # material, measured against a per-part mask of the hero render:
++    #
++    #   sheen .13 / spec .16 / lift .008   train 40.0
++    #   sheen .13 / spec .16 / lift 0      train 38.5    <- albedo is worth 1.5
++    #   sheen .06 / spec .10 / lift .004   train 31.5
++    #   sheen .03 / spec .06 / lift .008   train 28.1    <- fibre lobe is worth 12
++    #
++    # Shipped a shade under the last of those, at sheen .022 / spec .045, which
++    # measures 28 against a lower front robe of 24 and a hem border of 26.
++    #
++    # The lift everyone (including me) reaches for first is worth a point and a
++    # half; the fibre lobe is worth twelve. It makes sense once stated: the cloth
++    # out there is up-facing under RimL, and sheen is a grazing-angle lobe seen
++    # by a camera that is itself at a grazing angle to the floor, so it fires at
++    # full strength across the train's entire area and nowhere else on the model.
++    #
++    # THE RIGHT REFERENCE IS THE ROBE, NOT THE FLOOR. Two rounds were spent
++    # tuning this against the backdrop and the floor, which is the wrong
++    # comparison and let the train sit at 40 against a lower front robe of 24 -
++    # i.e. the brightest cloth on the lower body, when the whole point of it is
++    # to be the quietest. These numbers put it at 28 against that same 24: the
++    # same family as the garment it belongs to, still a clear step above the
++    # under-skirt at 10 and the cast shadow, and now reading as a dark shape on
++    # a lighter floor rather than as a pale patch on a dark one.
++    mat = make_material("MageRobeRun%d" % i, C_ROBE, 0.0, f(0.420, 0.800),
++                        sheen=f(0.38, 0.022),
++                        sheen_tint=(0.72, 0.86, 1.00, 1.0),
++                        sheen_roughness=0.26,
++                        coat=f(0.12, 0.0), coat_roughness=f(0.22, 0.30),
++                        specular=f(0.45, 0.045),
++                        film_thickness=f(FILM_T, 0.0), film_ior=FILM_IOR)
++    add_nacre_band(mat, C_ROBE, strength=f(1.0, NACRE_STR_TRAIN))
++    add_up_lift(mat, f(0.0, TRAIN_UP_LIFT))
++    return mat
++
++
++M_ROBE_RUN = [_train_blend(i / (TRAIN_ZONES - 1.0), i)
++              for i in range(TRAIN_ZONES)]
++
+ M_SILVER  = make_material("MageSilver",  C_SILVER,  1.0, 0.062, anisotropic=0.55,
+                           specular=0.90)
++# The hem cord, and it is deliberately NOT the same silver as everything else.
++#
++# The review's second blocker was that the trim "abandons the shape exactly where
++# it is needed" - it died partway along the train instead of reaching the tip -
++# and all three reviewers named the outline, not the fill, as the thing carrying
++# the wedge at 184. The cause is written down two blocks below on C_PROS: a fully
++# metallic surface has no diffuse term, so in a rig with five small area lights
++# and a 0.03 world it exists only where a highlight happens to land. The front
++# piping is in the key and lands one; a cord lying on the floor round the back of
++# the figure does not, and goes black.
++#
++# So the hem cord is part dielectric, exactly as the prosthetic arm is: at
++# metallic 0.52 about half the response is Lambertian off a 0.80 albedo, which
++# holds a light value along its whole length whatever the lights are doing, and
++# the other half still gives real silver specular where a light does reach it.
++# It is also fatter than the rest of the piping (see build_robe_trim) because at
++# 184 px an 8 mm cord is one pixel wide and one pixel is not an outline.
++C_SILVER_HEM = (0.780, 0.800, 0.870, 1.0)
++M_SILVER_HEM = make_material("MageSilverHem", C_SILVER_HEM, 0.52, 0.200,
++                             anisotropic=0.30, coat=0.10, coat_roughness=0.14,
++                             specular=0.80)
++# ...and the same cord, tarnished, for the part of it lying on the floor.
++#
++# The cord did its job too well: "it is the strongest silver on the model and it
++# is at the hem, not at the chest". The fix is not to dim the cord - the front
++# opening needs every bit of it - but to let it fall off along the ground run,
++# which is also just true of metal thread that has been dragged along the floor
++# for a thousand years. Roughness up, specular down, albedo cut hard; it stays
++# metal, it stops being the loudest thing in the frame.
++#
++# Cut again this pass, from 0.360 to 0.215, because halving it was not enough:
++# "the cord is the largest bright mass on the model and it sits at floor level."
++# Together with TRAIN_TRIM_TAPER's harder thinning this takes both of the terms
++# that set how much light the ground run throws - its width and its albedo - so
++# the cord keeps its full brightness exactly where the eye should be, at the
++# front opening, and is a dark thread by the time it is out on the floor.
++#
++# Graded over TRIM_DIM_AT..TRIM_DARK_AT, which is the cord's OWN span and not the
++# cloth's - the cloth's grading was praised and is not being moved to fix metal.
++C_SILVER_HEM_D = (0.215, 0.224, 0.252, 1.0)
++SILVER_RUN_ZONES = 4
++
++
++def _silver_run(t, i):
++    def f(a, b):
++        return a + (b - a) * t
++
++    def c(a, b):
++        return tuple(x + (y - x) * t for x, y in zip(a, b))
++
++    return make_material("MageSilverHemRun%d" % i,
++                         c(C_SILVER_HEM, C_SILVER_HEM_D), f(0.52, 0.42),
++                         f(0.200, 0.460), anisotropic=0.30,
++                         coat=f(0.10, 0.0), coat_roughness=0.14,
++                         specular=f(0.80, 0.22))
++
++
++M_SILVER_RUN = [_silver_run(i / (SILVER_RUN_ZONES - 1.0), i)
++                for i in range(SILVER_RUN_ZONES)]
+ M_SILVER_D = make_material("MageSilverDark", C_SILVER_D, 1.0, 0.260,
+                            anisotropic=0.35)
+ # The wrought arm. Two materials, and the important number in both is METALLIC.
+@@ -1777,9 +2645,12 @@ def robe_fold(theta, z, amp):
+     return amp * (main + fine)
+ 
+ 
+-def robe_radius(theta, z, offset=0.0):
++def robe_radius(theta, z, offset=0.0, amp_scale=1.0):
++    """`amp_scale` exists for the raked hem. Fold amplitude comes from
++    ROBE_TABLE at the NOMINAL z, and the rake moves cloth a long way from the
++    height its amplitude was chosen for - see TRAIN_FOLD_GAIN."""
+     r, amp = table_lookup(ROBE_TABLE, z)
+-    return r + robe_fold(theta, z, amp) + offset
++    return r + robe_fold(theta, z, amp * amp_scale) + offset
+ 
+ 
+ def body_shape(theta, r, z):
+@@ -1797,8 +2668,274 @@ def body_shape(theta, r, z):
+                    z))
+ 
+ 
+-def robe_point(theta, z, offset=0.0):
+-    return body_shape(theta, robe_radius(theta, z, offset), z)
++def hem_arc(theta):
++    """Signed angle from the front centreline, wrapped to [-pi, pi].
++
++    This is the atan2-around-Z the raked hem is driven by. Taken from the section
++    PARAMETER rather than from atan2(y, x) of the finished point: body_shape()
++    squares the section off with BODY_POWER, so the two differ by several degrees
++    at the diagonals, and only the parameter is exactly 2*pi periodic - which is
++    what keeps the fold seam and the train's own falloffs agreeing with each
++    other at the back.
++    """
++    return (theta - THETA_FRONT + pi) % (2.0 * pi) - pi
++
++
++# Range of robe_fold() at unit amplitude, derived from the fold constants rather
++# than measured, so an edit to either stays consistent. The fold is |sin|**p minus
++# the mean plus a second harmonic at FOLD_FINE of the depth, so both extremes
++# scale with (1 + FOLD_FINE). Used to normalise the fold into a 0..1 ridge height.
++# (A variant that overrides FOLD_MEAN via the hook at the bottom of the file would
++# leave these stale - override them too, or the flutes lose their zero.)
++FOLD_UNIT_LO = -(1.0 + FOLD_FINE) * FOLD_MEAN
++FOLD_UNIT_HI = (1.0 + FOLD_FINE) * (1.0 - FOLD_MEAN)
++
++
++def train_axis():
++    """Horizontal unit vector the train runs along.
++
++    theta = pi/2 is +Y, i.e. dead astern; TRAIN_SWING rotates that toward +X.
++    Returned as a plain pair because it is used both to displace vertices and,
++    in train_depth(), to classify finished world points.
++    """
++    return (sin(TRAIN_SWING), cos(TRAIN_SWING))
++
++
++def train_profile(z):
++    """The two monotone 0..1 rake profiles at a height: (lift, run).
++
++    Both are plain powers of the same normalised height rather than smoothsteps,
++    and that is the fix for the previous version's flat, one-quad-wide tip. A
++    smoothstep has zero derivative at BOTH ends, so every ring in the bottom
++    10 cm of the skirt landed at the same reach and the last quarter of the train
++    was a degenerate slab. A power > 1 is flat at the hip end, where the rake has
++    to blend into untouched cloth, and still climbing at the hem end, where every
++    ring needs to land somewhere different.
++    """
++    z0 = ROBE_TABLE[0][0]
++    u = (TRAIN_Z_FADE - z) / (TRAIN_Z_FADE - z0)
++    if u <= 0.0:
++        return (0.0, 0.0)
++    u = min(1.0, u)
++    return (u ** TRAIN_LIFT_EASE, u ** TRAIN_RUN_EASE)
++
++
++def front_arc_weight(a):
++    """Falloff of the front cut-away: flat-topped, and asymmetric TWICE OVER.
++
++    Two independent asymmetries, and they do different jobs:
++
++      * in ARC, the leading (his left) side is the shorter of the two, because
++        the train takes the silk away out there and the lift has nothing left to
++        do. Both arcs are narrow - see TRAIN_FRONT_ARC for why the previous
++        190-degree span measured inside target and still read as a fifth of body
++        height.
++      * in HEIGHT, the lift is scaled from full at the trailing edge down to
++        TRAIN_LIFT_LEAD at the leading edge. This is the fix for "a symmetric
++        proscenium arch... its symmetry fights the asymmetry the change was
++        supposed to introduce", and it is the reason this returns a weight rather
++        than a pure 0..1 mask.
++
++    The height ramp is driven by the SIGNED normalised arc so it is smooth across
++    the centreline. Driving it off the sign of `a` instead would put a step right
++    at twelve o'clock, in the middle of the flat top, where it would be a visible
++    crease down the front of the garment.
++
++    Everything downstream inherits both asymmetries for free, which is the point
++    of doing it here rather than in hem_rake(): the hem border's depth blend, the
++    silver cord, and build_underrobe()'s zoning of the exposed column all call
++    this, so the material boundary lands exactly on the geometry no matter how
++    the arcs are retuned.
++    """
++    arc = TRAIN_FRONT_ARC if a >= 0.0 else TRAIN_FRONT_ARC_R
++    x = abs(a) / arc
++    w = 1.0 - smoothstep((x - TRAIN_FRONT_FLAT) / (1.0 - TRAIN_FRONT_FLAT))
++    if w <= 0.0:
++        return 0.0
++    # -1 at the trailing edge, 0 on the centreline, +1 at the leading edge.
++    s = a / arc
++    return w * lerp(1.0, TRAIN_LIFT_LEAD, smoothstep(0.5 * (s + 1.0)))
++
++
++def train_scallop(theta, z):
++    """The train's OWN fold: coarser than the robe's, same cusped profile.
++
++    0 in the notches, 1 on the ridges. Built from the same |sin|**FOLD_POWER the
++    robe is folded by and carrying the robe's own phase drift, so it is the same
++    cloth idea at a lower frequency rather than a second, unrelated wave - which
++    is what lets hem_rake() cross-fade between them without a visible handover.
++
++    See TRAIN_LOBES for why the run needs a coarser fold than the body does.
++    """
++    ph = FOLD_SKEW * sin(theta + FOLD_PHASE) + FOLD_TWIST * z
++    return abs(sin(TRAIN_LOBES * theta + ph)) ** FOLD_POWER
++
++
++def train_arc_weight_a(a):
++    """1 on the train's axis, 0 outside the rear arc, smoothstepped between.
++
++    Takes the HEM ARC rather than theta, because build_underrobe() only has
++    atan2 of a finished point to work from. Pulled out of hem_rake() because the
++    hem border, the silver cord and the under-skirt zoning all have to follow
++    exactly the same arc the cloth is drawn out over; two hand-written copies of
++    this expression is how the border ends up finishing somewhere the train does
++    not.
++    """
++    d = (a - (pi - TRAIN_SWING) + pi) % (2.0 * pi) - pi
++    x = abs(d) / TRAIN_BACK_ARC
++    if TRAIN_BACK_FLAT <= 0.0:
++        return 1.0 - smoothstep(x)
++    return 1.0 - smoothstep((x - TRAIN_BACK_FLAT) / (1.0 - TRAIN_BACK_FLAT))
++
++
++def train_arc_weight(theta):
++    return train_arc_weight_a(hem_arc(theta))
++
++
++def train_depth(p):
++    """How far a world point lies along the train's axis.
++
++    One scalar that says "how far out into the train is this", usable on a
++    finished mesh where the (theta, z) that produced a vertex is long gone. The
++    material zoning and the shell-thinning vertex group in build_robe() both key
++    off it, which is what keeps them agreeing with the geometry without either of
++    them having to know how loft() orders its vertices.
++    """
++    ax, ay = train_axis()
++    return p[0] * ax + p[1] * ay
++
++
++def hem_rake(theta, z, under=False):
++    """Per-vertex warp that turns the bell hem into a raked train.
++
++    Returns (dr, dx, dy, dz, fold_gain). `dr` is a radial tuck handed back to
++    robe_radius() so it lands on the elliptical section like everything else
++    does; dx/dy/dz are world-space, because the train leaves the body's
++    cross-section behind entirely once it is out over the floor; `fold_gain`
++    scales the fold amplitude, see TRAIN_FOLD_GAIN.
++
++    Three regions, every boundary smoothstepped so there is no corner anywhere on
++    the hem line:
++
++        front, 72 deg left / 115 deg right  hem lifts to shin height, tucks in
++        rear,  104 deg swung to his left     hem runs out and down into the train
++        the rest                             the old pooled hem, untouched
++
++    The front arc and the rear arc OVERLAP on his left, and the overlap is
++    resolved rather than avoided: the run's landing term remaps the already
++    lifted height, so cloth that is both raked and swept leaves the body high and
++    settles as it runs out. See TRAIN_FRONT_ARC for what the previous
++    abut-exactly rule cost once the lift got tall.
++
++    On his right there is a long decay into ~110 deg of pooled hem behind him.
++    That asymmetry is the point: it is what a garment trailing off to one side
++    actually looks like, and it is what makes the base read as having a direction
++    rather than just a longer end.
++
++    `under` is the under-robe. It takes TRAIN_UNDER_LIFT of the front lift and
++    TRAIN_UNDER_RUN of the train - both currently zero, and both for reasons
++    written out at those constants. What it does instead, below the raked hem, is
++    become its own slim tapering column: see UNDER_NARROW.
++
++    THE "STAY PARALLEL" RULE ONLY APPLIES WHERE BOTH SHELLS EXIST. Earlier
++    versions followed the front TUCK at full strength on the grounds that the two
++    surfaces sit UNDER_INSET apart and must not z-fight. True above the raked hem
++    and false below it, where there is no outer shell at all - and obeying it
++    everywhere is what handed the exposed column the robe's own hem FLARE, which
++    is the "squat drum, nearly as wide as the robe base" the panel rejected. So
++    the tuck is blended OUT into the narrowing rather than added to it: parallel
++    where they overlap, free where they do not.
++    """
++    ql, qr = train_profile(z)
++    if ql <= 0.0:
++        return (0.0, 0.0, 0.0, 0.0, 1.0)
++    a = hem_arc(theta)
++
++    # -- front: cut away -------------------------------------------------------
++    wf = front_arc_weight(a)
++    dr = -TRAIN_TUCK * wf * ql
++    dx = dy = 0.0
++    dz = TRAIN_LIFT * (TRAIN_UNDER_LIFT if under else 1.0) * wf * ql
++    gain = 1.0 + (TRAIN_FOLD_GAIN - 1.0) * wf * ql
++
++    # -- the exposed under-robe column ----------------------------------------
++    # Applies all the way round, not just across the cut: the column has to be
++    # the narrower shape at every angle or the taper inverts again the moment the
++    # figure is seen from anywhere but dead front. LERPED with the tuck rather
++    # than added, so the two cannot stack into a pinch on the centreline where
++    # both are at full strength.
++    if under:
++        un = smoothstep((UNDER_NARROW_Z - z) / (UNDER_NARROW_Z - ROBE_TABLE[0][0]))
++        if un > 0.0:
++            dr = lerp(dr, -UNDER_NARROW, un)
++            # ...and the corrugation flattens with it, so the column separates
++            # from the silk by TEXTURE and not by value alone - the cue that
++            # survives the 184 downsample. See UNDER_SMOOTH.
++            gain *= lerp(1.0, UNDER_SMOOTH, un)
++
++    # -- rear: drawn out into the train ---------------------------------------
++    wb = train_arc_weight(theta) * (TRAIN_UNDER_RUN if under else 1.0)
++    if wb > 0.0 and qr > 0.0:
++        # TWO folds, cross-faded along the run, and the cross-fade is the point.
++        #
++        # `ridge` is the robe's own fold normalised to 0 in the valleys and 1 on
++        # the ridges - 7 lobes plus a 13-lobe harmonic, the same function the
++        # skirt above is folded by, so nothing stops at the transition.
++        # `scallop` is the train's coarse 5-lobe version of the same shape.
++        # Weighting toward the scallop as the cloth runs out is what gathered
++        # fabric actually does, and it is also the only way an outline made of
++        # fourteen creases becomes one that survives 184 px - see TRAIN_LOBES.
++        ridge = ((robe_fold(theta, z, 1.0) - FOLD_UNIT_LO)
++                 / (FOLD_UNIT_HI - FOLD_UNIT_LO))
++        scallop = train_scallop(theta, z)
++        k = qr * wb
++        fold = lerp(ridge, scallop, smoothstep(k))
++        curl = smoothstep((qr - TRAIN_CURL_AT) / (1.0 - TRAIN_CURL_AT)) * wb
++
++        # Gathers where the run leaves the body: the scallop's notches are pulled
++        # radially IN, so the cloth breaks into three deep folds instead of the
++        # single convex swell two reviewers called an inflated blob. Peaks in the
++        # upper run and is gone by the time the cloth is on the floor.
++        gth = wb * smoothstep(min(1.0, qr / TRAIN_GATHER_AT)) \
++            * (1.0 - smoothstep((qr - TRAIN_GATHER_AT) / (1.0 - TRAIN_GATHER_AT)))
++        dr -= TRAIN_GATHER * (1.0 - scallop) * gth
++
++        # Displaced along the train's FIXED axis, not along the local radial: a
++        # radial push fans the rear arc outward into a wider skirt, an axial one
++        # draws it into a run that points somewhere.
++        run = (TRAIN_REACH * k
++               * (1.0 + TRAIN_FLUTE_R * (scallop - 0.5))
++               * (1.0 - TRAIN_CURL_PULL * curl))
++        ax, ay = train_axis()
++        dx, dy = run * ax, run * ay
++
++        # Height is REMAPPED toward the floor, not offset, and on its OWN
++        # schedule - see TRAIN_LAND. The cloth falls steeply over the first half
++        # of the run and lies flat for the second, which is what lets the run be
++        # long without most of its area being a flat sheet at grazing incidence.
++        # ...and it descends from wherever the FRONT LIFT has already put it, not
++        # from the nominal table height. That one substitution is what joins the
++        # raked front to the run: without it the hem has to come all the way back
++        # down to the floor before the train may start, which is a V in the hem
++        # line and a fan that looks bolted on.
++        land = smoothstep(min(1.0, qr / TRAIN_LAND)) * wb
++        z_run = (lerp(z + dz, TRAIN_TAIL_Z, land)
++                 + TRAIN_BILLOW * sin(pi * land)
++                 + TRAIN_FLUTE * fold * k
++                 + TRAIN_CURL_LIFT * curl)
++        dz = z_run - z
++        gain = max(gain, 1.0 + (TRAIN_FOLD_GAIN - 1.0) * k)
++
++    return (dr, dx, dy, dz, gain)
++
++
++def robe_point(theta, z, offset=0.0, under=False):
++    dr, dx, dy, dz, gain = hem_rake(theta, z, under)
++    p = body_shape(theta, robe_radius(theta, z, offset + dr, gain), z)
++    p.x += dx
++    p.y += dy
++    p.z += dz
++    return p
+ 
+ 
+ def robe_open_half(z):
+@@ -1823,12 +2960,66 @@ def build_underrobe():
+     Kept exactly UNDER_INSET inside the robe surface using the SAME fold
+     function, so the two shells stay parallel everywhere. Give it a different
+     fold amplitude instead and the peaks of one punch through the other.
++
++    It does NOT follow the outer robe's front lift (TRAIN_UNDER_LIFT) and it does
++    NOT follow the train (TRAIN_UNDER_RUN) - both zero, both explained at those
++    constants. This shell is what the cut-away reveals, so it runs on down to the
++    floor while the silk rakes up off it; and it is a plain cone under the train
++    rather than a second copy of it.
++
++    It does follow the TUCK, so the sampling rate goes up anyway: 40 columns is
++    fine for a cone of revolution but it chords across the tucked front by more
++    than the 2 mm the two shells are held apart, and a chord across a concave
++    stretch falls on the wrong side - i.e. the under-robe surfaces through the
++    robe.
+     """
+-    zs = robe_z_samples(0.060)
+-    rings = [[robe_point(2 * pi * i / 40, z, -UNDER_INSET) for i in range(40)]
++    zs = robe_z_samples(0.048)
++    rings = [[robe_point(2 * pi * i / 72, z, -UNDER_INSET, under=True)
++              for i in range(72)]
+              for z in zs]
+     ob = loft("Underrobe", rings, mat=M_ROBE_IN, closed=True,
+               cap_start=True, cap_end=True)
++
++    # -- the exposed skirt ----------------------------------------------------
++    # Everything below the outer robe's RAKED hem is in full view and gets the
++    # under-skirt cloth; everything above it is a recess and stays lining. See
++    # C_UNDER_SKIRT for why those cannot be the same material.
++    #
++    # The hem height is recomputed here from the same falloffs the geometry uses,
++    # rather than being a constant, because the raked hem is not level: it peaks
++    # at z ~0.28 on the trailing side of the front, is back on the floor by 40
++    # degrees to his right and 32 to his left, and is swept away rather than
++    # lifted where the train leaves. A flat threshold would leave a dark crescent
++    # on one side and a pale one on the other. Because front_arc_weight() now
++    # carries the height asymmetry as well as the arc, that stays true without a
++    # second copy of the ramp living here.
++    #
++    # GOTCHA: theta here comes from atan2 of the finished point, not from the
++    # section parameter, so it disagrees with hem_arc()'s input by a few degrees
++    # at the diagonals (body_shape squares the section off). That is fine for
++    # choosing a material zone and would not be fine for geometry.
++    z0 = ROBE_TABLE[0][0]
++    base = len(ob.data.materials)
++    for step in M_UNDER_SKIRT:
++        ob.data.materials.append(step)
++    for poly in ob.data.polygons:
++        c = poly.center
++        if c.z > z0 + TRAIN_LIFT + UNDER_SKIRT_FADE:
++            continue
++        a = hem_arc(math.atan2(c.y, c.x))
++        hem_z = z0 + TRAIN_LIFT * max(front_arc_weight(a), train_arc_weight_a(a))
++        t = 1.0 - smoothstep((c.z - hem_z) / UNDER_SKIRT_FADE)
++        # CONTACT DARKENING. The exposure ramp is pulled back toward the lining
++        # over the last UNDER_CONTACT of height, so the column grounds itself in
++        # near-black instead of ending on a flat cut at the brightest value it
++        # carries. There is no light in this rig low enough to produce a contact
++        # shadow, and without one the base of a vertical column against a lit
++        # floor reads as a cylinder standing on a plate rather than cloth meeting
++        # the ground.
++        t *= smoothstep((c.z - z0) / UNDER_CONTACT)
++        if t > 0.0:
++            poly.material_index = base + min(UNDER_SKIRT_ZONES - 1,
++                                             int(t * UNDER_SKIRT_ZONES))
+     return ob
+ 
+ 
+@@ -1851,7 +3042,50 @@ def build_robe():
+         rings.append([robe_point(lerp(a0, a1, i / (n_th - 1)), z)
+                       for i in range(n_th)])
+     ob = loft("Robe", rings, mat=M_ROBE, closed=False)
+-    solidify(ob, ROBE_THICK, lining=M_ROBE_IN)
++    m = solidify(ob, ROBE_THICK, lining=M_ROBE_IN)
++
++    # -- tonal zoning ---------------------------------------------------------
++    # The M_ROBE_RUN blend laid down on one mesh, chosen per face by how far out
++    # along the train that face sits. See M_ROBE_RUN for why the train needs its
++    # own end of the blend at all, and TRAIN_ZONES for why it is six steps and
++    # not one threshold.
++    #
++    # Gated on HEIGHT as well as depth, which the previous version was not:
++    # train_depth() is a plain dot product with a horizontal axis, so it is just
++    # as large on the rear-left of the CHEST as it is on the train, and the
++    # shoulder was quietly starting to dim. Nothing above the hip is part of this
++    # change.
++    #
++    # Slot order is dictated by the Solidify modifier: it offsets the material
++    # index of the inner surface it generates by one, so every outer slot has to
++    # be followed by the lining. Hence the pairing below, and hence the stride of
++    # two when the index is computed.
++    base = len(ob.data.materials)
++    for step in M_ROBE_RUN:
++        ob.data.materials.append(step)
++        ob.data.materials.append(M_ROBE_IN)
++    for poly in ob.data.polygons:
++        if poly.center.z >= TRAIN_Z_FADE:
++            continue
++        t = smoothstep((train_depth(poly.center) - TRAIN_DIM_AT)
++                       / (TRAIN_DARK_AT - TRAIN_DIM_AT))
++        if t > 0.0:
++            k = min(TRAIN_ZONES - 1, int(t * TRAIN_ZONES))
++            poly.material_index = base + 2 * k
++
++    # -- shell thinning -------------------------------------------------------
++    # The tip is seen almost edge-on, and 18 mm of wall there read as carved
++    # stone with a lit crease along the top. Solidify scales its thickness by a
++    # vertex group, so the wall tapers to TRAIN_THIN of full along the run. This
++    # also buys back most of the floor clearance the flattening cloth costs: a
++    # thinner shell has less thickness to project straight down at the tip.
++    vg = ob.vertex_groups.new(name="TrainThin")
++    for v in ob.data.vertices:
++        w = lerp(1.0, TRAIN_THIN,
++                 smoothstep((train_depth(v.co) - TRAIN_THIN_AT) / TRAIN_THIN_W))
++        vg.add([v.index], w, 'REPLACE')
++    m.vertex_group = vg.name
++
+     bevel(ob, width=0.004, segments=2)
+     return ob
+ 
+@@ -1880,24 +3114,121 @@ def build_robe_trim():
+                    mat=M_SILVER, u=12, v=8,
+                    rot=look_at_euler(c, Vector((0.0, 0.0, z))))
+ 
+-    # Hem BORDER: a deep band of darker cloth round the bottom of the skirt with
+-    # the silver piping along its top edge. A single piped line at the hem is a
+-    # trim; a band is tailoring, and it gives the bottom of the robe some weight
+-    # to sit on instead of just stopping.
+-    z0, z1 = ROBE_TABLE[0][0] + 0.006, ROBE_TABLE[0][0] + HEM_BAND
+-    rows, n = 4, 92
++    # Hem BORDER: a band of darker cloth round the bottom of the garment. A band
++    # is tailoring where a single piped line is only a trim, and it gives the
++    # bottom of the robe some weight to sit on instead of just stopping.
++    #
++    # It is sampled from robe_point(), so it inherits hem_rake() without a line
++    # of its own and sweeps up over the cut-away front, down round the sides and
++    # out along the train to the tip. If it is ever rebuilt from anything other
++    # than robe_point() it has to be given the rake explicitly, or the border
++    # goes back to being a level ring on a hem that is no longer level.
++    #
++    # The band's DEPTH is per-column, not constant, and there are now TWO reasons
++    # for that.
++    #
++    # Out on the train: nominal z is not arc length. The run flattens near the
++    # hem, so a 10 cm slice of nominal z maps to about 3 mm of actual cloth and
++    # the border collapses into a crushed bead. Widening the slice to
++    # TRAIN_BAND_Z over the train's own arc maps it back to roughly HEM_BAND of
++    # real length, so the border is one uniform width the whole way round.
++    #
++    # Across the RAKED FRONT it does the opposite - it shrinks to HEM_BAND_FRONT,
++    # and that is the fix for the unanimous "there is no visible band of
++    # near-black under-robe". The cut-away was in the geometry all along; what
++    # was missing was CONTRAST across it. A full-depth border puts 10 cm of deep
++    # M_ROBE_D immediately above the silver cord, and the under-skirt below the
++    # cord is darker still, so the eye met silk, then dark, then dark, then floor
++    # and read the whole lower half as one shadowed mass. Narrowed to 3 cm, the
++    # bright silk itself comes down to the cord and the layering reads in three
++    # clear steps: lit silk, silver line, near-black column.
++    z_hem = ROBE_TABLE[0][0] + 0.006
++    rows, n = 10, 96
+     rings = []
+     for i in range(rows + 1):
+-        z = lerp(z0, z1, i / rows)
+-        oh = robe_open_half(z)
+-        rings.append([robe_point(lerp(THETA_FRONT + oh,
+-                                      THETA_FRONT + 2 * pi - oh, j / (n - 1)),
+-                                 z, 0.005) for j in range(n)])
++        t = i / rows
++        # `oh` is an angular span so it has to be per-ring, not per-column; taken
++        # at the depth the band has at the FRONT, which is where the opening is.
++        oh = robe_open_half(lerp(z_hem, z_hem + HEM_BAND, t))
++        ring = []
++        for j in range(n):
++            th = lerp(THETA_FRONT + oh, THETA_FRONT + 2 * pi - oh, j / (n - 1))
++            a = hem_arc(th)
++            depth = lerp(lerp(HEM_BAND, HEM_BAND_FRONT, front_arc_weight(a)),
++                         TRAIN_BAND_Z, train_arc_weight_a(a))
++            ring.append(robe_point(th, lerp(z_hem, z_hem + depth, t), 0.005))
++        rings.append(ring)
+     band = loft("Robe_HemBorder", rings, mat=M_ROBE_D, closed=False)
+     solidify(band, 0.009)
++    # Same reason as the robe's own zoning, and graded over the same span so the
++    # border does not change tone a step ahead of the cloth it sits on. No lining
++    # was passed to solidify() above, so its material offset is zero and the
++    # inner faces follow the outer ones into the same slot - hence a stride of
++    # one here, not two.
++    bbase = len(band.data.materials)
++    for step in M_ROBE_RUN:
++        band.data.materials.append(step)
++    for poly in band.data.polygons:
++        t = smoothstep((train_depth(poly.center) - TRAIN_DIM_AT)
++                       / (TRAIN_DARK_AT - TRAIN_DIM_AT))
++        if t > 0.0:
++            poly.material_index = bbase + min(TRAIN_ZONES - 1,
++                                              int(t * TRAIN_ZONES))
+     bevel(band, width=0.003, segments=2)
+ 
+-    sweep("Robe_HemBand", rings[-1][::2], TRIM_R * 1.1, M_SILVER, segs=8)
++    # ONE silver line, on the hem itself, and it is the most important 40 lines
++    # in this change. Three reviewers independently named the outline rather than
++    # the fill as the thing that has to carry the wedge at 184 px, and the last
++    # version lost it twice over: the cord died partway along the train, and two
++    # silver curves crossed each other at the front where the border's top edge
++    # was piped as well.
++    #
++    # So: the border's top edge is no longer piped at all, and this single cord
++    # traces the entire new hem - up over the cut-away front, round the sides,
++    # out along the whole cusped outline of the train and off the tip. Sampled at
++    # its own rate rather than from the border's rings, because the tip outline
++    # is scalloped by TRAIN_FLUTE_R and every other vertex of a 96-column band
++    # cuts the corners off those cusps.
++    #
++    # Fatter than the rest of the piping, deliberately: at 184 px the model is
++    # about 130 px tall, so TRIM_R's 15 mm cord is one pixel wide and one pixel
++    # is not an outline. 1.45x puts it just over two, which is the difference
++    # between a line and a suggestion; it came down from 1.55 for the "too thick"
++    # half of the review note, which is as far as it can go before the icon loses
++    # the outline that is the whole reason the cord exists.
++    #
++    # It then THINS AND DIMS along the ground run, and only there. Two reviewers:
++    # "too thick and too bright at its brightest; it is the strongest silver on
++    # the model and it is at the hem, not at the chest." A third praised the cord
++    # as it stood, so nothing is shortened and the front is untouched - the taper
++    # simply starts as soon as the cord turns into the train rather than half way
++    # along it, and the metal grades into M_SILVER_HEM_D over the same span. Full
++    # brightness stays where the character's focus is, on the front opening and
++    # the hat band.
++    n_cord = 168
++    oh = robe_open_half(z_hem)
++    pts, taper = [], []
++    for j in range(n_cord):
++        th = lerp(THETA_FRONT + oh, THETA_FRONT + 2 * pi - oh, j / (n_cord - 1))
++        pts.append(robe_point(th, z_hem, 0.007))
++        w = train_arc_weight(th)
++        taper.append(1.0 - (1.0 - TRAIN_TRIM_TAPER)
++                     * smoothstep((w - TRAIN_TRIM_AT)
++                                  / (TRAIN_TRIM_TO - TRAIN_TRIM_AT)))
++    cord = sweep("Robe_HemBand", pts, TRIM_R * 1.45, M_SILVER_HEM, segs=8,
++                 taper=taper)
++    # Graded rather than switched, for the reason the robe's own zoning is: a
++    # threshold on world position cuts diagonally across a quad grid and every
++    # quad flips as a unit, which on an eight-sided tube is a very visible bead.
++    cbase = len(cord.data.materials)
++    for step in M_SILVER_RUN:
++        cord.data.materials.append(step)
++    for poly in cord.data.polygons:
++        t = smoothstep((train_depth(poly.center) - TRIM_DIM_AT)
++                       / (TRIM_DARK_AT - TRIM_DIM_AT))
++        if t > 0.0:
++            poly.material_index = cbase + min(SILVER_RUN_ZONES - 1,
++                                              int(t * SILVER_RUN_ZONES))
+ 
+ 
+ def build_sash():

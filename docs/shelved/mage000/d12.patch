@@ -1,0 +1,647 @@
+diff --git a/C:/Users/LachlanB/AppData/Local/Temp/claude/C--Users-LachlanB-TD/5678655d-eb99-40b2-9b1b-8de599ade7d3/scratchpad/theirs.py b/Assets/Blender/blender_mage000.py
+index 6f7b4f9..fd98ce0 100644
+--- a/C:/Users/LachlanB/AppData/Local/Temp/claude/C--Users-LachlanB-TD/5678655d-eb99-40b2-9b1b-8de599ade7d3/scratchpad/theirs.py
++++ b/Assets/Blender/blender_mage000.py
+@@ -100,7 +100,7 @@ Z_NECK_BASE = 1.545
+ Z_NECK_TOP  = 1.793
+ Z_HEAD     = 1.838        # head centre
+ Z_BRIM     = 1.883        # hat brim reference plane
+-Z_HAT_TIP  = 2.265        # crown apex. The TIP itself hangs below this - see
++Z_HAT_TIP  = 2.355        # crown apex. The TIP itself hangs below this - see
+                           # HAT_SPINE, the point curls back over and down.
+ 
+ HEAD_R     = 0.106
+@@ -548,15 +548,30 @@ BRIM_WAVE = 0.028         # the brim is cloth, not a dinner plate. At 0.012 it
+ #
+ # The curl only reads off-axis. Any future camera work that only checks `front`
+ # will conclude the hat is a stubby cone and be wrong.
++# The STRAIGHT section was lengthened by 90 mm on 2026-08-02 and the hook
++# translated up unchanged with it. Nothing about the hook's shape moved - it is
++# the same curve at the same y values - but the cone below it has to carry three
++# things now (bare felt, the Salt Crown's circlet, and blades long enough to
++# break the outline) and at the old height they were stacked on top of each other
++# with no cloth showing between. A hat that reads short and chunky is also the
++# wrong hat for this character. Everything downstream is parameterised off this
++# list, so the tilt, the dent and the attach point all follow on their own.
+ HAT_SPINE = [
+-    (0.000, 0.000, 1.788),
+-    (0.000, 0.022, 1.958),
+-    (0.000, 0.078, 2.105),
+-    (0.000, 0.165, 2.211),
++    (0.000, 0.000, 1.788),   # springs from the brim; do not move
++    (0.000, 0.020, 2.010),
++    (0.000, 0.078, 2.195),
++    (0.000, 0.165, 2.301),
+     (0.000, 0.300, Z_HAT_TIP),
+-    (0.000, 0.438, 2.241),   # the tip, hanging back and down
++    (0.000, 0.438, 2.331),   # the tip, hanging back and down
+ ]
+ HAT_RADII = [0.122, 0.100, 0.074, 0.049, 0.027, 0.008]
++# Samples per spine span. This is a RESOLUTION number, not a shape number: the
++# curve it traces is identical at 7 or at 26. It is 26 because the Salt Crown's
++# crush is a 22 mm feature and at 7 the rings around it were ~26 mm apart in z,
++# so the crush was below the mesh's Nyquist limit and could not appear however
++# deep it was set - see the block above CROWN_BITE_R. Anything that narrows
++# CROWN_DENT_FALL further has to raise this to match.
++HAT_SPINE_STEPS = 26
+ 
+ HATBAND_Z = 1.919         # sits just above where the brim springs
+ HATBAND_R = 0.104
+@@ -574,6 +589,218 @@ HAT_PIVOT = Vector((0.0, 0.010, 1.760))
+ HAT_OVAL   = 0.10
+ HAT_CREASE = 0.13
+ 
++# -- The Salt Crown of Vael Adrest ---------------------------------------------
++# At Vael Adrest he stopped the tide-siege and the survivors offered him the
++# city's crown. He took the metal and refused the throne, and has worn it jammed
++# down over a road hat ever since so that nobody can mistake it for a claim. So
++# this is a circlet worn OVER the felt and crushed into it - not a coronet
++# sitting neatly under a brim - and the cloth has to GIVE under it (CROWN_BITE_R)
++# or the whole thing reads as a decal printed on the hat.
++#
++# It is also the cheapest silhouette win left on the model: at 184x184 the head
++# is otherwise a smooth dark blob, and an asymmetric spiked crest breaking upward
++# and backward names "ancient king / hierophant" instantly. The spires follow the
++# hat's deliberate 7.5-degree cock instead of quietly correcting it.
++#
++# EVERY number below is sized against ONE test, judged at 184 BEFORE the hero
++# view: the crest has to survive as two or three individually countable hard
++# shapes. Two earlier passes died on that test in different ways - first the
++# blades were too short and lay flat on the felt; then they were tall and splayed
++# but still so narrow they dissolved into grey fuzz at icon size, which is worse
++# than nothing because it fogs the crisp pointed-hat outline that was already
++# working. Width and count are therefore silhouette numbers, not taste numbers.
++CROWN_ON = True
++# Ride height: about 40% of the way up the visible cone, which is a long way
++# above the felt band. Sat lower, the circlet, the band and the brim stacked into
++# three concentric rings directly above the face-void - the model's cleanest
++# transition turned into its busiest area, and the "worn OVER a hat" story was
++# never told because no bare felt showed beneath the metal. Raising it is also
++# what gives the blades sky behind them instead of brim.
++CROWN_Z      = HATBAND_Z + 0.101
++CROWN_R      = 0.088      # major radius, and SMALL on purpose. The ring has to
++CROWN_MINOR  = 0.013      # sit down IN the waist the dent cuts, with felt
++                          # rolling proud of it - a ring wider than the cloth
++                          # around it is a hoop parked on a hat.
++                          # Floor: CROWN_R - CROWN_MINOR must stay under the
++                          # DENTED cone radius here (~0.080 at its widest) or the
++                          # circlet stops touching the felt and the audit calls it
++                          # levitating.
++CROWN_SQUASH = 0.62       # flattens the section: a band, not a sausage
++CROWN_TAPER  = 0.07       # ...and the band is a shallow truncated CONE, not a
++                          # cylinder: its top edge pulls in to follow the hat's
++                          # own taper. A straight cylinder cuts across the cone
++                          # and reads machined on an otherwise all-soft figure.
++CROWN_LEAN   = radians(6.0)
++                          # the circlet does not sit square. Deliberate asymmetry
++                          # reads as history; unequal parts with nothing else
++                          # supporting them read as sloppy modelling, so the lean,
++                          # the flattened arc and the snapped blade all have to
++                          # be present together or none of them land.
++# The felt has to visibly GIVE, LOCALLY. A wide shallow squeeze made the whole
++# cone read as narrower and shorter - it cost the hat volume, the exact opposite
++# of the intent - so the squeeze is deep (~26% of the cone radius) but narrow,
++# and the displaced cloth comes back as a roll that OVERHANGS the metal's outer
++# edge far enough to break the light.
++# WHY THIS NEVER RENDERED. Four panels running reported "no crush at all", and
++# four passes answered by making CROWN_DENT bigger, which could not have worked:
++# the failure was SAMPLING, not amplitude. The crown sweep gets its rings from
++# catmull(HAT_SPINE, n), and at the old n=7 the samples near the circlet were
++# ~26 mm apart in z while CROWN_DENT_FALL was 22 mm - the entire waist was
++# narrower than one sample spacing. The five rings covering the whole feature
++# landed at u = -3.22, -1.81, -0.45, 0.87, 2.18, so the waist reached only 81% of
++# its depth and the roll - which peaks at |u| = 1.5 - had NO sample near its crest
++# at all. Catmull smoothing across the sweep and then subsurf erased what little
++# survived. Deepening an aliased feature only aliases harder, which is exactly
++# what the last four attempts observed and misread as "not deep enough".
++#
++# HAT_SPINE_STEPS below is the actual fix. Everything here is now sized in real
++# millimetres and can be trusted to appear.
++CROWN_DENT_FALL = 0.022   # height scale of the squeeze: narrow = a waist
++CROWN_BITE_R    = 0.080   # THE key number. At the contact line the metal simply
++                          # wins: the cloth is forced to the ring's own circular
++                          # radius instead of keeping the hat's oval section. Set
++                          # 5 mm proud of the ring's inner wall (CROWN_R -
++                          # CROWN_MINOR = 0.075) so the tube stays buried in felt
++                          # at EVERY azimuth. That is what stops the circlet
++                          # reading as floating hardware, and it is also why the
++                          # crush is uniform: a rigid ring crushing a soft oval
++                          # hat makes it round, it does not politely follow it.
++                          # The hat's oval returns above and below the waist, so
++                          # the cone is only circular exactly where the metal is.
++CROWN_ROLL      = 0.026   # displaced cloth, in metres of extra radius at the
++                          # crest of the roll. The cone is ~0.083-0.103 here and
++                          # the ring's outer edge is 0.101, so this is sized to
++                          # push the felt PAST the metal at the strong lobes and
++                          # leave it tucked under between them.
++CROWN_ROLL_AT   = 1.35    # where the crest sits, in units of u. With the fixed
++                          # sampling there are ~4 rings between the waist and the
++                          # crest, which is what lets it read as a rolled edge
++                          # rather than a step.
++CROWN_ROLL_WID  = 0.58    # and how far it spreads. This is a CLEARANCE number,
++                          # not a shape one. At 0.85 the roll still had amplitude
++                          # ~66 mm below the ring, which sprawled down across the
++                          # 101 mm of bare felt the ring height exists to create
++                          # and closed the gap to the hat band - so two panels
++                          # read the circlet as fused to the band and "a second
++                          # brim" even though the geometry put it high. Tight
++                          # enough here that the cloth returns to the plain cone
++                          # well before the band.
++CROWN_ROLL_LOW  = 0.50    # the cloth rolls over BOTH edges now. It was 0.25 -
++                          # nearly suppressed - back when a full lower roll added
++                          # a third concentric line above the hat band. The lower
++                          # roll still clears the metal, but it is the smaller of
++                          # the two: cloth crushed downward has the brim to spread
++                          # into, cloth crushed upward has nowhere to go.
++# Uneven on purpose: a 2-lobe and a 3-lobe term at different phases, so the cloth
++# rolls over the metal in two or three places of DIFFERENT strength and tucks
++# under between them. An even doughnut just gives the circlet a matching second
++# disc to sit in, which is the "concentric bands" read.
++CROWN_ROLL_L2   = 0.34
++CROWN_ROLL_L3   = 0.30
++CROWN_ROLL_A2   = radians(115.0)
++CROWN_ROLL_A3   = radians(40.0)
++
++# FOUR blades. Angles are in the hat's frame: 0 = +X = his left, the side the hat
++# droops over; 180 = -X, the side it cocks UP.
++#
++# Clearing the hat's outline is SOLVED and must not regress, so every number here
++# was re-checked against the cone's projected radius before being written down.
++# What changed is the arrangement, which read as goldsmithing rather than loot:
++# the old set put its two long blades at 318 and 190 - near mirror images about
++# the front centreline, at similar heights - so the front view came out as rabbit
++# ears / a jester's cap / a fleur-de-lis tiara, and the hat's own point was just
++# the middle spike of three.
++#
++# Three fixes, all in this table:
++#   * ROTATED OFF THE CAMERA AXIS and de-mirrored. No pair of azimuths now sums to
++#     180 (mod 360), which is the condition for mirroring in the front view.
++#   * TWO PUSHED TO THE REAR. 65 and 140 both sit behind the cone (+Y), so the set
++#     reads as spread around the crown rather than fanned in one plane.
++#   * SHORTENED by a quarter to a third, and the spread widened: the three intact
++#     blades run 0.196 / 0.150 / 0.126, a ratio of 1.56, and the tallest tip now
++#     lands at z 2.254 against the hat's apex at 2.355 - so the hat's point wins
++#     the top of the silhouette outright.
++# The 140 blade is the snapped stub and is short, which also quietly settles the
++# contested note about a rear blade tangling the hook: nothing back there is long
++# enough to reach it any more.
++#
++# Columns are (angle, height, out, wide, snap):
++#   out  - splay away from the cone, as a fraction of height. NOT a constant-angle
++#          number: CREST_RAKE tips every blade backward about +X, which cancels
++#          splay on the front blades and adds to it on the rear ones, so `out`
++#          has to be solved per azimuth. These four were solved to land at 30, 32,
++#          29 and 29 degrees off the cone axis - inside the 20-40 band, and even
++#          the two with out = 0 still splay, purely from the rake.
++#   wide - root width multiplier, so the four are not stamped from one die.
++#   snap - where up the blade the taper stops, leaving a broken stump instead of
++#          a point. 1.0 is intact.
++CROWN_SPIRES = [
++    #  angle  height  out   wide  snap
++    ( 300.0,  0.196,  1.12, 1.00, 1.00),   # tallest, front-right into open sky
++    ( 205.0,  0.150,  0.61, 0.88, 1.00),   # the cocked-up flank
++    (  65.0,  0.126,  0.00, 1.06, 1.00),   # rear-right; rake alone splays it
++    ( 140.0,  0.100,  0.00, 1.18, 0.42),   # rear-left, snapped: broad, torn off
++]
++SPIRE_W     = 0.042       # half-width ACROSS the blade at its root: 84 mm, about
++                          # 5 px at 184. 60 mm was still a smudge. This is the
++                          # single most important number in the block.
++SPIRE_D     = 0.010       # half-depth THROUGH it. Was 0.019, giving a 2.2:1
++                          # section that rendered as a rounded lozenge, petal or
++                          # ear with no thickness anywhere. At 0.010 the blade is
++                          # a 4.2:1 PLATE, which is what "thin plate with a crisp
++                          # bevelled edge" actually requires.
++# The section is a lens with two DIFFERENT halves. The outer half is deliberately
++# full and flat - a broad facet turned toward the key - because a bright 1 px
++# arris cannot carry a value break at this scale: separation needs surface AREA,
++# not a rim line. The inner half keeps a sharp keel so the blade still reads as
++# metal rather than as a paddle.
++SPIRE_LENS_OUT = 0.35     # <1 fills the outer face out into a flat facet. Pulled
++                          # down from 0.60: at 0.60 the "flat" facet still curved
++                          # away over its whole width and shaded off to nothing,
++                          # so the instruction to angle a broad facet at the key
++                          # never actually rendered. At 0.35 the outer face is
++                          # genuinely planar across the middle and turns down hard
++                          # at each arris, which is what makes an edge to find.
++SPIRE_LENS_IN  = 1.90     # >1 pinches the inner face to a keel
++SPIRE_RIDGE = 0.42        # a raised spine down the centre of the outer face, as a
++                          # fraction of half-depth. With the value dropped this far
++                          # the blades can no longer be found by brightness, so
++                          # they have to be found by form: the ridge splits the
++                          # facet into two planes at slightly different angles, so
++                          # one catches the key and one does not, and the blade
++                          # reads as a faceted object rather than a flat cutout.
++SPIRE_JAG   = 0.016       # depth of the torn zig-zag across a snapped blade's
++                          # break. A flat cut reads as a modelling shortcut; a
++                          # ragged one reads as damage, and damage is what turns
++                          # unequal heights from an error-read into a story-read.
++SPIRE_SHOULDER      = 0.64   # blade stays near full width to here, then points
++SPIRE_SHOULDER_DROP = 0.18   # how much it narrows over that first stretch
++                          # Together: a leaf, tapering only over the top third.
++                          # A power-law taper from the root is what made every
++                          # earlier pass sub-pixel over most of its length even
++                          # when the root was wide enough.
++SPIRE_CURVE = 0.16        # a little extra +Y drift near the tip, so the blade is
++                          # an arc rather than a straight stick
++CREST_RAKE  = radians(20.0)
++                          # the whole crest tips backward about +X. Applied as a
++                          # rotation of each blade's GROWTH vector, not as a +Y
++                          # offset: an offset cancels the outward splay on the
++                          # front blades (out is -Y there) and leaves them
++                          # standing upright against the felt, which is exactly
++                          # the "rises up the concave front of the hook" failure.
++SPIRE_SEGS  = 24          # even and a multiple of 4, so vertices land exactly on
++                          # both side arrises and on the outer crest - the lit
++                          # facet that keeps a blade visible against dark felt is
++                          # picked out by vertex index, so this must stay
++                          # divisible by 4
++
++# Wear on the ring itself: one short arc hammered flat, on the drooping side,
++# which is the same side that has lost its blades. Two thousand-year-old dents
++# telling the same story in the same place.
++CROWN_NICK     = 0.060            # depth, as a fraction of radius
++CROWN_NICK_AT  = radians(35.0)
++CROWN_NICK_ARC = radians(26.0)
++
+ # -- Staff ---------------------------------------------------------------------
+ # Point-down on the ground at his right. The spine passes through the grip point
+ # by construction - see the comment on GRIP_C.
+@@ -1239,6 +1466,61 @@ M_SILVER  = make_material("MageSilver",  C_SILVER,  1.0, 0.062, anisotropic=0.55
+                           specular=0.90)
+ M_SILVER_D = make_material("MageSilverDark", C_SILVER_D, 1.0, 0.260,
+                            anisotropic=0.35)
++# The Salt Crown's metal: a PAIR of matte pewters. METALLIC is the number that
++# matters here, not roughness, and getting that backwards is why this design has
++# been rejected three rounds running.
++#
++# The crown kept coming back with BOTH of two apparently opposite complaints at
++# once - "the hottest specular on the upper half of the figure" AND "a lumpy grey
++# smudge / invisible at 184". Three passes treated those as two problems and
++# tuned roughness to split the difference (0.26 -> 0.52 -> 0.86). They are one
++# problem. At metallic 1.0 there is NO diffuse term at all, so a metal in this rig
++# - five small area lights against a 0.03 world - is a mirror of a black room and
++# shows up ONLY where a highlight happens to land. Raising roughness does not make
++# such a surface matte, it makes it ABSENT: it spreads the one light response
++# thinner while adding nothing back, so the ring reads as a hot pinpoint on one
++# facet and near-felt-black over the other 95% of itself. That is exactly the
++# "pinned at the wrong end" note - there is a lot of headroom between near-black
++# and competing with the gem, and full metallic cannot reach any of it.
++#
++# So, following the wrought arm below, which hit this same trap and solved it:
++# both of these are deliberately PART DIELECTRIC. At metallic 0.40 about 60% of
++# the response is Lambertian off the albedo, which holds a steady mid value across
++# the whole surface no matter where the lights are, and the roughness can then
++# stay high enough (0.72-0.82) that the remaining metallic lobe is broad and dull
++# with no hot spot anywhere. Dull AND present, which is what "matte regalia" needs
++# and what roughness alone was never able to deliver.
++#
++# The two values are a VALUE pair, not a shine pair - same metal, same roughness
++# band, different albedo - because separation at icon size needs surface AREA. The
++# whole outer half of each blade and the ring's upper band take M_CROWN_LIT;
++# everything turned away takes M_CROWN. A 1 px bright arris does not survive
++# downscaling whatever it is made of, which is why three passes of edge rims were
++# invisible at 184.
++#
++# LEVEL. Fixing the absence overshot straight past the target and the metal came
++# back as the brightest value on the model - measured off the render, the blades
++# ran mean 0.330 / p95 0.701 against the beard's 0.270 / 0.572, and out-massed the
++# gem at the top of frame. That inverts the one hierarchy the whole palette is
++# built on, and it is the same error as before with the sign flipped: this design
++# has now failed at BOTH ends of the same axis.
++#
++# So the albedo comes down hard while metallic stays at 0.40. Keeping metallic is
++# what keeps the surface present at all; the albedo is what sets where it sits.
++# Targets, all from the panel and mutually consistent: clearly darker than the
++# beard, roughly midway between the robe and the beard, at or below the silver hem
++# trim, gem unambiguously the brightest pixel. Roughness moves into the 0.60-0.75
++# band and there is no coat on either.
++#
++# Effective diffuse: body ~0.09, facet ~0.16, against the beard at 0.25 and the
++# robe at 0.011. The metal is now meant to be found by EDGE AND SILHOUETTE, never
++# by brightness - which is why this change and the flat-facet change below are one
++# idea in two places. Drop the value without giving the blades a real facet and
++# they would simply go back to being invisible.
++M_CROWN     = make_material("MageCrownPewter", (0.140, 0.150, 0.178, 1.0),
++                            0.40, 0.700, specular=0.25)
++M_CROWN_LIT = make_material("MageCrownPewterLit", (0.250, 0.264, 0.300, 1.0),
++                            0.40, 0.640, specular=0.30)
+ # The wrought arm. Two materials, and the important number in both is METALLIC.
+ #
+ # The first version of this was C_PROS at 0.30 with metallic 1.0 and roughness 0.43
+@@ -2721,8 +3003,18 @@ def build_hat():
+ 
+     # Crown as a shaped sweep rather than a circular one, so the felt has an oval
+     # section and a crease running up one side.
+-    spine = catmull([hat_xf(p) for p in HAT_SPINE], 7)
+-    rr = catmull([(r, 0.0, 0.0) for r in HAT_RADII], 7)
++    # Smooth the spine in the hat's own upright frame and tilt it afterwards.
++    # hat_xf is affine and a Catmull-Rom sample is an affine combination of its
++    # control points, so the curve that comes out is identical either way - but
++    # this order leaves the UNTILTED z of every sample in hand, which is what the
++    # circlet's compression dent needs in order to find the band line.
++    # HAT_SPINE_STEPS, not 7. See the block on CROWN_DENT_FALL: at 7 the rings
++    # near the circlet were further apart in z than the crush was wide, so the
++    # crush could not be represented at all no matter how deep it was set. Both
++    # curves have to use the same count because ring() indexes rr by the same t.
++    spine_local = catmull([Vector(p) for p in HAT_SPINE], HAT_SPINE_STEPS)
++    spine = [hat_xf(p) for p in spine_local]
++    rr = catmull([(r, 0.0, 0.0) for r in HAT_RADII], HAT_SPINE_STEPS)
+ 
+     def ring(t, a):
+         i = min(len(rr) - 1, int(t * (len(rr) - 1)))
+@@ -2732,7 +3024,41 @@ def build_hat():
+         fade = 1.0 - smoothstep((t - 0.55) / 0.45)
+         m = 1.0 + fade * (HAT_OVAL * cos(2.0 * a)
+                           - HAT_CREASE * (0.5 + 0.5 * cos(a - 0.9)) ** 3.0)
+-        return (r * m * cos(a), r * m * sin(a))
++        rad = max(0.004, r * m)
++        # The Salt Crown is metal crushed down onto felt, so the felt gives. Two
++        # terms, and both act on the FINAL radius, after the oval and the crease.
++        # That ordering is deliberate: applied before them, a fixed crush depth
++        # came out varying by 20 mm around the hat, so the ring bit deep on the
++        # wide axis and hung clear of the cloth on the narrow one.
++        #
++        # 1. BITE. Inside the waist window the cloth is driven to CROWN_BITE_R,
++        #    a circle, regardless of what the hat's oval section wanted. A rigid
++        #    ring crushing a soft hat forces it round; that is the whole physical
++        #    claim of the design, and it also guarantees the tube stays buried in
++        #    felt at every azimuth, which is what "floating hardware" meant.
++        # 2. ROLL. The displaced cloth has to go somewhere, so it comes back as a
++        #    bulge over BOTH edges of the metal - uneven, from a 2-lobe and a
++        #    3-lobe term at different phases, so it rolls over the ring in two or
++        #    three places of different strength and tucks under between them. An
++        #    even bulge would just be another concentric band.
++        #
++        # sweep_fn hands us t = i/(N-1) over exactly these samples, so the round()
++        # lands back on the sample index rather than interpolating.
++        if CROWN_ON:
++            zl = spine_local[min(len(spine_local) - 1,
++                                 int(round(t * (len(spine_local) - 1))))].z
++            u = (zl - CROWN_Z) / CROWN_DENT_FALL
++            w = math.exp(-u * u)                     # the waist window
++            rad = rad * (1.0 - w) + CROWN_BITE_R * w
++            lobe = max(0.0,
++                       CROWN_ROLL_L2 * cos(2.0 * (a - CROWN_ROLL_A2))
++                       + CROWN_ROLL_L3 * cos(3.0 * (a - CROWN_ROLL_A3))
++                       + 0.45)
++            rad += CROWN_ROLL * lobe \
++                * (CROWN_ROLL_LOW if u < 0.0 else 1.0) \
++                * math.exp(-((abs(u) - CROWN_ROLL_AT) / CROWN_ROLL_WID) ** 2.0)
++            rad = max(0.004, rad)
++        return (rad * cos(a), rad * sin(a))
+ 
+     # Quiet silk for the same reason as the brim: a tapered cone shows its
+     # grazing flanks across most of its width from any angle.
+@@ -2751,11 +3077,247 @@ def build_hat():
+     # Silver buckle plate on the band, front centre, with a small violet stone.
+     # Repeats the staff's motif at a whisper and gives the hat an accent that
+     # survives to icon size.
+-    plate_c = hat_xf((0.0, -HATBAND_R - 0.004, HATBAND_Z))
+-    add_sphere("Hat_Buckle", plate_c, 0.030, scale=(1.0, 0.42, 0.78),
+-               mat=M_SILVER, u=16, v=10, rot=(0.0, HAT_TILT, 0.0))
+-    add_gem("Hat_Stone", plate_c + Vector((0.0, -0.012, 0.0)), 0.017,
+-            subdiv=1, mat=M_GEM_S, scale=(1.0, 0.75, 1.0))
++    #
++    # It only exists when the Salt Crown is OFF. With the crown on it is a second
++    # bright metal element at head height: at 184 the plate and the circlet merged
++    # into one chrome stripe cutting the head in half. Its violet stone goes with
++    # it and is NOT re-sited - a second violet point up here competes with the
++    # staff gem for the one colour the gem has to own outright, and the hat has
++    # the whole crown to carry the eye now.
++    if not CROWN_ON:
++        plate_c = hat_xf((0.0, -HATBAND_R - 0.004, HATBAND_Z))
++        add_sphere("Hat_Buckle", plate_c, 0.030, scale=(1.0, 0.42, 0.78),
++                   mat=M_SILVER, u=16, v=10, rot=(0.0, HAT_TILT, 0.0))
++        add_gem("Hat_Stone", plate_c + Vector((0.0, -0.012, 0.0)), 0.017,
++                subdiv=1, mat=M_GEM_S, scale=(1.0, 0.75, 1.0))
++    else:
++        build_salt_crown()
++
++
++def build_salt_crown():
++    """The Salt Crown of Vael Adrest: a silver circlet crushed over the hat.
++
++    One shallow tapered band riding about 40% of the way up the cone, plus four
++    unequal lens-section blades splayed off the felt and raked backward along the
++    hat's own arc. Everything is built in the crown's own frame and pushed through
++    crown_xf() at the last moment - which adds the circlet's own few degrees of
++    lean on top of the hat's 7.5-degree cock, so ring and blades cannot come apart
++    however either is retuned.
++
++    Four things keep this honest rather than decorative:
++      * The blades SPLAY (the `out` column) and are LONG enough that their tips
++        clear the cone's projected outline into open background. A blade that
++        dies against dark felt does not read as a blade at any size, which is why
++        the azimuths are chosen against the cameras rather than spaced evenly.
++      * They are WIDE - 84 mm at the root, about 5 px at icon size - and taper
++        only over the top third.
++      * Separation is carried by a broad LIT FACET on each blade's outer half,
++        not by a bright edge. A 1 px arris cannot hold a value break at 184.
++      * The ring's tube bites the crown wall and every blade is rooted INSIDE the
++        ring, so nothing here can drift onto the audit's levitation list.
++    """
++    ring_c = Vector((0.0, 0.006, CROWN_Z))
++    lean = Matrix.Rotation(CROWN_LEAN, 3, 'X')
++
++    def crown_xf(p):
++        """Crown-local point -> world.
++
++        Leans the whole assembly about the ring's own centre, then hands off to
++        hat_xf(). Same reasoning as hat_xf itself: leaning the ring but not the
++        blades is the obvious way to get a crown that comes apart, and it would
++        still pass the audit because every piece would touch SOMETHING.
++        """
++        return hat_xf(ring_c + lean @ (Vector(p) - ring_c))
++
++    mseg, nseg = 44, 20
++    # The object rotation reproduces crown_xf exactly for the torus's own
++    # vertices: Blender's default XYZ euler evaluates as Rz@Ry@Rx, so the lean is
++    # applied in the ring's local frame first and the hat's cock second.
++    circlet = add_torus("Hat_Crown_Ring", hat_xf(ring_c),
++                        CROWN_R, CROWN_MINOR,
++                        rot=(CROWN_LEAN, HAT_TILT, 0.0),
++                        mat=M_CROWN, mseg=mseg, nseg=nseg,
++                        scale=(1.0, 1.0, CROWN_SQUASH))
++    # Two jobs in one vertex pass, both about not reading as machined hardware:
++    #   * TAPER the band into a shallow truncated cone that follows the hat's own
++    #     angle. A straight cylinder cuts across the cone and is the one hard
++    #     mechanical edge on an otherwise entirely soft figure.
++    #   * NICK it: hammer one short arc flat, on the drooping side, which is the
++    #     same side the crown has lost its blades over, so both dents tell one
++    #     story. Moving vertices rather than cutting geometry keeps the mesh
++    #     manifold and the audit clean.
++    for v in circlet.data.vertices:
++        sc = 1.0 - CROWN_TAPER * (v.co.z / CROWN_MINOR)
++        d = abs((math.atan2(v.co.y, v.co.x) - CROWN_NICK_AT + pi)
++                % (2.0 * pi) - pi)
++        if d < CROWN_NICK_ARC:
++            sc -= CROWN_NICK * (0.5 + 0.5 * cos(pi * d / CROWN_NICK_ARC))
++        v.co.x *= sc
++        v.co.y *= sc
++    # ONE PLAIN BAND, one material, deliberately.
++    #
++    # This ring used to be split into a light outer arc, a mid inner arc and a
++    # near-black underside. Every panel since has called the circlet "a stack of
++    # two or three concentric bands" or "machined concentric ribs", and that split
++    # is where the extra bands were coming from: three material zones stacked up a
++    # 16 mm tall torus draw three horizontal lines across the hat's cleanest zone,
++    # which is precisely the banding the design is supposed to avoid. Chasing it
++    # with geometry would have been chasing the wrong thing.
++    #
++    # There is nothing to replace it with, either. Now that the felt genuinely
++    # crushes and rolls over both edges, the ring is read from the cloth pinched
++    # around it - found by edge and silhouette, exactly as the note asks - so it
++    # does not need an internal value break of its own, and at this albedo it could
++    # not afford one anyway.
++    pass
++
++    # NOTE there is deliberately no hat gem any more. The old buckle stone, and
++    # then the same stone re-seated in this ring, put a second violet point at
++    # head height - and violet is the one colour the staff gem has to own
++    # outright. The circlet carries the eye on value alone.
++
++    back = Vector((0.0, 1.0, 0.0))
++    ck, sk = cos(CREST_RAKE), sin(CREST_RAKE)
++
++    def width_at(t):
++        """Blade half-width down the length, as a fraction of SPIRE_W.
++
++        A leaf, not a needle: near full width for the lower two thirds, then a
++        real point over the top third. Every earlier pass used a power law from
++        the root, which looks fine in section but spends most of the blade's
++        length under a pixel at icon size - and a blade that is sub-pixel over
++        80% of itself is a smudge, not a spike.
++        """
++        if t <= SPIRE_SHOULDER:
++            return 1.0 - SPIRE_SHOULDER_DROP * (t / SPIRE_SHOULDER)
++        u = (t - SPIRE_SHOULDER) / (1.0 - SPIRE_SHOULDER)
++        return (1.0 - SPIRE_SHOULDER_DROP) * (1.0 - u) ** 0.75
++
++    def rake(v):
++        """Tip a growth vector backward about +X, so the crest follows the hat.
++
++        A rotation, not a +Y translation. Translation was the first pass's
++        mistake: on the front spires the outward splay already points at -Y, so a
++        +Y offset cancels it and leaves the blade standing bolt upright against
++        the felt - which is exactly the "rises up the concave front of the hook"
++        that got the first pass rejected. Rotating preserves the splay on every
++        spire and tips the whole crest back as one piece.
++        """
++        return Vector((v.x, v.y * ck + v.z * sk, -v.y * sk + v.z * ck))
++
++    def section(a, hw, hd):
++        """Lens offset (across, through) at section angle a.
++
++        Two different halves. sin a > 0 is the OUTER face and uses a power below
++        1, which fills the section out into a broad flat facet that turns down
++        sharply at each arris; sin a < 0 is the inner face and uses a power above
++        1, pinching it to a keel. That asymmetry is what gives every blade a real
++        lit plane to show the camera instead of a curved surface that shades away
++        to nothing at this size.
++        """
++        s = sin(a)
++        p = SPIRE_LENS_OUT if s >= 0.0 else SPIRE_LENS_IN
++        d = hd * math.copysign(abs(s) ** p, s)
++        # A raised spine down the middle of the outer face. cos(a) is 0 exactly at
++        # the centre of that face, so a narrow Gaussian on cos(a) rides the blade's
++        # centreline all the way up its length. It splits one broad facet into two
++        # planes meeting at a shallow angle: one takes the key, one does not, and
++        # the value break between them is what makes a nearly-black blade findable
++        # by form now that it can no longer be found by brightness.
++        if s > 0.0:
++            d += hd * SPIRE_RIDGE * math.exp(-(cos(a) / 0.34) ** 2.0)
++        return (hw * cos(a), d)
++
++    for idx, (deg, h, outf, wide, snap) in enumerate(CROWN_SPIRES):
++        phi = radians(deg)
++        out = Vector((cos(phi), sin(phi), 0.0))
++        tang = Vector((-sin(phi), cos(phi), 0.0))
++        # Rooted INSIDE the ring's tube - a few mm in and a few mm down from its
++        # centre line. Deliberate, and not just for the audit: a blade that merely
++        # meets the ring's underside leaves a hairline seam the eye finds
++        # immediately, at the one place on the model that wants to look solid.
++        base = out * (CROWN_R - 0.004) + ring_c - Vector((0.0, 0.0, 0.005))
++        # Splay and rise are linear in s so the blade leaves the ring already
++        # standing off the cone; the extra +Y drift goes as s**2, a curve
++        # gathering near the tip rather than a lean baked in at the root.
++        pts = catmull([base + rake(out * (outf * h * s)
++                                   + Vector((0.0, 0.0, h * s))
++                                   + back * (SPIRE_CURVE * h * s * s))
++                       for s in (0.0, 0.34, 0.70, 1.0)], 5)
++
++        n = len(pts)
++        rings = []
++        for i, p in enumerate(pts):
++            t = i / (n - 1)
++            if i == 0:
++                tv = (pts[1] - pts[0]).normalized()
++            elif i == n - 1:
++                tv = (pts[-1] - pts[-2]).normalized()
++            else:
++                tv = (pts[i + 1] - pts[i - 1]).normalized()
++            # Frame the section by hand instead of reusing frames_along(): a
++            # rotation-minimising frame is seeded from a world axis, so every
++            # blade would come out facing the SAME way regardless of where it
++            # stands on the ring. Gram-Schmidt against the ring's tangent keeps
++            # each blade broadside-on to the viewer it faces.
++            w_ax = (tang - tv * tang.dot(tv)).normalized()
++            d_ax = w_ax.cross(tv).normalized()        # +radially outward
++            # snap < 1 samples the profile short, so the blade ends while it is
++            # still wide - a broken stump instead of a point.
++            # Never let k reach 0 either: a ring collapsed onto a single point
++            # makes the end cap degenerate and both bevel and subsurf misbehave.
++            k = max(0.10, width_at(t * snap))
++            hw, hd = SPIRE_W * wide * k, SPIRE_D * wide * k
++            # The break itself is TORN, not sawn: the top ring of a snapped blade
++            # dips back along its own axis by a few mm, in three lobes round the
++            # section. A flat cut reads as a modelling shortcut and takes the
++            # whole "ancient trophy" story down with it.
++            jag = SPIRE_JAG if (snap < 1.0 and i == n - 1) else 0.0
++            ring = []
++            for j in range(SPIRE_SEGS):
++                a = 2.0 * pi * j / SPIRE_SEGS
++                off = section(a, hw, hd)
++                ring.append(crown_xf(p + w_ax * off[0] + d_ax * off[1]
++                                     - tv * (jag * (0.5 + 0.5
++                                                    * cos(3.0 * a + 2.0)))))
++            rings.append(ring)
++
++        ob = loft("Hat_Spire%d" % idx, rings, mat=M_CROWN,
++                  closed=True, cap_start=True, cap_end=True)
++        me = ob.data
++        me.materials.append(M_CROWN_LIT)   # 1 - the broad lit facet
++        # The whole OUTER half of each blade takes the lighter pewter, not a strip
++        # along its edges. That is the correction that matters most this round: a
++        # bright arris is about a pixel wide at icon size and simply vanishes, so
++        # a blade crossing dark felt had no value break and stopped existing. A
++        # value break needs AREA. Outer half light, inner half dark, and the blade
++        # reads as a solid object with a lit plane and a shaded one.
++        #
++        # loft() emits vertices ring by ring, so a vertex's index modulo
++        # SPIRE_SEGS is the angle it was built at; the outer crest is at
++        # SPIRE_SEGS/4 and the two arrises at 0 and SPIRE_SEGS/2. Deriving the
++        # split from THAT rather than from face order survives a change of ring
++        # count or cap flags; caps are skipped by their vertex count.
++        for poly in me.polygons:
++            if len(poly.vertices) != 4:
++                continue
++            js = sorted(v % SPIRE_SEGS for v in poly.vertices)
++            j = js[0] if js[-1] - js[0] <= 1 else js[-1]   # the wrap face
++            if 0 <= j < SPIRE_SEGS // 2:
++                poly.material_index = 1
++        # A small bevel, not the 0.03 that rescues a cube: this is already a
++        # smooth lofted lens, and 30 mm of bevel would eat a blade 84 mm across.
++        # All it has to do is take the razor off the two side arrises so they
++        # catch a highlight instead of aliasing into a dotted line.
++        #
++        # Tightened to 2.5 mm, and subsurf dropped to 0, because between them they
++        # were rounding the plate straight back into the lozenge the section work
++        # above exists to prevent: a 4 mm bevel plus a subsurf pass on a blade only
++        # 20 mm thick blunts both arrises and the new centre ridge at once. The
++        # loft is already 24-sided and shade-smooth, so it renders smooth without
++        # one (rule 9 is about the render, not the modifier stack); the crisp edge
++        # is the whole point of the change.
++        bevel(ob, width=0.0025, segments=2)
+ 
+ 
+ # ==============================================================================

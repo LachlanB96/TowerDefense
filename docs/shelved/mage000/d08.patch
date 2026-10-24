@@ -1,0 +1,1957 @@
+diff --git a/Assets/Blender/blender_mage000.py b/Assets/Blender/blender_mage000.py
+index c2d5a5c..bfbc04d 100644
+--- a/Assets/Blender/blender_mage000.py
++++ b/Assets/Blender/blender_mage000.py
+@@ -286,7 +286,19 @@ SASH_D   = 0.017          # half-depth (radial)
+ # His right (-X) grips the staff; his left (+X) is held forward, open.
+ SHOULDER_R = Vector((-0.262, -0.006, 1.470))
+ ELBOW_R    = Vector((-0.350, -0.060, 1.250))
+-WRIST_R    = Vector((-0.438, -0.109, 1.090))
++# The wrist is swung FORWARD (-y) as well as out, so the staff arm approaches the
++# shaft from the camera side instead of from directly behind it.
++#
++# This is not a pose tweak, it is what makes the prosthetic visible at all. At the
++# old y = -0.109 the forearm ran almost straight down the line of sight into the
++# shaft: the staff's own silhouette covered the outer half of the limb, the only
++# lighter pixels left were finger tips poking past the FAR edge of the wood, and
++# they read as rivets stuck on the staff rather than as a hand holding it. Out
++# here the whole plated cylinder sits in the open gap between robe and shaft,
++# silhouetted against background rather than against wood, and the fingers wrap
++# across the near face where they can actually be seen. It also costs nothing:
++# the wrist is still 0.068 from the shaft axis, the same grip distance as before.
++WRIST_R    = Vector((-0.452, -0.158, 1.090))
+ 
+ SHOULDER_L = Vector(( 0.262, -0.006, 1.470))
+ ELBOW_L    = Vector(( 0.312, -0.050, 1.240))
+@@ -299,6 +311,15 @@ SLEEVE_END_R = 0.22       # the staff arm's sleeve stops just past the elbow.
+                           # Bounded above by staff clearance: at 0.35 the cuff
+                           # has travelled far enough down the forearm that the
+                           # bell reaches the shaft again.
++                          #
++                          # Now also bounded above by the prosthetic. This cuff is
++                          # what REVEALS the wrought arm, and it is already rolled
++                          # back well behind mid-forearm - the short sleeve was
++                          # always this side - so the whole plated run from
++                          # PROS_T0 down is in the open with a few centimetres of
++                          # near-black stump above it. It did not need moving and
++                          # it must not be lengthened to "match" the left: the two
++                          # asymmetries are supposed to stack, not cancel.
+ SLEEVE_END_L = 0.44
+ SLEEVE_R0    = 0.104      # radius at the shoulder
+ # The two sleeves are deliberately NOT the same. His left hangs as a full bell;
+@@ -349,6 +370,85 @@ FINGER_KNUCKLE = 0.17     # how far the knuckle bulges swell a digit's radius
+ FOREARM_END = 1.00
+ FOREARM_R1  = 0.021
+ 
++# -- The staff hand: a wrought-silver prosthetic -------------------------------
++# At the Weeping Gate he held the door shut from the inside for one night. The arm
++# did not come back out with him. The hand the Grey Lanterns wrought for him closed
++# on the staff and has not opened since - which is why the staff is never set down,
++# and why the gem is always exactly where he is.
++#
++# Built as an articulated vambrace: a bright collar band where the cloth stops, four
++# overlapping lames ringed round the forearm, two tiles over the back of the fist,
++# then four fingers of three shells each, fused around the shaft.
++#
++# Two things bound every number below.
++#
++# STAFF CLEARANCE. The lames are full rings about the limb axis, and that axis still
++# runs toward the shaft, though far less steeply now that WRIST_R has swung forward:
++# a ring drawn perpendicular to it reaches ~1.01x its own radius in the direction of
++# the staff (it was 1.13x), and the shaft's ridge crests and wound cord put its
++# effective surface out near 0.046 rather than at STAFF_RADII's 0.034. Past t = 0.68
++# a ring still big enough to read as armour is inside that, so the ring stack stops
++# there and the fist is plated with open tiles instead.
++#
++# VALUE. This is where the first attempt failed and it failed in the obvious
++# direction. "Do not compete with the gem" was read as "be dark", the arm came out
++# at the same value as the near-black under-sleeve and the staff shaft, and what it
++# rendered as was a grubby ribbed hose. There is an enormous amount of room between
++# near-black and stealing the frame, and the whole point of this limb is that it is
++# the one LIGHT thing on a dark figure. So M_PROS now sits at roughly beard value -
++# above the robe's silver trim, second only to the gem - and it gets there through
++# a partly DIELECTRIC response rather than through a brighter mirror. That matters:
++# a metallic=1.0 surface has no diffuse term and only shows where a highlight lands,
++# which is exactly why the first pass read as dark no matter what its base colour
++# said. Hue stays neutral grey; hue is the gem's lever, value is this arm's.
++PROS_COLLAR  = 0.30       # where the metal STARTS, as a fraction of elbow ->
++                          # wrist: a hard bright band, not a fade. The cuff is
++                          # back at SLEEVE_END_R = 0.22 and its mouth waves +-3 cm
++                          # along the arm, so a plate here would be half-swallowed
++                          # by cloth and the reveal would read as a lumpy rolled
++                          # sleeve. The collar is the terminator: cloth stops, one
++                          # unmistakable ring of bright metal, then plate.
++PROS_T0      = 0.35       # first lame, as a fraction of elbow -> wrist
++PROS_T1      = 0.68       # last lame on the forearm - see STAFF CLEARANCE above
++PROS_LAMES   = 4          # + 2 tiles over the fist = 6 plates in the run.
++                          # FOUR, not the eight the shape suggests. At the size
++                          # this is actually seen a fine stack of rings averages
++                          # out into grey corduroy and the segmentation stops
++                          # being information; four chunky plates each survive on
++                          # their own. Same reason the fingers are big.
++PROS_R0      = 0.0410     # lame mid-surface radius at PROS_T0 ...
++PROS_R1      = 0.0262     # ... and at PROS_T1. The two together are the taper.
++                          # Both are ~12% fatter than a forearm needs. The plated
++                          # cylinder has to be a MASS bridging the gap between
++                          # robe and shaft, not a pipe: at 184 px it is about six
++                          # pixels of width and there is nothing to spare.
++PROS_HL_LIP  = 0.0128     # half-length of a lame toward the HAND, and toward the
++PROS_HL_HEAD = 0.0062     # elbow. Deliberately unequal: the long end is the lip,
++                          # it stands ~9 mm of radius proud of the next lame down
++                          # the arm and overhangs it, and the 4.5 mm the two ends
++                          # leave between them is the slot the gasket shows
++                          # through. Made equal, the stack reads as a row of
++                          # separate rings instead of as overlapping plate.
++PROS_D       = 0.0075     # half-thickness of a shell
++PROS_LIFT    = 0.0070     # how far the lip rises off the mid-surface
++PROS_PHI0    = radians(-17.0)   # where the wrap starts, measured from body-side
++PROS_SPAN    = radians(304.0)   # ... and how far round it runs. The 56 deg left
++                                # open faces away from every rendered camera, so
++                                # the vambrace reads closed from the front and the
++                                # opening only ever contributes more near-black.
++PROS_EDGE_R  = 0.0042     # the bright band along each lip. A HAIRLINE here (it
++PROS_EDGE_HL = 0.0045     # was 1.8 mm) does not survive: it broke up into a few
++                          # scattered speculars and was gone by hero scale, let
++                          # alone at 184. At 8-9 mm it is four or five pixels of
++                          # continuous bright edge at hero scale and it is the
++                          # thing that draws the plate boundaries (rule 3).
++PROS_GAP_R   = 0.0030     # how far the near-black gasket stands proud of the
++                          # mid-surface. Still well BELOW the crest on purpose: a
++                          # gap has to read as a recess (rule 4), not a third band.
++PROS_CORE_IN = 0.0055     # how far the near-black core sits inside the mid-
++                          # surface - i.e. just behind the shells' inner face, so
++                          # it fills every joint without poking through one
++
+ # -- Beard ---------------------------------------------------------------------
+ # Runs from inside the head, out under the brim shadow, and down over the chest.
+ # The y values are what keep it PROUD of the robe: sunk into the chest surface it
+@@ -508,8 +608,17 @@ STAFF_TWIST  = 7.2        # radians of rotation over the shaft's length
+ STAFF_SEGS   = 30
+ 
+ # Leather cord wound round the shaft where the hand grips it.
+-GRIP_T0, GRIP_T1 = 0.36, 0.60
+-GRIP_TURNS  = 36          # over the 0.55 m of shaft between GRIP_T0 and GRIP_T1.
++#
++# Pulled DOWN and shortened so the winding ends just under the fist instead of
++# running up past it. It used to span z 0.84 -> 1.39, which put a tightly ribbed
++# tube directly alongside the plated forearm, at the same height, at almost the
++# same pitch and the same value. Two corrugated cylinders side by side do not read
++# as two things; they read as noise, and neither the armour nor the rope survived
++# it. Ending at z ~1.04 the cord still does its actual job - it says where the hand
++# goes, and now it says it by stopping exactly where the hand starts - while the
++# lames get a stretch of plain shaft to be seen against.
++GRIP_T0, GRIP_T1 = 0.29, 0.45
++GRIP_TURNS  = 24          # over the 0.37 m of shaft between GRIP_T0 and GRIP_T1.
+                           # 19 turns is a 29 mm pitch around a 12.4 mm cord -
+                           # 17 mm of bare wood between every turn, which is a
+                           # rope ladder however thin the cord gets. A binding
+@@ -570,20 +679,141 @@ GEM_FACETS    = 8
+ # and it costs nothing in the one currency the figure cannot spare, which is
+ # contrast against the gem.
+ #
+-# The robe's base colour is a three-stop fresnel ramp, not a single value.
+-# C_ROBE is what faces you; C_ROBE_EDGE is the extreme grazing angle.
+-C_ROBE      = (0.008, 0.011, 0.046, 1.0)
+-C_ROBE_MID  = (0.038, 0.030, 0.150, 1.0)
+-C_ROBE_EDGE = (0.175, 0.310, 0.470, 1.0)
+-# The hem band, sash and hatband run the same shift a stop darker, so they stay
+-# readable as a separate, deeper cloth instead of merging with the robe.
+-C_ROBE_D      = (0.005, 0.007, 0.028, 1.0)
+-C_ROBE_D_MID  = (0.024, 0.019, 0.096, 1.0)
+-C_ROBE_D_EDGE = (0.120, 0.215, 0.330, 1.0)
+-# How fast the ramp turns. Lower = the bright edge is confined to a narrower
+-# rim, which keeps the overall figure dark; at 0.5 the whole robe lifts and the
+-# point of a dark base is lost.
+-PEARL_BLEND = 0.30
++# The robe's base colour is an ANGLE MIX, not a single value, and the mix is
++# split into two ramps hanging off one Layer Weight: a HUE ramp and a VALUE
++# ramp. Two ramps rather than one because the whole point of nacre is that it is
++# a hue shift, not a brightening - and with a single colour ramp there is no way
++# to travel through teal/lilac/rose without also travelling up in value, which
++# is exactly the "just make it brighter" failure this palette exists to avoid.
++# Split, the value ceiling is one number and the hue is free to move under it.
++#
++# C_ROBE is what faces you. It sits a shade under the 0.046 it was before the
++# nacre work, but a long way back up from the 0.030 that first pass tried: at
++# 0.030 the facing planes were at the WORLD BACKGROUND's own luminance, the
++# figure bled into the backdrop at icon size, and "midnight blue" came back as
++# sooty charcoal. Value is only half of why - the other half is chroma, so this
++# is a deep SATURATED indigo (normalised it is 0.26/0.21/1.00, a blue-violet
++# with almost no grey in it) rather than a dark neutral with a blue cast.
++C_ROBE      = (0.011, 0.009, 0.042, 1.0)
++# Hue stops for the band, normalised so the brightest channel is 1.0. They carry
++# no value of their own - NACRE_V supplies all of it - so retinting one of these
++# can never lift the robe. The first stop is not listed here: it is the
++# material's own core colour, normalised, so that facing 0 reproduces C_ROBE
++# exactly whatever the hue ramp is doing further up.
++#
++# The sweep is COLD from end to end and stays a NEIGHBOUR OF THE ROBE'S OWN
++# INDIGO. Two failures got it here, and both were costume-identity failures
++# rather than finish failures, which is why the stops are so tightly boxed in:
++#
++#   * indigo -> teal -> rose (first pass): the traverse crosses the neutral axis
++#     over a dark blue base and lands on brown-grey.
++#   * indigo -> cyan -> silver-blue (second pass): the cyan stop at 0.20/0.90/1.00
++#     is a GREEN, and over a broad surface it rendered as seafoam. The character
++#     stopped being a midnight-blue silk wizard and became a frost/sea mage - a
++#     different costume, arrived at by a shader tweak.
++#
++# So: no green stop exists any more. The band runs indigo -> periwinkle -> pale
++# silver-blue, all within one hue neighbourhood, and the only trace of the cool
++# lean is that G sits a hair above R in the periwinkle stop. Chroma falls as the
++# band opens, because the widest parts of the band cover the largest areas and
++# that is exactly where a saturated hue reads as a coloured light rather than as
++# a material.
++NACRE_PERI      = (0.60, 0.68, 1.00, 1.0)  # periwinkle, the faintest cool lean
++NACRE_SILVER    = (0.82, 0.87, 1.00, 1.0)  # pale silver-blue - carries the sweep
++NACRE_SILVER_HI = (0.90, 0.93, 1.00, 1.0)  # same hue, a shade paler, at the rim
++# NO WARM TERMINUS, and this was decided rather than defaulted. A rose flush at
++# the true rim was in the last two passes and registered in neither - it fires
++# on so few pixels that it cost a ramp stop for nothing. The choice was to make
++# it genuinely visible or to cut it, and cutting it is the better trade: WARM is
++# now the gem's only uncontested monopoly (value is shared with the trim, and
++# blue is the whole costume), so spending it on cloth buys a hue nobody asked
++# for and weakens the one contrast that has never been in dispute.
++# Where the core stop SITS on the facing axis, and it is the number that decides
++# whether this is a robe with a pearl contour or a pearl robe. A ColorRamp holds
++# its first stop's value for everything below it, so this is the angle at which
++# the band is allowed to start at all: with NACRE_BLEND's exponent, 0.32 is
++# ~70 degrees off face-on, and everything inside that renders as exactly C_ROBE.
++#
++# It has been raised twice, and the reason is that a FLAT SURFACE and a ROUND
++# one are not the same problem. At 0.20 (~45 degrees) the flat skirt panels were
++# right - dark facing planes, nacre on the fold edges - while the hat brim, the
++# crown and the shoulder spheres went a flat wash end to end, because on a
++# strongly curved form most of the visible area is already past 45 degrees. The
++# threshold has to be set by the roundest thing wearing the material, not the
++# flattest.
++NACRE_FLOOR = 0.32
++# The two upper VALUE stops, as (facing position, linear value). The third stop
++# is the core, pinned at NACRE_FLOOR and taken from the material's own colour.
++# 0.51 is where the band is fully open - about 82 degrees off face-on - so the
++# whole travel from plain cloth to full nacre happens in the last ~12 degrees
++# before the silhouette, and the top stop is the true rim itself.
++NACRE_V = ((0.51, 0.360), (1.00, 0.575))
++# Hard ceiling on the nacre - roughly half the gem's rendered luminance. This is
++# a CHOSEN ceiling, not a derivation: the gem's rendered brightness comes mostly
++# from its coat specular under the key rather than from GEM_EMIT, so it cannot
++# be computed from the material constants. What can be guaranteed is that the
++# cloth never breaches it, via a Math/MINIMUM after the value ramp - so retuning
++# NACRE_V can never accidentally let the robe out-shine the stone.
++NACRE_PEAK = 0.575
++# How wide the band is. NOTE this drives Layer Weight's FACING output, not its
++# Fresnel output, and that is the single most important line in this block.
++#
++# Fresnel cannot produce this effect at all. Its shape is ~F0 + (1-F0)(1-cos)^5,
++# which is flat to within a percent or two until about 65 degrees and then
++# snaps: at blend 0.17 the mid stop was not reached until ~87 degrees and the
++# top stop was never reached anywhere on the model. The result was a two-pixel
++# hairline at the true silhouette that vanished entirely at 184x184 - all of the
++# cost of darkening the robe and none of the pearl.
++#
++# Facing is 1 - |dot(N, V)|^p, which is close to linear in the projected width
++# of a form, so the band wraps ONTO the curvature of a shoulder or a sleeve
++# instead of clinging to its outline. Layer Weight maps blend to that exponent
++# as p = 2*blend below 0.5 (and 0.5/(1-blend) above), so 0.18 gives p = 0.36.
++#
++# This is the KNEE, and NACRE_FLOOR is the threshold; both had to move and the
++# knee is the one that was missed last time. A smaller p holds the facing output
++# down through the whole mid-angle range and then turns hard near the
++# silhouette, which is what "a sharp knee" means in this graph. At p = 0.60 the
++# output had already climbed to 0.34 by 60 degrees, so raising the threshold
++# alone just traded a wash for a slightly smaller wash; at p = 0.36 it is still
++# only 0.22 there, and the whole 0.32 -> 0.51 travel that opens the band is
++# packed into 70-82 degrees.
++#
++# The trade this makes explicit: the band is now a CONTOUR, not a gradient
++# across each form. It occupies roughly the outer 6% of a form's projected width
++# - which sounds like nothing and is not, because on a folded garment every
++# crest has its own pair of silhouettes.
++NACRE_BLEND = 0.18
++# Fine warp/weft grain, multiplied over the VALUE at +/- 8%. Modulating value
++# rather than colour is what makes the weave self-masking: it is worth ~0.002
++# where the robe is dark (invisible) and ~0.036 inside the band (visible), so
++# the cloth shows its threads exactly where the pearl is and nowhere else.
++# GOTCHA: at scale 120 in object space a thread is about a pixel wide at
++# 900x1300, so this WILL alias if the amplitude is raised. 8% is quiet enough
++# that the aliasing reads as thread sparkle along the rim rather than as noise.
++NACRE_WEAVE      = 120.0
++NACRE_WEAVE_WARP = 2.0     # distortion: threads wander instead of ruling lines
++NACRE_WEAVE_AMP  = 0.08
++# The hem band, sash and hatband share every stop above and differ only in how
++# much nacre they are allowed, so they stay readable as a deeper, quieter cloth
++# instead of merging with the robe. Same saturated indigo, a clear stop down in
++# value - the gap between 0.030 and the robe's 0.042 is what keeps the sash from
++# disappearing into the garment it is tied around.
++C_ROBE_D       = (0.008, 0.006, 0.030, 1.0)
++NACRE_STR_DEEP = 0.75
++# The same silk, at a third of the nacre, for the three ROUND masses: the hat
++# brim, the hat crown and the shoulder deltoids. Threshold and knee are set by
++# geometry, and these three have the wrong geometry for either to save them - a
++# broad disc seen almost edge-on from a chest-height camera is past the knee
++# across its entire top surface, and a sphere spends most of its projected area
++# there too. They came back the brightest, most saturated things on the model,
++# which is exactly backwards: the hat is the single biggest silhouette read on
++# the character and it should be the DARKEST graphic mass, so the eye falls down
++# the beard into the void instead of being pulled up and out to the brim.
++#
++# Damped rather than exempted: at zero these read as a different fabric from the
++# robe, which is the same complaint in the other direction.
++NACRE_STR_QUIET = 0.30
+ # Thin-film interference - a soap-bubble layer over the silk. This is the actual
+ # iridescence: the fresnel ramp alone shifts colour with angle, but thin film
+ # shifts the HIGHLIGHT's hue too, which is what stops the shimmer reading as a
+@@ -592,7 +822,15 @@ PEARL_BLEND = 0.30
+ FILM_T   = 430.0
+ FILM_IOR = 1.92
+ 
+-C_ROBE_IN  = (0.003, 0.004, 0.014, 1.0)
++# TRUE black, and darker than it has ever been. The open front, the face void
++# and the sleeve interiors are one job: give the outer robe something to sit a
++# clear notch above, so the garment reads as two layers and the void reads as
++# absence rather than as more cloth. Giving this material any nacre at all -
++# tried at a quarter strength, 2026-08-01 - closed that gap: the outer robe and
++# the under-robe converged, the layered read flattened to a single mass, and the
++# face void lost the lit boundary that is the best idea on the model. There is
++# no add_nacre_band() call for this material, and that is deliberate.
++C_ROBE_IN  = (0.0010, 0.0011, 0.0026, 1.0)
+ # Silver as a cold mirror. At roughness 0.06 it is mostly reflecting the dark
+ # world rather than generating its own value, which is precisely what makes it
+ # read as precious metal instead of grey paint - a rough silver has to be lit to
+@@ -665,6 +903,487 @@ GEM_EMIT   = 0.10         # AgX desaturates bright emitters toward WHITE, so
+                           # blob. The glow has to come from saturated colour and
+                           # specular against a dark setting, not from intensity.
+ 
++# -- Vow-threads ---------------------------------------------------------------
++# An INSCRIPTION BAND round the very bottom of the robe: the words of the vow he
++# swore at the Ossuary and has never been released from, in a script no one alive
++# reads. It sits on the floor because the vow is what keeps his feet on the
++# ground, and that is also where it pays: the pooled hem is the widest part of
++# the silhouette, so lighting it and nothing else reads as WEIGHT.
++#
++# Material only - no geometry, nothing on the floor, no aura volume. All three
++# would break rule 4 by handing the gem a lit background to compete with.
++#
++# Five failures so far, and every one of them is worth keeping because every one
++# of them is a trap that looks like a tuning problem and is not:
++#
++#   1. Built from ISO-CONTOURS OF NOISE. Contours do close into loops, which was
++#      the intent, but they scatter isotropically and their WIDTH tracks the
++#      local gradient - flat parts of the field give fat bands, steep parts give
++#      hairlines. It rendered as blobs of uneven thickness and read as water
++#      stains. The fix was a Wave in SAW profile: constant gradient means every
++#      stroke is identically wide, and parallel bands supply the baseline and
++#      repetition that make an eye call something writing.
++#
++#   2. Constant width was right; constant LENGTH was not. Rows of identical
++#      dashes read as machine stitching - perforation, hazard tape, an LED
++#      strip. Same pen, different words: the width is still fixed and the LENGTH
++#      now varies about 4x, the rows are decorrelated so they cannot column up
++#      into a quilted grid, and per-stroke brightness varies so the line
++#      shimmers unevenly instead of firing as one bar.
++#
++#   3. It also out-read the gem at 1.90 and climbed to the knee. Both are the
++#      same mistake - spending the effect's budget on AREA. See VOW_EMIT and
++#      VOW_Z_OFF.
++#
++#   4. EMISSION-ONLY. A wide halo was already there and nobody could see it, and
++#      the reason is not that it was too dim: emission is added over the surface
++#      without the surface changing, so the cloth around a stroke was still the
++#      same cloth and the strokes read as painted on. The fix is that the halo
++#      now also lifts BASE COLOR, so the fabric near a stroke is lighter fabric.
++#      See VOW_ALB.
++#
++#   5. TOO MUCH OF IT. With the mechanism finally right the whole thing lost on
++#      AREA instead: five courses at ~50% duty under a 15 mm halo covered more
++#      of the icon than the gem did, and each course was lit for longer than it
++#      was dark, so it welded shut into hoop-banding. Note that 4 and 5 pull in
++#      opposite directions - 4 says the light must reach into the cloth, 5 says
++#      there must be far less of it - and that both are satisfied at once by
++#      making the marks SPARSE and the halo TIGHT rather than by dimming, which
++#      had already been tried twice. The levers are VOW_GAP_CUT (duty), VOW_ROWS
++#      (course count), VOW_HALO_W and VOW_ALB (spread), VOW_Z_OFF (extent).
++#      Emission is the last lever to reach for here, not the first.
++#
++#   6. IT LOOKED LIKE SHEEN. With the marks sparse, low and correctly dim, they
++#      still read as damp or grime - because they were landing hardest on the
++#      fold crests that already face the key lamp, where they were arithmetically
++#      indistinguishable from a specular highlight. Two fixes, both structural
++#      rather than dimensional, and both about WHERE rather than HOW MUCH: the
++#      marks are now attenuated on cloth facing the key and held at full strength
++#      in the troughs it cannot reach (VOW_CREST), and the albedo lift is
++#      pre-cooled because it gets multiplied by a warm key and the emission does
++#      not (C_VOW_ALB). A third: the albedo had been given a WIDER, softer
++#      profile than the stroke, so the patch swallowed the mark - it now shares
++#      the stroke's own profile exactly.
++C_VOW      = (0.340, 0.140, 1.000, 1.0)   # the gem's violet, swung toward blue
++                                          # and one step down in purity: 0.86
++                                          # saturation against C_GEM_EM's 0.95,
++                                          # so it reads as a different KIND of
++                                          # light from the stone, not a rival.
++                                          #
++                                          # Most of that purity is paying for AgX
++                                          # rather than showing up in frame. The
++                                          # view transform desaturates bright
++                                          # emitters toward white: measured on the
++                                          # render, an input of (0.56, 0.52, 1.00)
++                                          # came back at 0.10 saturation - a
++                                          # neutral grey indistinguishable from
++                                          # the silver hem trim, which is the one
++                                          # crisp line the lower half has. Do not
++                                          # "clean this up" by desaturating the
++                                          # input; the number that matters is the
++                                          # rendered one.
++VOW_EMIT   = 1.18         # HARD CAP 1.20, and the cap is not about this number
++                          # in isolation - it is about the ONE hierarchy rule the
++                          # character has: the gem is the brightest thing on the
++                          # model. At 1.90 the brightest strokes matched the gem's
++                          # peak value, and there are ~60 of them against one
++                          # stone, so the hem won on mass and the eye landed on
++                          # the floor and had to hunt upward. That is the failure
++                          # this cap exists to prevent.
++                          #
++                          # And then it lost the SAME argument a second time at
++                          # 0.95, where no stroke came anywhere near the gem's
++                          # value and the hem still won the icon - because the
++                          # quantity that beat it was AREA, not value. Dimming
++                          # further is the weakest available lever and it was
++                          # nearly spent; the cuts that actually did the work this
++                          # time are coverage ones (VOW_ROWS, VOW_BAND,
++                          # VOW_GAP_CUT, VOW_HALO_W, VOW_Z_OFF). This number came
++                          # down alongside them, but only by about a seventh -
++                          # NOT by the third that would have matched the coverage
++                          # cut, because the two cuts MULTIPLY. At 0.62 with area
++                          # already down four-fold the hem rendered blank
++                          # (run-177), and at 0.72 it was still barely there
++                          # (run-179). Both land on the opposite failure this
++                          # design keeps oscillating between.
++                          #
++                          # The shape of the answer is FEWER MARKS, EACH ONE
++                          # CONFIDENT. Area is what the icon judges and value is
++                          # what the hero view judges, so they are cut with
++                          # different tools: coverage hard, value barely at all.
++                          # There is a lot of room between "near black" and
++                          # "competes with the gem" and both ends of it have now
++                          # failed here; this sits in the middle of it on purpose.
++                          #
++                          # The test, and it takes ten seconds: squint at the hero
++                          # render until only two lights are left, and check the
++                          # one that survives is the gem. Do that rather than
++                          # trusting the number, because the number is not
++                          # comparable to GEM_EMIT - the stone is a solid 18 cm
++                          # faceted emitter with transmission and a coat standing
++                          # under the key, so most of what makes it read is
++                          # REFLECTED light that its emission only tints, which is
++                          # why GEM_EMIT can sit at 0.10 and still win.
++                          #
++                          # Do NOT rebalance this by raising GEM_EMIT. That has
++                          # been tried and it backfires: AgX pales the stone and
++                          # flattens its facet contrast. Bring the hem down to the
++                          # gem, never the gem up to the hem.
++VOW_KEY_DIR = (-0.637, -0.771, 0.000)
++                          # HORIZONTAL direction toward the KEY light, which
++                          # build_rig() puts at (-2.15, -2.60, 3.05). Hand
++                          # computed rather than read from the lamp because the
++                          # rig is built after the materials, and it only has to
++                          # be approximate - it drives a soft attenuation, not a
++                          # mask. Recompute if the Key moves.
++                          #
++                          # THE Z TERM IS ZERO AND THAT IS THE WHOLE POINT. The
++                          # true 3D direction to the key is (-0.48, -0.58, 0.66),
++                          # and using it wiped out the band (run-191): the pooled
++                          # hem is a near-horizontal flare whose normals point
++                          # 0.62-0.76 UP, so dotted against that +0.66 Z term
++                          # every facet of the hem scored ~0.5 before any fold
++                          # variation entered, and the brightest, lowest, most
++                          # important course was attenuated everywhere at once.
++                          #
++                          # The mask is supposed to ask "which way round the body
++                          # does this facet point", because that is what varies
++                          # from fold crest to fold trough. Dropping Z asks
++                          # exactly that and ignores how much the cloth happens to
++                          # tilt upward, which is a property of the pool and not
++                          # of the folds. A surface's Z-facing is not a crest.
++VOW_CREST  = 0.45         # how far the marks are attenuated on cloth that CRESTS
++VOW_CREST_HI = 0.70       # toward the key, and the dot(N, key) at which that
++                          # attenuation is fully reached. This is the single most
++                          # important idea in the design and it took four rounds
++                          # to find, so the reasoning is worth stating plainly.
++                          #
++                          # The marks were landing hardest on the fold ridges that
++                          # already face the lamp - because those ridges are simply
++                          # the brightest cloth, and anything added there lands on
++                          # top of a highlight. The result was indistinguishable
++                          # from specular sheen: it read as damp, or grime, or
++                          # bleached wear, and it fought the fold reading instead
++                          # of layering onto it. No amount of colour or intensity
++                          # fixes that, because the problem is WHERE the light is,
++                          # not what colour or how much.
++                          #
++                          # So it is inverted. Where the cloth turns to face the
++                          # key the marks drop to VOW_CREST; down in the fold
++                          # troughs, where the lamp cannot reach, they stay at
++                          # full strength. Light that appears where no lamp could
++                          # have put it is the only thing an eye reads as SELF-LIT,
++                          # and that is the whole difference between an emitter
++                          # and a stain. It also fixes two other complaints for
++                          # free: the blown-out patches were halo stacking on
++                          # specular, and both are on crests.
++                          #
++                          # Cheap, too - the surface normal was already available
++                          # on the Geometry node the height mask uses.
++                          #
++                          # Kept deliberately GENTLE - crests at 45% of troughs,
++                          # not the 28% first tried. The key is front-left and the
++                          # hero camera is front-on, so a hard cut here deletes
++                          # the marks from most of the cloth actually facing the
++                          # viewer. Half is enough to break the "this is just a
++                          # highlight" reading; more than that and the effect is
++                          # only visible from angles nobody looks at it from.
++VOW_HALO   = 0.09         # the wide dim falloff around each stroke, as a fraction
++                          # of the core. This is the difference between a decal
++                          # and a light. A stroke with a hard edge and no bleed
++                          # reads as painted on, which is why the first versions
++                          # had to be so bright to register at all - they were
++                          # bright PAINT. The test to check it is working: fold
++                          # interiors NEAR a stroke must be visibly lighter than
++                          # fold interiors far from one. That is the whole effect;
++                          # the core is only what the halo hangs on.
++VOW_HALO_W = 1.9          # halo half-width as a multiple of the stroke's, so the
++                          # glow reaches 6.2 mm from the stroke's centre - about
++                          # one stroke WIDTH in total - and it is EASE, so it hugs
++                          # the stroke and tails off rather than sitting there as
++                          # a fat band.
++                          #
++                          # THE RATIO IS NOW INVERTED ON PURPOSE. At 11 mm around
++                          # a 6.5 mm stroke the halo was three times the area of
++                          # the thing it was supposed to be softening, so it did
++                          # all the work: verifiers saw "soft cloud-shaped
++                          # patches" and could not locate an individual mark
++                          # inside one. A halo has to be the EDGE of a stroke, not
++                          # a replacement for it. Note this reverses an earlier
++                          # instruction to widen it, and both instructions were
++                          # right at the time - the previous failure was a halo
++                          # too weak to read as light, this one was a halo so wide
++                          # the stroke stopped existing. The stable form is a hard
++                          # bright mark with a narrow glow, not a soft bloom.
++                          #
++                          # Was 5.0, a 15 mm reach, and that was a genuine error
++                          # of kind and not just of degree: at 15 mm against a
++                          # 68 mm course pitch, neighbouring halos MET. The lower
++                          # robe stopped being dark cloth with lit marks on it and
++                          # became one continuous milky grey-violet field, which
++                          # costs the character the void his whole palette is
++                          # built on.
++                          #
++                          # THE CONSTRAINT IS A RATIO, NOT A DISTANCE: halo radius
++                          # over course pitch. It hazed at 15/68 = 0.22. It is now
++                          # 11/114 = 0.10, so nine tenths of the run between two
++                          # courses returns to untouched black - and 11 mm gets
++                          # there because the PITCH doubled, not because the halo
++                          # had to be crushed. Cutting the absolute distance as
++                          # well (8.5 mm, run-179) double-counted the pitch change
++                          # and cost each mark most of its presence for a haze
++                          # that had already been fixed by the pitch alone.
++C_VOW_ALB  = (0.200, 0.070, 1.000, 1.0)
++                          # the albedo lift's own colour, and it is COLDER and
++                          # more saturated than C_VOW on purpose. This is the fix
++                          # for "it desaturates to a warm pale grey", and the
++                          # cause is structural rather than a bad colour choice:
++                          # an albedo is MULTIPLIED BY THE LIGHT THAT HITS IT, and
++                          # build_rig()'s Key is warm, (1.00, 0.84, 0.62). Any
++                          # violet painted into Base Color down there comes back
++                          # through that multiply with its blue cut to 0.62 and
++                          # its red untouched - i.e. greyer and warmer than it
++                          # went in. The emission path has no such problem, which
++                          # is exactly why the colour drifted warm as the albedo
++                          # wash came to dominate the read.
++                          #
++                          # So the albedo is pre-cooled to survive the key, and
++                          # the emission keeps the gem's own violet. Two colours,
++                          # because they travel through two different amounts of
++                          # light. Do NOT "tidy" this back into one constant.
++                          #
++                          # It also matters more than it looks: the beard is meant
++                          # to be the only warm thing on the model, and a warm hem
++                          # was quietly setting up a second warm pole at the
++                          # opposite end of the silhouette.
++VOW_ALB    = 0.075        # the SAME halo, added to BASE COLOR as well as to
++                          # emission, and this is the half of it that was missing.
++                          # Emission on its own is light sitting on top of cloth
++                          # that never acknowledges it - which is the definition
++                          # of a decal, and is why a 3.6x emission-side halo was
++                          # invisible last pass. A thread genuinely glowing in
++                          # silk also makes the silk around it a LIGHTER SILK.
++                          #
++                          # The two halves cover different pixels, which is why
++                          # both are needed. Emission is the only thing that can
++                          # lift a fold INTERIOR, because no light reaches it to
++                          # be reflected. Albedo is the only thing that can make
++                          # the lit facing planes respond, because there the
++                          # emission is already buried under the key. Do one and
++                          # half the surface ignores the stroke.
++                          #
++                          # 0.042 in the vow's hue against C_ROBE's own 0.042 blue
++                          # is a doubling AT the stroke, back to nothing 11 mm out.
++                          # It also self-limits in exactly the right place: a flat
++                          # add is a large fraction of the 0.042 facing value the
++                          # band needs to lift, and a fourteenth of the 0.575
++                          # nacre peak, so it flushes the dark facing cloth and
++                          # vanishes into the grazing rim rather than greying out
++                          # the silver.
++                          #
++                          # It was ALSO 0.055 once, and the number is not what was
++                          # wrong with it - the RADIUS it was painted over was. At
++                          # a 15 mm halo on a 68 mm pitch this did not flush the
++                          # cloth around a stroke, it raised the whole lower
++                          # garment a step above the chest and the model read as a
++                          # light bottom under a dark top. Same lift, an 11 mm
++                          # halo and a 114 mm pitch, and it is a local flush again.
++                          # Which is the general lesson here: when a material
++                          # effect is too spread out, fix the SPREAD. Dimming it
++                          # keeps the bad shape and just makes it harder to see.
++VOW_Z_RIM  = 0.026        # ...but NOT all the way down. Below this the band is
++VOW_Z_RIM_ON = 0.045      # off again, fading back in by RIM_ON. The very bottom
++                          # of the pooled hem is the rim where the cloth meets the
++                          # ground, and lighting it put a bright edge UNDER the
++                          # model - a strip of light along the contact line, which
++                          # reads as the figure hovering over a lit floor and
++                          # directly contradicts the contact shadow the pooled hem
++                          # exists to cast. The lowest 2.5 cm is a shadow, not a
++                          # page. Costs nothing: the first course sits at 0.069.
++VOW_Z_FULL = 0.105        # full density from RIM_ON to here...
++VOW_Z_MID  = 0.200        # ...0.80 here...
++VOW_MID    = 0.80
++VOW_Z_OFF  = 0.335        # ...and dead here and above.
++                          #
++                          # Courses land at z = 0.069, 0.183, 0.298, weighted
++                          # 1.00, 0.82 and 0.15 - three, dissolving upward, EASE
++                          # so the top has zero slope and never shows as a line.
++                          #
++                          # THE SECOND COURSE CARRIES THIS AND THE GEOMETRY IS WHY.
++                          # Cutting off at 0.235 to answer "it climbs too high"
++                          # deleted the third course and pushed the second down to
++                          # 0.35, and the hem went blank (run-191, run-192) - which
++                          # looks like a lighting failure and is actually a
++                          # geometry one. Read the normals off ROBE_TABLE: the
++                          # pooled flare from 0.020 to 0.076 has normals pointing
++                          # 0.62-0.76 UP, so it is a near-horizontal shelf that
++                          # every camera sees at a grazing angle and that occupies
++                          # almost no pixels. The cloth only stands up at 0.076
++                          # (radial 0.96) and is a true vertical wall by 0.19.
++                          #
++                          # So "densest at the very bottom" and "visible" pull
++                          # against each other: the very bottom is precisely the
++                          # part that cannot be seen. The band has to sit on the
++                          # lowest VERTICAL cloth, not on the lowest cloth. The
++                          # weighting keeps the floor course strongest so the
++                          # gradient still reads as light pooling downward, but it
++                          # no longer starves the one course doing the work.
++                          #
++                          # 0.335 m is a seventh of the 2.27 m figure - lower calf,
++                          # inside the "bottom sixth" that was asked for. Three
++                          # panels reported this effect at hip and belt height,
++                          # where the mask is provably and exactly zero; that is
++                          # worth recording, because chasing it downward twice is
++                          # what cost two renders.
++VOW_ROWS   = 2.75         # Wave scale. Blender's band period is 0.314/scale
++                          # metres, so courses sit 11.4 cm apart - was 6.8 cm, and
++                          # widening the pitch is most of where the area cut came
++                          # from, because it is the one change that removes whole
++                          # courses rather than shaving each one.
++VOW_PHASE  = -0.012       # Mapping Location Z, which slides every course by -this
++                          # (Location is added AFTER Scale, and the wave reads the
++                          # result). It exists for one reason: to place the silver
++                          # hem trim in the MIDDLE of a dark gap.
++                          #
++                          # The trim is a sweep of radius TRIM_R*1.1 along
++                          # z = ROBE_TABLE[0][0] + HEM_BAND, so it occupies
++                          # z 0.117 to 0.133. Courses 1 and 2 sit at 0.069 and
++                          # 0.183, i.e. 48 mm below and 50 mm above it. Last pass
++                          # a course cleared it by 11 mm and the panel still read
++                          # the trim as crowded and muddied - because clearance
++                          # has to be measured from the HALO, not the stroke, and
++                          # the halo was bridging a gap the strokes did not. The
++                          # margin now is ~40 mm of untouched black either side
++                          # even at full wander. Recompute this whenever VOW_ROWS,
++                          # HEM_BAND or ROBE_TABLE[0][0] moves.
++VOW_BAND   = 0.057        # stroke width as a fraction of the course pitch, so
++                          # 0.057 x 11.4 cm = 6.5 mm, CONSTANT everywhere - that
++                          # constancy is what reads as one pen. Cut as a FRACTION
++                          # while growing in millimetres, because this is a ratio
++                          # against a pitch that nearly doubled: left alone it
++                          # would have widened every stroke to 10 mm and undone
++                          # the course cut. Because a SAW ramp is uniformly
++                          # distributed it is also the coverage exactly.
++                          #
++                          # Chunkier than the 6 mm that was on screen, and that is
++                          # deliberate rather than a hedge. Area was cut about
++                          # four-fold by removing courses and by trebling the gaps
++                          # between marks; spending a little of that back on the
++                          # WIDTH of the marks that remain is the one way to spend
++                          # it that survives downsampling, because at 184 a 5 mm
++                          # stroke is a third of a pixel and averages away to
++                          # nothing while the count of strokes is what drives the
++                          # icon's total mass. Fewer and chunkier beats more and
++                          # finer at both sizes at once.
++VOW_WOBBLE = 0.75         # phase distortion, in units where a course pitch is
++                          # 2*pi: +/-0.75 is +/-13.6 mm, about a ninth of a
++                          # course, so a line meanders like handwriting and can
++                          # never collide with a neighbour. Lower than the old 1.5
++                          # in wave units and yet the same displacement in metres,
++                          # because the pitch it is a fraction of nearly doubled.
++VOW_STRETCH = 0.85        # squash X and Y before the distortion is sampled. Was
++                          # 0.34, which made the wander so long and lazy that a
++                          # course was effectively at ONE height all the way round
++                          # the body - a dead-level ruling, and five of those are
++                          # hoops. At 0.85 the wander turns over about every 0.7 m
++                          # of circumference, so each course visibly tilts and
++                          # follows the drape instead of cutting a horizontal, and
++                          # the left and right front panels no longer meet the
++                          # front opening at the same height for the eye to join
++                          # up across the gap. Does NOT touch the pitch - Z is 1.0.
++VOW_SPACE    = 0.010      # IRREGULAR SPACING, in metres, added to the wave's own
++VOW_SPACE_XY = 0.5        # input Z before it is banded. A Wave texture is strictly
++VOW_SPACE_Z  = 4.0        # periodic, so no amount of tuning can make its courses
++                          # unevenly spaced - the pitch is the pitch. Displacing
++                          # the coordinate it reads is the only lever, and it is
++                          # sampled from a field that varies FAST in Z and slowly
++                          # in X and Y, which is what separates this from
++                          # VOW_WOBBLE above.
++                          #
++                          # Fast in Z (scale 4.0, so a wavelength of ~0.25 m
++                          # against a 0.29 m band) means neighbouring courses get
++                          # different offsets and the gaps come out at anything
++                          # from 8 to 15 cm - two close together, a wide dark gap,
++                          # then one. Slow in X and Y (scale 0.5, a wavelength of
++                          # about the whole circumference) means a course tilts as
++                          # a WHOLE rather than undulating, so this reads as the
++                          # line being set down at a slight angle and the wobble
++                          # reads as the hand shaking - two different scales of
++                          # error, which is what handwriting actually looks like.
++                          #
++                          # Budget: +/-10 mm here plus +/-13.6 mm of wobble is
++                          # 23.6 mm worst case against a 114 mm pitch. Both came
++                          # down because the WANDER is what eats the trim's dark
++                          # margin: the courses either side of the trim clear it
++                          # by ~48 mm nominally, and every millimetre of wander is
++                          # a millimetre off that clearance at the worst moment.
++                          # At this budget the margin holds at 18 mm - above the
++                          # trim's own 16.5 mm width - even with both fields at
++                          # opposite extremes, which is the condition the panel
++                          # kept catching and I kept measuring optimistically.
++VOW_GAP_SCALE = 20.0      # word breaks. Detail 3 on this noise is deliberate and
++VOW_GAP_CUT   = 0.565     # is what fixed the stitching read: an fBm field crosses
++                          # its threshold at several scales at once, so runs come
++                          # out anywhere from ~5 mm to ~6 cm instead of all the
++                          # same length. Length variance is the half of "writing"
++                          # that constant width cannot supply on its own.
++                          #
++                          # CUT is the DUTY CYCLE and it is the single most
++                          # important number in this whole design. It was 0.47,
++                          # which passes a little over half of each course, and
++                          # that is why every verifier read hoop-banding: at ~50%
++                          # a course spends as much of itself lit as dark, the
++                          # dashes are longer than the gaps that separate them,
++                          # and from any given angle foreshortening closes the
++                          # remaining gaps toward the silhouette edges until the
++                          # ring welds shut. It does not matter how varied the
++                          # runs are if there is no dark between them.
++                          #
++                          # At 0.60 an fBm passes about a fifth, so the average
++                          # gap is three to four times the average run and no
++                          # course can close from ANY view. That also happens to
++                          # be the largest single area cut available - it is
++                          # multiplicative with the course count - which is why it
++                          # answers the icon blocker and the ornament blocker at
++                          # the same time. They were always one problem.
++                          #
++                          # The opposing failure is real and this is bracketed
++                          # against it: longer runs (scale 12, cut 0.44) aggregate
++                          # into a luminous base at 184 but read as neon PIPING;
++                          # past cut ~0.70 the marks thin to Morse ticks and the
++                          # icon loses the band entirely. Do not chase either end.
++VOW_GAP_EDGE  = 0.03      # width of the ramp's shoulder above CUT, and it must be
++                          # read TOGETHER with CUT because the two of them coupled
++                          # in a way that cost a whole render (run-177, hem blank).
++                          #
++                          # A Blender noise Fac is not uniform on 0..1 - it is
++                          # piled up around 0.5 with a spread of only about 0.1.
++                          # So the shoulder is not a small finishing detail on a
++                          # wide passing region, it is a large fraction of one.
++                          # At CUT 0.60 with a 0.07 shoulder, the noise only got
++                          # ~5% of the way past the far end of the ramp: nearly
++                          # every stroke sat PART WAY UP the shoulder, so raising
++                          # the threshold to make the marks sparser silently made
++                          # every surviving mark dimmer as well, and the band
++                          # disappeared at a strength that should have been ample.
++                          #
++                          # Duty cycle and stroke VALUE have to be independent
++                          # controls. Keeping the shoulder narrow against the
++                          # noise's spread is what separates them: at CUT 0.565
++                          # about a quarter of each course passes and over 70% of
++                          # that is at FULL value, so CUT now sets only how much
++                          # is lit and VOW_EMIT sets only how brightly. That
++                          # ratio, not either number, is the thing to preserve.
++VOW_GAP_Z     = 3.2       # squash the gap field in Z ONLY. Without this a gap
++                          # blob is round and spans several courses, so the breaks
++                          # line up vertically and the whole band reads as a
++                          # quilted grid. At 3.2 a gap is ~1.6 cm tall against a
++                          # 11.4 cm pitch, so no two courses share a break.
++VOW_LIFE_SCALE = 8.0      # slow variation of per-stroke brightness along the run,
++VOW_LIFE_MIN   = 0.70     # 70-100%. A row of strokes all at exactly one value
++                          # fires like a bar of LEDs; unevenness is most of what
++                          # makes it read as something written by hand.
++
+ # ==============================================================================
+ #  SCENE RESET
+ # ==============================================================================
+@@ -735,42 +1454,173 @@ def make_material(name, rgba, metallic=0.0, roughness=0.5,
+     return mat
+ 
+ 
+-def add_pearl_shift(mat, core, mid, edge, blend=PEARL_BLEND, interp="EASE"):
+-    """Shot silk: drive Base Color from a viewing-angle ramp.
+-
+-    This is what makes silk shimmer rather than just look shiny. The cloth
+-    changes HUE as it turns away from the camera, so every fold reads as a
+-    different colour instead of the same blue at a different brightness - which
+-    is exactly what a fold in real silk does, and what no amount of specular
+-    will fake. Layer Weight's Fresnel output is ~0 face-on, ~1 at grazing.
+-
+-    Three stops, not two: a straight core-to-edge blend passes through the
+-    midpoint of the two colours, and the midpoint of near-black and cyan is a
+-    muddy slate. The mid stop is what keeps the transition through violet.
+-
+-    NOTE this is a render-time material and does NOT survive the FBX export -
+-    FBX carries a single flat colour per material. mat.diffuse_color is set to
+-    the mid stop so Unity and the solid viewport get the most representative
+-    single value; matching the shimmer in-engine is a shader job for whoever
+-    builds the prefab.
++def add_nacre_band(mat, core, strength=1.0, blend=NACRE_BLEND):
++    """Pearlescent by ANGLE, not by brightness: an angle-gated nacre band.
++
++    The cloth stays dark and saturated facing the camera and only the silhouette
++    edges and fold crests carry a bright pearl contour, so the figure
++    self-outlines at 184x184. What goes down is the value of the part pointed at
++    you, not the mean of the whole garment - a band wide enough to see costs
++    mean value, and that trade is made deliberately (see NACRE_BLEND). The
++    contrast the gem needs is bought back with HUE instead: everything here is
++    cold, and the stone is the only warm thing in the frame.
++
++    Layer Weight's FACING output is 0 face-on and 1 at the silhouette, and it is
++    close to linear in a form's projected width - which is why it, and not
++    Fresnel, drives this (see NACRE_BLEND for the full reason). Two ramps hang
++    off that one output:
++
++      HUE   - LINEAR, four stops, all inside one hue neighbourhood: the core
++              colour's own indigo, a periwinkle handoff, then pale silver-blue
++              held to the rim. This is the part that does the work. A fold crest
++              turning away from you travels up the ramp, so the SAME cloth reads
++              indigo on one flank of a crest and pale silver on the other. That
++              is what real shot silk does and what no amount of specular will
++              fake. Cold end to end on purpose: the gem is the only warm thing
++              in the frame, and that is how it keeps its dominance now that
++              value is not doing it on its own.
++      VALUE - EASE, three stops: core, open band, rim peak. EASE and not LINEAR
++              because the ease-in holds the near-face-on region flat and dark;
++              a linear ramp starts lifting the instant a surface turns at all,
++              and the whole garment greys out.
++
++    The two are multiplied, so VALUE is the only thing that can brighten the robe
++    - and it is capped. A Math/MINIMUM against NACRE_PEAK sits between the value
++    ramp and the multiply, because "the gem is the brightest thing on the model"
++    is a promise that has to survive somebody retuning the ramp later.
++
++    A Wave texture then multiplies that value by 1 +/- NACRE_WEAVE_AMP. Since it
++    modulates value rather than colour it is self-masking: worth ~0.002 where the
++    robe is dark and ~0.036 inside the band, so the weave appears only where the
++    pearl does.
++
++    `strength` lerps the two upper value stops back toward the core, which is how
++    the sash and hem band (0.75) keep the same material identity while staying a
++    quieter cloth than the robe they trim. The under-robe deliberately does not
++    call this at all - see C_ROBE_IN.
++
++    NOTE this is a render-time graph and does NOT survive the FBX export - FBX
++    carries a single flat colour per material. mat.diffuse_color is set below so
++    Unity and the solid viewport get a representative single value; matching the
++    shimmer in-engine is a shader job for whoever builds the prefab.
+     """
+     nt = mat.node_tree
+     b = nt.nodes["Principled BSDF"]
++
++    # Hue stop 0 is the core colour NORMALISED and value stop 0 is its brightest
++    # channel, so hue x value at facing 0 reproduces `core` exactly. Splitting
++    # it this way is what lets the band be retinted without ever changing what
++    # the robe looks like face-on, which is the one thing that must not move.
++    core_v = max(core[0], core[1], core[2], 1e-6)
++    core_h = (core[0] / core_v, core[1] / core_v, core[2] / core_v, 1.0)
++
+     lw = nt.nodes.new("ShaderNodeLayerWeight")
+-    lw.location = (-620, 180)
++    lw.location = (-1020, 200)
+     lw.inputs["Blend"].default_value = blend
+-    ramp = nt.nodes.new("ShaderNodeValToRGB")
+-    ramp.location = (-420, 180)
+-    cr = ramp.color_ramp
+-    cr.interpolation = interp
+-    cr.elements[0].position = 0.0
+-    cr.elements[0].color = core
+-    cr.elements[1].position = 1.0
+-    cr.elements[1].color = edge
+-    cr.elements.new(0.55).color = mid
+-    nt.links.new(lw.outputs["Fresnel"], ramp.inputs["Fac"])
+-    nt.links.new(ramp.outputs["Color"], b.inputs["Base Color"])
+-    mat.diffuse_color = mid
++
++    hue = nt.nodes.new("ShaderNodeValToRGB")
++    hue.location = (-820, 340)
++    hr = hue.color_ramp
++    hr.interpolation = "LINEAR"
++    # The hue ramp gets the SAME shoulder as the value ramp, and it matters just
++    # as much. With this stop at 0.00 the cloth was already half way to cyan at
++    # 40 degrees off face-on - the value ramp was correctly holding the front of
++    # the garment at its core VALUE while the hue ramp quietly repainted it, and
++    # the robe rendered teal with no indigo anywhere (2026-08-01). Pinned here,
++    # every surface inside the shoulder is exactly C_ROBE, hue included, and all
++    # the colour travel happens inside the band where the pearl actually is.
++    hr.elements[0].position = NACRE_FLOOR
++    hr.elements[0].color = core_h
++    hr.elements[1].position = 1.00
++    hr.elements[1].color = NACRE_SILVER_HI
++    # Added after the two endpoints are placed - elements.new() re-sorts the
++    # list, so grabbing elements[1] afterwards would not be the stop you think.
++    # Silver-blue is reached by 0.66 and then held to the rim, so it carries
++    # about four fifths of the sweep and the periwinkle leg is a short handoff
++    # out of the indigo rather than a colour the cloth sits in.
++    hr.elements.new(0.48).color = NACRE_PERI
++    hr.elements.new(0.66).color = NACRE_SILVER
++    nt.links.new(lw.outputs["Facing"], hue.inputs["Fac"])
++
++    val = nt.nodes.new("ShaderNodeValToRGB")
++    val.location = (-820, 60)
++    vr = val.color_ramp
++    vr.interpolation = "EASE"
++    stops = [(p, core_v + strength * (v - core_v)) for p, v in NACRE_V]
++    # NOT position 0. The ramp holds this value for everything below it, and that
++    # flat shoulder is what keeps the front of the garment at its core colour
++    # while the band still has somewhere to travel. See NACRE_FLOOR.
++    vr.elements[0].position = NACRE_FLOOR
++    vr.elements[0].color = (core_v, core_v, core_v, 1.0)
++    vr.elements[1].position = stops[-1][0]
++    vr.elements[1].color = (stops[-1][1],) * 3 + (1.0,)
++    for p, v in stops[:-1]:
++        vr.elements.new(p).color = (v,) * 3 + (1.0,)
++    nt.links.new(lw.outputs["Facing"], val.inputs["Fac"])
++
++    # The ceiling. MINIMUM rather than a Clamp node so the graph reads as "the
++    # cloth may not exceed this" instead of as an arbitrary range.
++    cap = nt.nodes.new("ShaderNodeMath")
++    cap.location = (-600, 60)
++    cap.operation = 'MINIMUM'
++    cap.inputs[1].default_value = NACRE_PEAK
++    nt.links.new(val.outputs["Color"], cap.inputs[0])
++
++    # Warp/weft. Object space so the weave is locked to the cloth and does not
++    # swim when the camera moves. The mapping squashes Z, so a distorted band
++    # comes out several times longer than it is wide and the threads run ALONG
++    # the folds rather than dotting across them.
++    coord = nt.nodes.new("ShaderNodeTexCoord")
++    coord.location = (-1420, -240)
++    mapping = nt.nodes.new("ShaderNodeMapping")
++    mapping.location = (-1220, -240)
++    mapping.inputs["Scale"].default_value = (1.0, 1.0, 0.22)
++    nt.links.new(coord.outputs["Object"], mapping.inputs["Vector"])
++    wave = nt.nodes.new("ShaderNodeTexWave")
++    wave.location = (-1020, -240)
++    wave.wave_type = 'BANDS'
++    # Bands along X, i.e. stripes that run up the figure with the folds. Guarded
++    # because bands_direction is a fairly recent property and a missing one
++    # should cost the grain its orientation, not crash the build.
++    if hasattr(wave, "bands_direction"):
++        wave.bands_direction = 'X'
++    wave.inputs["Scale"].default_value = NACRE_WEAVE
++    wave.inputs["Distortion"].default_value = NACRE_WEAVE_WARP
++    if "Detail" in wave.inputs:
++        wave.inputs["Detail"].default_value = 2.0
++    nt.links.new(mapping.outputs["Vector"], wave.inputs["Vector"])
++    # MULTIPLY_ADD: wave * 2*amp + (1 - amp), i.e. 1 +/- amp. The three sockets
++    # are all literally named "Value" in the RNA - only the UI relabels them
++    # Multiplier/Addend - so they have to be reached by index.
++    grain = nt.nodes.new("ShaderNodeMath")
++    grain.location = (-820, -240)
++    grain.operation = 'MULTIPLY_ADD'
++    grain.inputs[1].default_value = 2.0 * NACRE_WEAVE_AMP
++    grain.inputs[2].default_value = 1.0 - NACRE_WEAVE_AMP
++    nt.links.new(wave.outputs["Fac"], grain.inputs[0])
++
++    lit = nt.nodes.new("ShaderNodeMath")
++    lit.location = (-420, -80)
++    lit.operation = 'MULTIPLY'
++    nt.links.new(cap.outputs["Value"], lit.inputs[0])
++    nt.links.new(grain.outputs["Value"], lit.inputs[1])
++
++    # Colour x scalar. Vector Math/SCALE rather than a Mix node because the two
++    # Mix spellings have swapped names and sockets across 3.x/4.x/5.x, while
++    # SCALE has not; a Vector output feeding a Colour input is converted
++    # componentwise, which is exactly the multiply wanted here.
++    tint = nt.nodes.new("ShaderNodeVectorMath")
++    tint.location = (-220, 120)
++    tint.operation = 'SCALE'
++    nt.links.new(hue.outputs["Color"], tint.inputs[0])
++    nt.links.new(lit.outputs["Value"], tint.inputs["Scale"])
++    nt.links.new(tint.outputs["Vector"], b.inputs["Base Color"])
++
++    # A QUARTER of the way up the band, not the middle of it: most of the
++    # garment's area sits at the core stop, so handing Unity the mid stop would
++    # describe a robe far paler than the one that renders.
++    rep = core_v + 0.25 * (stops[0][1] - core_v)
++    mat.diffuse_color = tuple(c * rep for c in NACRE_SILVER[:3]) + (1.0,)
+     return mat
+ 
+ 
+@@ -819,27 +1669,472 @@ def add_grain_glow(mat, colour, strength, scale=9.0, threshold=0.62,
+     return mat
+ 
+ 
+-# Sheen is what separates silk from painted plastic. It is also the single
+-# easiest thing to overdo: at 0.80 it laid a bright white fresnel over the whole
+-# garment and a robe with a base value of 0.03 rendered as pale lavender. Sheen
+-# gives the material its FIBRE, it is not the lighting - keep it low and let the
+-# base colour stay dark.
+-M_ROBE    = make_material("MageRobe",    C_ROBE,    0.0, 0.300, sheen=0.38,
+-                          sheen_tint=(0.60, 0.55, 1.00, 1.0), coat=0.30,
+-                          coat_roughness=0.10, specular=0.70,
++def add_vow_threads(mat, colour, strength):
++    """The vow, written round the bottom of the cloth he stands in. The palette
++    block says why it is shaped this way; this is how.
++
++    Four masks multiplied together decide where the robe emits, and the emission
++    COLOUR carries all of them - Emission Strength stays pinned at the cap, so
++    there is exactly one number to audit and one place to break the promise that
++    the gem is the brightest thing on the model. A fifth output (5, below) takes
++    the same masks to BASE COLOR, which is what makes the strokes light rather
++    than paint.
++
++    1. COURSES. A Wave texture, BANDS along Z, SAW profile, through a tight ramp.
++       Bands along Z put the strokes round the body's circumference so they wrap
++       the flare like a carved band, and that is the thing that makes an eye call
++       a pattern "writing": a baseline, repeated at a fixed pitch, every run going
++       the same way. SAW and not SIN because a sawtooth is LINEAR between its
++       resets, so the ramp cuts a stroke of identical width everywhere, and it
++       gives one stroke per course instead of the two a sine gives on its rising
++       and falling edges. A Wave is rigidly periodic, so the two things that stop
++       three parallel rulings looking like hoops are both done to the COORDINATE
++       it reads, before it reads it: VOW_SPACE displaces Z from a field that
++       varies quickly up the figure and slowly around it, which makes the spacing
++       uneven and tilts each course as a whole, and the wave's own Distortion
++       (VOW_WOBBLE) makes the line meander within that.
++
++       The stroke is a flat PLATEAU with soft shoulders, wrapped in a much wider
++       EASE halo at VOW_HALO. The halo is the part that matters: it is what lifts
++       the cloth and the fold interiors immediately around a stroke, and without
++       it the strokes are painted dashes that have to be made too bright to
++       register. Combined with MAXIMUM rather than added, so the core is exactly
++       1.0 and `strength` really is the peak.
++
++    2. WORDS. An fBm noise chops each course into runs of wildly different
++       length, squashed in Z so no two courses break in the same place.
++
++    3. LIFE. A slow noise varies per-stroke brightness over VOW_LIFE_MIN..1, so
++       the band shimmers unevenly instead of firing as one bar.
++
++    4. HEIGHT. A world-Z WINDOW, closing at both ends: dark on the ground-contact
++       rim, full through the pooled hem, then 0.50 and 0.18 on the two courses
++       above before EASEing out at VOW_Z_OFF. The falloff is what makes three
++       courses read as light pooling rather than as a tiered skirt - an even
++       band is decoration wherever it is put. Position comes from the Geometry
++       node, which is WORLD space - object coordinates would agree today only
++       because every part happens to be built at the origin, and would break
++       silently the first time one moved.
++
++    5. BLEED. The halo again, this time added to BASE COLOR under masks 2-4, so
++       the cloth around a stroke is genuinely lighter cloth. See VOW_ALB for why
++       emission alone cannot do this. It is ADDED onto whatever already drives
++       Base Color rather than replacing it, because on both robe materials that
++       is the nacre band and overwriting it would delete the pearlescence.
++
++    Because the pitch depends only on world Z, courses land at the same heights
++    in every material this is applied to, so the robe and its hem border read as
++    ONE inscription crossing both rather than two patterns that happen to abut.
++
++    GOTCHA: a Math node's inputs are all called "Value", so they can only be
++    addressed by index - hence inputs[0]/[1]/[2] below rather than by name.
++    """
++    nt = mat.node_tree
++    b = nt.nodes["Principled BSDF"]
++
++    coord = nt.nodes.new("ShaderNodeTexCoord")
++    coord.location = (-1760, -640)
++    mapping = nt.nodes.new("ShaderNodeMapping")
++    mapping.location = (-1580, -560)
++    # X and Y only. Z MUST stay 1.0 or the course pitch moves with it.
++    mapping.inputs["Scale"].default_value = (VOW_STRETCH, VOW_STRETCH, 1.0)
++    # Location is applied AFTER Scale, so this is a straight slide in metres and
++    # is safe to set while Scale Z stays 1.0. See VOW_PHASE: it is what parks the
++    # silver hem trim in the middle of a dark gap.
++    mapping.inputs["Location"].default_value = (0.0, 0.0, VOW_PHASE)
++    nt.links.new(coord.outputs["Object"], mapping.inputs["Vector"])
++
++    # Irregular course spacing. The Wave below is strictly periodic and nothing
++    # done to its own inputs can change that, so the coordinate it reads is
++    # displaced in Z instead: shift the ruler rather than the marks. Sampled from
++    # its own mapping precisely so it can be fast in Z and slow in X/Y, which is
++    # what makes it spacing-and-tilt rather than a second copy of the wobble.
++    sp_map = nt.nodes.new("ShaderNodeMapping")
++    sp_map.location = (-1580, -300)
++    sp_map.inputs["Scale"].default_value = (VOW_SPACE_XY, VOW_SPACE_XY,
++                                            VOW_SPACE_Z)
++    nt.links.new(coord.outputs["Object"], sp_map.inputs["Vector"])
++
++    sp = nt.nodes.new("ShaderNodeTexNoise")
++    sp.location = (-1380, -300)
++    sp.inputs["Scale"].default_value = 1.0
++    # Detail 0: one smooth octave. Any fBm here would put fine wiggle back into
++    # the course positions, which is the wobble's job and would double-count.
++    if "Detail" in sp.inputs:
++        sp.inputs["Detail"].default_value = 0.0
++    nt.links.new(sp_map.outputs["Vector"], sp.inputs["Vector"])
++
++    # MULTIPLY_ADD to recentre 0..1 onto -VOW_SPACE..+VOW_SPACE. All three
++    # sockets are named "Value", so they are reached by index (see the GOTCHA).
++    sp_c = nt.nodes.new("ShaderNodeMath")
++    sp_c.operation = 'MULTIPLY_ADD'
++    sp_c.location = (-1180, -300)
++    sp_c.inputs[1].default_value = 2.0 * VOW_SPACE
++    sp_c.inputs[2].default_value = -VOW_SPACE
++    nt.links.new(sp.outputs["Fac"], sp_c.inputs[0])
++
++    sp_v = nt.nodes.new("ShaderNodeCombineXYZ")
++    sp_v.location = (-1000, -300)
++    nt.links.new(sp_c.outputs["Value"], sp_v.inputs["Z"])
++
++    sp_add = nt.nodes.new("ShaderNodeVectorMath")
++    sp_add.operation = 'ADD'
++    sp_add.location = (-820, -380)
++    nt.links.new(mapping.outputs["Vector"], sp_add.inputs[0])
++    nt.links.new(sp_v.outputs["Vector"], sp_add.inputs[1])
++
++    tex = nt.nodes.new("ShaderNodeTexWave")
++    tex.location = (-1380, -520)
++    tex.wave_type = 'BANDS'
++    tex.bands_direction = 'Z'
++    tex.wave_profile = 'SAW'
++    tex.inputs["Scale"].default_value = VOW_ROWS
++    if "Distortion" in tex.inputs:
++        tex.inputs["Distortion"].default_value = VOW_WOBBLE
++    # Two octaves of wander at about half a metre: one slow sag along the run and
++    # one finer waver inside it. More detail and the line frays instead of
++    # flowing.
++    if "Detail" in tex.inputs:
++        tex.inputs["Detail"].default_value = 2.0
++    if "Detail Scale" in tex.inputs:
++        tex.inputs["Detail Scale"].default_value = 1.6
++    nt.links.new(sp_add.outputs["Vector"], tex.inputs["Vector"])
++
++    half = VOW_BAND * 0.5
++    band = nt.nodes.new("ShaderNodeValToRGB")
++    band.location = (-1160, -440)
++    cr = band.color_ramp
++    cr.elements[0].position = 0.5 - half
++    cr.elements[0].color = (0.0, 0.0, 0.0, 1.0)
++    cr.elements[1].position = 0.5 + half
++    cr.elements[1].color = (0.0, 0.0, 0.0, 1.0)
++    # The full-value plateau, as a fraction of the stroke's half-width. It was
++    # 0.34, which on a 6.5 mm stroke is a core only 2.2 mm wide - under one pixel
++    # at render scale and a third of one at 184, so almost the whole mark was
++    # SHOULDER, ramping from full to nothing with no flat top anywhere. That is
++    # the arithmetic behind "you can barely locate individual marks": a stroke
++    # whose core does not survive one pixel cannot resolve no matter how bright
++    # it is, and turning the brightness up just spreads a brighter gradient.
++    # At 0.55 the core is 3.6 mm and holds a flat top across ~1.5 pixels, so the
++    # mark has an actual body and the shoulder is an edge on it rather than the
++    # whole of it. Width is unchanged - this is entirely about the profile.
++    cr.elements.new(0.5 - half * 0.55).color = (1.0, 1.0, 1.0, 1.0)
++    cr.elements.new(0.5 + half * 0.55).color = (1.0, 1.0, 1.0, 1.0)
++    nt.links.new(tex.outputs["Fac"], band.inputs["Fac"])
++
++    # EASE and not LINEAR: a linear falloff leaves a visible straight-sided wedge
++    # either side of the stroke and reads as a second, softer dash. EASE puts the
++    # curvature next to the core and the long tail out at the edge, which is what
++    # a glow looks like.
++    halo = nt.nodes.new("ShaderNodeValToRGB")
++    halo.location = (-1160, -660)
++    hr = halo.color_ramp
++    hr.interpolation = 'EASE'
++    hw = min(0.48, half * VOW_HALO_W)
++    hr.elements[0].position = 0.5 - hw
++    hr.elements[0].color = (0.0, 0.0, 0.0, 1.0)
++    hr.elements[1].position = 0.5 + hw
++    hr.elements[1].color = (0.0, 0.0, 0.0, 1.0)
++    hr.elements.new(0.5).color = (VOW_HALO, VOW_HALO, VOW_HALO, 1.0)
++    nt.links.new(tex.outputs["Fac"], halo.inputs["Fac"])
++
++    glow = nt.nodes.new("ShaderNodeMath")
++    glow.operation = 'MAXIMUM'
++    glow.location = (-940, -540)
++    nt.links.new(band.outputs["Color"], glow.inputs[0])
++    nt.links.new(halo.outputs["Color"], glow.inputs[1])
++
++    # Word breaks. Separate mapping from the wobble's: this one squashes Z, which
++    # is the opposite of what the wobble wants, and it must not touch X or Y or
++    # the runs stretch out and stop being words.
++    gap_map = nt.nodes.new("ShaderNodeMapping")
++    gap_map.location = (-1580, -860)
++    gap_map.inputs["Scale"].default_value = (1.0, 1.0, VOW_GAP_Z)
++    nt.links.new(coord.outputs["Object"], gap_map.inputs["Vector"])
++
++    gap = nt.nodes.new("ShaderNodeTexNoise")
++    gap.location = (-1380, -860)
++    gap.inputs["Scale"].default_value = VOW_GAP_SCALE
++    if "Detail" in gap.inputs:
++        gap.inputs["Detail"].default_value = 3.0
++    if "Roughness" in gap.inputs:
++        gap.inputs["Roughness"].default_value = 0.62
++    nt.links.new(gap_map.outputs["Vector"], gap.inputs["Vector"])
++
++    gap_ramp = nt.nodes.new("ShaderNodeValToRGB")
++    gap_ramp.location = (-1160, -880)
++    gr = gap_ramp.color_ramp
++    gr.elements[0].position = VOW_GAP_CUT
++    gr.elements[0].color = (0.0, 0.0, 0.0, 1.0)
++    # A shoulder rather than a step: a hard cut ends every run with a square tip,
++    # and word ends that all stop dead read as a printed pattern.
++    gr.elements[1].position = min(1.0, VOW_GAP_CUT + VOW_GAP_EDGE)
++    gr.elements[1].color = (1.0, 1.0, 1.0, 1.0)
++    nt.links.new(gap.outputs["Fac"], gap_ramp.inputs["Fac"])
++
++    words = nt.nodes.new("ShaderNodeMath")
++    words.operation = 'MULTIPLY'
++    words.location = (-720, -640)
++    nt.links.new(glow.outputs["Value"], words.inputs[0])
++    nt.links.new(gap_ramp.outputs["Color"], words.inputs[1])
++
++    # Uneven brightness stroke to stroke. Sampled off the RAW coordinate: it is
++    # meant to drift slowly along the run, and the wobble's X/Y squash would
++    # stretch it out to a single value across the whole front of the figure.
++    life = nt.nodes.new("ShaderNodeTexNoise")
++    life.location = (-1380, -1080)
++    life.inputs["Scale"].default_value = VOW_LIFE_SCALE
++    if "Detail" in life.inputs:
++        life.inputs["Detail"].default_value = 1.0
++    nt.links.new(coord.outputs["Object"], life.inputs["Vector"])
++
++    life_ramp = nt.nodes.new("ShaderNodeValToRGB")
++    life_ramp.location = (-1160, -1080)
++    lrm = life_ramp.color_ramp
++    lrm.elements[0].position = 0.30
++    lrm.elements[0].color = (VOW_LIFE_MIN, VOW_LIFE_MIN, VOW_LIFE_MIN, 1.0)
++    lrm.elements[1].position = 0.72
++    lrm.elements[1].color = (1.0, 1.0, 1.0, 1.0)
++    nt.links.new(life.outputs["Fac"], life_ramp.inputs["Fac"])
++
++    alive = nt.nodes.new("ShaderNodeMath")
++    alive.operation = 'MULTIPLY'
++    alive.location = (-520, -740)
++    nt.links.new(words.outputs["Value"], alive.inputs[0])
++    nt.links.new(life_ramp.outputs["Color"], alive.inputs[1])
++
++    geo = nt.nodes.new("ShaderNodeNewGeometry")
++    geo.location = (-1580, -1300)
++    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
++    sep.location = (-1380, -1300)
++    nt.links.new(geo.outputs["Position"], sep.inputs["Vector"])
++
++    # World Z straight into a ColorRamp Fac. That is only legitimate because the
++    # whole band lives below z = 1 m, where metres and the ramp's 0..1 domain
++    # coincide; everything above a metre clamps to the last stop, which is black
++    # and is what we want up there anyway.
++    hgt = nt.nodes.new("ShaderNodeValToRGB")
++    hgt.location = (-1160, -1300)
++    zr = hgt.color_ramp
++    zr.interpolation = 'EASE'
++    zr.elements[0].position = VOW_Z_FULL
++    zr.elements[0].color = (1.0, 1.0, 1.0, 1.0)
++    zr.elements[1].position = VOW_Z_OFF
++    zr.elements[1].color = (0.0, 0.0, 0.0, 1.0)
++    zr.elements.new(VOW_Z_MID).color = (VOW_MID, VOW_MID, VOW_MID, 1.0)
++    # The ramp is a WINDOW, not a falloff: it closes at the bottom as well as the
++    # top. These two stops darken the ground-contact rim - see VOW_Z_RIM. Added
++    # after the endpoints, because elements.new() re-sorts and elements[0] would
++    # no longer be the stop set above.
++    zr.elements.new(VOW_Z_RIM).color = (0.0, 0.0, 0.0, 1.0)
++    zr.elements.new(VOW_Z_RIM_ON).color = (1.0, 1.0, 1.0, 1.0)
++    nt.links.new(sep.outputs["Z"], hgt.inputs["Fac"])
++
++    # 5. CREST. Attenuate the marks on cloth that turns to face the key lamp and
++    #    leave them at full strength in the fold troughs the lamp cannot reach.
++    #    See VOW_CREST: this is what separates a self-lit mark from a highlight.
++    #    The dot product runs -1..1 and a ColorRamp Fac clamps below zero, so
++    #    everything angled away from the key lands on the first stop for free.
++    crest_d = nt.nodes.new("ShaderNodeVectorMath")
++    crest_d.operation = 'DOT_PRODUCT'
++    crest_d.location = (-1380, -1520)
++    crest_d.inputs[1].default_value = VOW_KEY_DIR
++    nt.links.new(geo.outputs["Normal"], crest_d.inputs[0])
++
++    crest = nt.nodes.new("ShaderNodeValToRGB")
++    crest.location = (-1160, -1520)
++    cxr = crest.color_ramp
++    cxr.interpolation = 'EASE'
++    cxr.elements[0].position = 0.0
++    cxr.elements[0].color = (1.0, 1.0, 1.0, 1.0)
++    cxr.elements[1].position = VOW_CREST_HI
++    cxr.elements[1].color = (VOW_CREST, VOW_CREST, VOW_CREST, 1.0)
++    nt.links.new(crest_d.outputs["Value"], crest.inputs["Fac"])
++
++    # Height and crest combined once and shared by both output paths, so the
++    # emission and the albedo can never disagree about where a mark is.
++    env = nt.nodes.new("ShaderNodeMath")
++    env.operation = 'MULTIPLY'
++    env.location = (-940, -1380)
++    nt.links.new(hgt.outputs["Color"], env.inputs[0])
++    nt.links.new(crest.outputs["Color"], env.inputs[1])
++
++    lit = nt.nodes.new("ShaderNodeMath")
++    lit.operation = 'MULTIPLY'
++    lit.location = (-320, -900)
++    nt.links.new(alive.outputs["Value"], lit.inputs[0])
++    nt.links.new(env.outputs["Value"], lit.inputs[1])
++
++    # Black-to-colour ramp rather than a Mix node: same result, and it is the
++    # spelling the rest of this file already uses (see add_grain_glow), so there
++    # is no version-dependent Mix socket naming to get wrong.
++    tint = nt.nodes.new("ShaderNodeValToRGB")
++    tint.location = (-120, -900)
++    trm = tint.color_ramp
++    trm.elements[0].position = 0.0
++    trm.elements[0].color = (0.0, 0.0, 0.0, 1.0)
++    trm.elements[1].position = 1.0
++    trm.elements[1].color = colour
++    nt.links.new(lit.outputs["Value"], tint.inputs["Fac"])
++
++    if "Emission Color" in b.inputs:
++        nt.links.new(tint.outputs["Color"], b.inputs["Emission Color"])
++    if "Emission Strength" in b.inputs:
++        b.inputs["Emission Strength"].default_value = strength
++
++    # --- 6. BLEED: the stroke's own profile, into the cloth's albedo ----------
++    # This used to be a separate, WIDER, perfectly smooth hump, on the theory
++    # that a hard edge in albedo is what "painted on" looks like. That theory
++    # cost the design a round. Because the hump was wider than the stroke and had
++    # no core, the albedo was a soft patch with a thin emissive thread somewhere
++    # inside it, and every verifier read the patch and never found the thread -
++    # damp, dust, bleached wear. The stroke has to be the brightest part of its
++    # own mark in BOTH channels.
++    #
++    # So the bleed now shares `glow` - the same MAX(core plateau, narrow halo)
++    # the emission uses. Identical profile, identical width, one mark. The
++    # softness that stops it reading as paint comes from the halo shoulder and
++    # from the fact that albedo responds to the light, not from being blurrier
++    # than the thing it belongs to.
++    b_words = nt.nodes.new("ShaderNodeMath")
++    b_words.operation = 'MULTIPLY'
++    b_words.location = (-940, -1660)
++    nt.links.new(glow.outputs["Value"], b_words.inputs[0])
++    nt.links.new(gap_ramp.outputs["Color"], b_words.inputs[1])
++
++    b_alive = nt.nodes.new("ShaderNodeMath")
++    b_alive.operation = 'MULTIPLY'
++    b_alive.location = (-720, -1520)
++    nt.links.new(b_words.outputs["Value"], b_alive.inputs[0])
++    nt.links.new(life_ramp.outputs["Color"], b_alive.inputs[1])
++
++    b_lit = nt.nodes.new("ShaderNodeMath")
++    b_lit.operation = 'MULTIPLY'
++    b_lit.location = (-520, -1660)
++    nt.links.new(b_alive.outputs["Value"], b_lit.inputs[0])
++    nt.links.new(env.outputs["Value"], b_lit.inputs[1])
++
++    # Black -> VOW_ALB x C_VOW_ALB. NOT the emission's colour: see C_VOW_ALB.
++    # This one is about to be multiplied by a warm key and has to be pre-cooled
++    # to survive it; the emission is not and must not be.
++    flush = nt.nodes.new("ShaderNodeValToRGB")
++    flush.location = (-320, -1660)
++    fr = flush.color_ramp
++    fr.elements[0].position = 0.0
++    fr.elements[0].color = (0.0, 0.0, 0.0, 1.0)
++    fr.elements[1].position = 1.0
++    fr.elements[1].color = tuple(c * VOW_ALB for c in C_VOW_ALB[:3]) + (1.0,)
++    nt.links.new(b_lit.outputs["Value"], flush.inputs["Fac"])
++
++    # ADD onto whatever is already driving Base Color - on both robe materials
++    # that is add_nacre_band's SCALE node, and relinking Base Color directly
++    # would silently delete the pearlescence this design sits on top of. Snapshot
++    # the link list first: nt.links is live, and creating a link while iterating
++    # it is undefined. The fallback covers a material with a constant base colour,
++    # which is not the case today but is one call away from being it.
++    base_src = None
++    for lk in list(nt.links):
++        if lk.to_node is b and lk.to_socket.name == "Base Color":
++            base_src = lk.from_socket
++            break
++    lift = nt.nodes.new("ShaderNodeVectorMath")
++    lift.operation = 'ADD'
++    lift.location = (-120, -1400)
++    nt.links.new(flush.outputs["Color"], lift.inputs[1])
++    if base_src is not None:
++        nt.links.new(base_src, lift.inputs[0])
++    else:
++        lift.inputs[0].default_value = b.inputs["Base Color"].default_value[:3]
++    nt.links.new(lift.outputs["Vector"], b.inputs["Base Color"])
++    return mat
++
++
++# Sheen is what separates silk from painted plastic, and it is also the one
++# input on this material that can erase everything else. Two failures are
++# recorded here because they look identical and have different causes:
++#
++#   * sheen 0.80, roughness default (older) - a bright white veil, robe rendered
++#     pale lavender.
++#   * sheen 0.45, ROUGHNESS 0.55 (tried 2026-08-01) - same veil, in cyan. Sheen
++#     roughness is the WIDTH of the fibre lobe: near 0.25 it stays a grazing rim
++#     and reads as fibre, but by 0.55 it has spread across the whole surface and
++#     become a second, tinted diffuse. The robe came back slate-teal with the
++#     indigo base and the entire nacre ramp invisible underneath it - the base
++#     colour was doing nothing at all. If the cloth ever looks washed out, check
++#     this number before touching the ramp.
++#
++# The genuine fix for the wet patent-vinyl read that sheen 0.60 / coat 0.35 gave
++# the skirt is the SPECULAR width, not the sheen width: base roughness 0.42 (was
++# 0.30) turns the highlight into a long soft streak following the drape, the
++# coat drops to 0.12 so the oil-on-water layer is a suggestion and not a
++# varnish, and specular 0.45 stops the cloth behaving like a polished surface.
++M_ROBE    = make_material("MageRobe",    C_ROBE,    0.0, 0.420, sheen=0.38,
++                          sheen_tint=(0.72, 0.86, 1.00, 1.0),
++                          sheen_roughness=0.26, coat=0.12,
++                          coat_roughness=0.22, specular=0.45,
+                           film_thickness=FILM_T, film_ior=FILM_IOR)
+-add_pearl_shift(M_ROBE, C_ROBE, C_ROBE_MID, C_ROBE_EDGE)
+-M_ROBE_D  = make_material("MageRobeDeep", C_ROBE_D, 0.0, 0.360, sheen=0.36,
+-                          coat=0.24, film_thickness=380.0, film_ior=FILM_IOR)
+-add_pearl_shift(M_ROBE_D, C_ROBE_D, C_ROBE_D_MID, C_ROBE_D_EDGE)
+-# The lining stays matt and dark. It is rule 4's job - something for the gem to
+-# glow against - and a second shimmering silk in the robe's opening would take
+-# that away.
+-M_ROBE_IN = make_material("MageRobeLining", C_ROBE_IN, 0.0, 0.780, sheen=0.14)
++add_nacre_band(M_ROBE, C_ROBE)
++# Identical silk, quieter nacre, for the round masses - see NACRE_STR_QUIET.
++# A separate material and not a separate colour: everything except the band
++# strength is shared with M_ROBE, so the hat cannot drift into looking like a
++# different fabric from the robe under it.
++M_ROBE_Q  = make_material("MageRobeQuiet", C_ROBE, 0.0, 0.420, sheen=0.38,
++                          sheen_tint=(0.72, 0.86, 1.00, 1.0),
++                          sheen_roughness=0.26, coat=0.12,
++                          coat_roughness=0.22, specular=0.45,
++                          film_thickness=FILM_T, film_ior=FILM_IOR)
++add_nacre_band(M_ROBE_Q, C_ROBE, strength=NACRE_STR_QUIET)
++M_ROBE_D  = make_material("MageRobeDeep", C_ROBE_D, 0.0, 0.480, sheen=0.32,
++                          sheen_tint=(0.72, 0.86, 1.00, 1.0),
++                          sheen_roughness=0.26, coat=0.10,
++                          coat_roughness=0.22, specular=0.40,
++                          film_thickness=380.0, film_ior=FILM_IOR)
++add_nacre_band(M_ROBE_D, C_ROBE_D, strength=NACRE_STR_DEEP)
++# The vow-threads go on both robe cloths, and they have to go on both. The hem
++# BORDER is a separate loft in M_ROBE_D lying over the bottom 10 cm of the skirt
++# - exactly where the inscription is - so lighting M_ROBE alone would leave a
++# dark stripe through the middle of the band. M_ROBE_Q needs nothing: it is the
++# hat and the shoulder masses, and the world-Z ramp is flat zero above 0.31 m, so
++# every other user of these materials (sash, hatband, collar, sleeves) costs
++# nothing. Emission is untouched by add_nacre_band, which only drives Base Color,
++# so the two graphs coexist without either knowing about the other.
++add_vow_threads(M_ROBE, C_VOW, VOW_EMIT)
++add_vow_threads(M_ROBE_D, C_VOW, VOW_EMIT)
++# The lining is rule 4's job - something for the gem to glow against - and it
++# gets NO nacre at all. It has to stay a clear notch below the outer robe or the
++# two converge, the layered-robe read collapses into one mass, and the face void
++# stops functioning as a void. It also lines the sleeves and the under-brim, so
++# whatever happens here happens to every dark recess on the model at once.
++M_ROBE_IN = make_material("MageRobeLining", C_ROBE_IN, 0.0, 0.880, sheen=0.08)
+ M_SILVER  = make_material("MageSilver",  C_SILVER,  1.0, 0.062, anisotropic=0.55,
+                           specular=0.90)
+ M_SILVER_D = make_material("MageSilverDark", C_SILVER_D, 1.0, 0.260,
+                            anisotropic=0.35)
++# The wrought arm. Two materials, and the important number in both is METALLIC.
++#
++# The first version of this was C_PROS at 0.30 with metallic 1.0 and roughness 0.43
++# and it rendered as dark rubber. The base colour was not the problem: a fully
++# metallic surface has NO diffuse term, so in a rig with five small area lights and
++# a 0.03 world it only shows where a highlight happens to land, and everywhere else
++# it is whatever the dark world reflects - which is nothing. The rig comment up in
++# build_rig() already says this about the knight; the same trap caught this.
++#
++# So both of these are deliberately part dielectric. At metallic 0.55 about 45% of
++# the response is Lambertian off a 0.56 albedo - an effective ~0.25, which is beard
++# value, i.e. the target - and the remaining 55% still gives real silver specular
++# on top. The result reads as hammered, unpolished silver AND holds a light value
++# across its whole surface instead of only on the streaks. Hue stays neutral: this
++# arm's job is to be light, not to be a colour, and colour belongs to the gem.
++C_PROS     = (0.560, 0.578, 0.620, 1.0)
++M_PROS     = make_material("MageProsthetic", C_PROS, 0.55, 0.300,
++                           anisotropic=0.24, coat=0.14, coat_roughness=0.20)
++# The drawn edge, the collar, and every band that has to survive downscaling. One
++# clear step brighter than the plate faces so the plate boundaries read as OUTLINE
++# rather than as more of the same metal - and still under the gem, which is the
++# only emitter on the model and wins on hue as well as value.
++C_PROS_HI  = (0.815, 0.838, 0.880, 1.0)
++M_PROS_HI  = make_material("MageProstheticEdge", C_PROS_HI, 0.62, 0.170,
++                           anisotropic=0.30, coat=0.20, coat_roughness=0.12)
+ M_VOID    = make_material("MageVoid",    C_VOID,    0.0, 1.000)
+ M_WOOD    = make_material("MageStaffWood", C_WOOD,  0.0, 0.700, specular=0.50)
+ add_grain_glow(M_WOOD, C_WOOD_VEIN, WOOD_VEIN_EMIT, scale=40.0)
+@@ -853,6 +2148,18 @@ M_PARCH   = make_material("MageParchment", (0.205, 0.178, 0.138, 1.0), 0.0, 0.88
+ M_HAIR    = make_material("MageHair",    C_HAIR,    0.0, 0.640, sheen=0.40,
+                           sheen_tint=(0.78, 0.80, 1.00, 1.0))
+ M_SKIN    = make_material("MageSkin",    C_SKIN,    0.0, 0.700)
++# The free hand is GLOVED, and that is a direct consequence of plating the other
++# one. There used to be two pale flesh blobs at the same height on opposite sides
++# of the figure, splitting the warm-accent budget between them and with the beard;
++# with the staff hand gone to silver the survivor was the only flesh left on the
++# model and it pulled far harder than it had any business doing - a featureless
++# pale paddle coming out of a black sleeve. Gloved in the robe's own deep silk it
++# still reads as a hand (the sheen catches the rim lights and the digits keep their
++# shape) but it stops competing, and the beard is left owning the pale-warm role
++# outright. Kept a stop above C_ROBE so the hand does not dissolve into the sleeve.
++M_GLOVE   = make_material("MageGlove", (0.042, 0.046, 0.082, 1.0), 0.0, 0.520,
++                          sheen=0.34, sheen_tint=(0.62, 0.66, 1.00, 1.0),
++                          coat=0.18)
+ 
+ # The gem is the only light source on the model and the hero's whole colour
+ # identity. Transmission + a low-weight coat give it depth without the white
+@@ -1633,9 +2940,12 @@ def build_shoulders():
+     """
+     for tag, sgn in (("R", -1.0), ("L", 1.0)):
+         set_side(tag)
++        # Quiet silk: a sphere spends most of its projected area past the nacre
++        # band's knee, so at full strength these read as separate rubber pads
++        # rather than as the same cloth as the skirt. See NACRE_STR_QUIET.
+         add_sphere("Shoulder_" + tag,
+                    (sgn * 0.240, -0.010, 1.458), 0.106,
+-                   scale=(1.00, 0.74, 0.82), mat=M_ROBE, u=24, v=14)
++                   scale=(1.00, 0.74, 0.82), mat=M_ROBE_Q, u=24, v=14)
+     set_side("")
+ 
+ 
+@@ -1763,17 +3073,153 @@ def build_forearm(tag, elbow, wrist):
+                    0.044, FOREARM_R1, mat=M_ROBE_IN)
+ 
+ 
++def armour_shell(name, frames, hl_head, hl_lip, depth, lift, mat,
++                 segs=16, end_taper=0.80, bev=0.032):
++    """One plate of the prosthetic: an elongated rounded shell along `frames`.
++
++    `frames` is [(centre, out, along), ...] - a point on the plate's MID-surface,
++    the unit normal pointing away from the limb, and the unit direction the plate
++    is SHORT in (down the limb, lip end positive). A superellipse section is swept
++    along that list, so what comes out is a lozenge: thin radially, elongated down
++    the limb, rounded at every end. There is no box in it to rescue (rule 5), and
++    it still gets the bevel + subsurf + smooth-shade treatment because the section
++    corners are tight enough to catch a facet without them.
++
++    Three details that are load-bearing rather than decorative:
++
++      * the section is ASYMMETRIC. `hl_lip` is longer than `hl_head` and `lift`
++        raises that end off the mid-surface, so a stack of these reads as
++        overlapping lames instead of as a row of separate rings;
++      * `end_taper` shrinks the section toward both ends of the sweep, finishing
++        the plate in a lens rather than in a flat wall. Never to zero: a collapsed
++        ring gives a degenerate cap that the bevel then folds inside out;
++      * closed and capped, because the audit fails any mesh with a boundary edge
++        and an open shell also draws a black rim at grazing angles.
++    """
++    rings = []
++    n = len(frames)
++    for i, (c, out, along) in enumerate(frames):
++        u = i / max(1, n - 1)
++        f = end_taper + (1.0 - end_taper) * sin(pi * (0.06 + 0.88 * u)) ** 0.45
++        ring = []
++        for k in range(segs):
++            th = 2.0 * pi * k / segs
++            s, co = sin(th), cos(th)
++            # 0.62 rather than 1.0 squares the section off radially, which gives
++            # the plate a face for the light to sit on. A plain ellipse here is a
++            # tube, and a row of tubes is a caterpillar.
++            r = f * (lift * (0.5 + 0.5 * s)
++                     + depth * math.copysign(abs(co) ** 0.62, co))
++            a = f * (hl_lip if s >= 0.0 else hl_head) \
++                  * math.copysign(abs(s) ** 0.85, s)
++            ring.append(c + out * r + along * a)
++        rings.append(ring)
++    ob = loft(name, rings, mat=mat, closed=True, cap_start=True, cap_end=True)
++    bevel(ob, width=bev, segments=2)
++    subsurf(ob, 1)
++    return ob
++
++
++def build_pros_vambrace(tag, elbow, wrist):
++    """The forearm half of the wrought-silver arm - see the PROS_ block above.
++
++    A near-black core, one bright collar band where the cloth stops, four silver
++    lames ringed round it with a bright band drawn along every lip, and a
++    near-black gasket showing in every joint.
++
++    The core is doing real work and is not just filler: it is the gap-lining. It
++    is what shows through the joints and through the wrap's opening, and together
++    with the bands it is the reason the stack reads as outlined structure when it
++    downscales instead of fusing into one smooth metal tube (rules 3 and 4).
++    """
++    elbow, wrist = Vector(elbow), Vector(wrist)
++    span = (wrist - elbow).length
++    ax = (wrist - elbow).normalized()
++    # Body-side reference vector, so the opening in the wrap can be aimed away
++    # from the cameras by angle alone - see PROS_PHI0.
++    e1 = Vector((1.0, 0.0, 0.0))
++    e1 = (e1 - ax * e1.dot(ax)).normalized()
++    e2 = ax.cross(e1).normalized()
++
++    s0, s1 = span * PROS_T0, span * PROS_T1
++    pitch = (s1 - s0) / (PROS_LAMES - 1)
++
++    def mid_r(s):
++        """Lame mid-surface radius `s` metres down the arm from the elbow.
++
++        Extrapolates past both ends deliberately: the core and the gaskets read
++        off the SAME law as the lames, so no amount of re-tuning the taper can
++        leave one of them floating off the others."""
++        return lerp(PROS_R0, PROS_R1, (s - s0) / (s1 - s0))
++
++    def arc(centre, r, along, n=26):
++        """Frames for one wrap of the limb at radius `r`."""
++        out = []
++        for i in range(n):
++            a = PROS_PHI0 + PROS_SPAN * i / (n - 1)
++            d = e1 * cos(a) + e2 * sin(a)
++            out.append((centre + d * r, d, along))
++        return out
++
++    # The core runs back under the last of the flesh forearm and forward into the
++    # fist, so there is no station along the limb where the silver has nothing
++    # dark behind it. Its far cap stops well short of the shaft.
++    a0, a1 = span * PROS_COLLAR - 0.014, s1 + 0.035
++    capsule("Pros_Core_" + tag, elbow + ax * a0, elbow + ax * a1,
++            mid_r(a0) - PROS_CORE_IN, mid_r(a1) - PROS_CORE_IN,
++            mat=M_VOID, segs=20)
++
++    # The collar. Where the cloth stops the metal starts, and it starts with one
++    # hard bright ring rather than with a plate edge fading out under a wavy cuff.
++    # This is the whole reveal: without it the rolled-back sleeve just looks short.
++    sc = span * PROS_COLLAR
++    armour_shell("Pros_Collar_" + tag, arc(elbow + ax * sc, mid_r(sc) + 0.0032, ax),
++                 0.0085, 0.0085, 0.0062, 0.0, M_PROS_HI, bev=0.010)
++
++    for k in range(PROS_LAMES):
++        s = s0 + pitch * k
++        f = arc(elbow + ax * s, mid_r(s), ax)
++        armour_shell("Pros_Lame_%s%d" % (tag, k), f,
++                     PROS_HL_HEAD, PROS_HL_LIP, PROS_D, PROS_LIFT, M_PROS)
++        # The drawn line, and it is a BAND now, not a hairline. Half-sunk into the
++        # lip's bevel so it sits on the plate rather than hovering over it, and
++        # wide enough to stay continuous when the render is scaled down - at 1.8 mm
++        # it broke into a handful of speculars and the plate boundaries stopped
++        # existing, which is the failure rule 3 is specifically about.
++        edge = [(p + out * (PROS_LIFT * 0.92 + PROS_D * 0.62)
++                   + al * (PROS_HL_LIP * 0.86), out, al)
++                for (p, out, al) in f]
++        armour_shell("Pros_LameEdge_%s%d" % (tag, k), edge,
++                     PROS_EDGE_HL, PROS_EDGE_HL, PROS_EDGE_R, 0.0, M_PROS_HI,
++                     segs=12, bev=0.008)
++
++    # Gaskets. Each sits in the slot between two lames, proud enough of the lower
++    # one to be seen and far enough under the upper one's lip to stay a recess.
++    # Without them the joint is silver meeting silver and the segmentation
++    # disappears the moment the render is scaled down.
++    for k in range(PROS_LAMES - 1):
++        s = s0 + pitch * (k + 0.5)
++        f = arc(elbow + ax * s, mid_r(s) + PROS_GAP_R, ax)
++        armour_shell("Pros_Gasket_%s%d" % (tag, k), f,
++                     0.0060, 0.0060, 0.0035, 0.0, M_VOID,
++                     segs=12, bev=0.008)
++
++
+ def _rot_about(axis, angle):
+     return Matrix.Rotation(angle, 3, axis)
+ 
+ 
+-def build_palm(name, centre, across, thick, along, size):
++def build_palm(name, centre, across, thick, along, size, mat=None):
+     """A flattened rounded block - the palm.
+ 
+     A sphere was the first attempt and it reads as an egg with sausages attached,
+     because a hand's defining feature is that it is FLAT: wide across the
+     knuckles, thin front to back. The superellipse power squares the section off
+     just enough to give the back of the hand a plane for light to sit on.
++
++    `mat` defaults to skin. The staff hand passes M_VOID: over there this block is
++    not flesh at all, it is the near-black core the knuckle tiles sit on and what
++    shows in the gap between them.
+     """
+     rings = []
+     rows = 8
+@@ -1794,82 +3240,166 @@ def build_palm(name, centre, across, thick, along, size):
+             dv = h * math.copysign(abs(sn) ** 0.68, sn)
+             ring.append(centre + across * du + thick * dv + along * off)
+         rings.append(ring)
+-    ob = loft(name, rings, mat=M_SKIN, closed=True,
++    ob = loft(name, rings, mat=mat or M_SKIN, closed=True,
+               cap_start=True, cap_end=True)
+     return ob
+ 
+ 
+-def build_digit(name, pts, r0, r1, knuckles=3.0, flat=0.86):
++def build_digit(name, pts, r0, r1, knuckles=3.0, flat=0.86, mat=None):
+     """A finger: tapered, slightly flattened, and bulged at the knuckles.
+ 
+     The bulges are the whole point. A smooth tapered tube is a sausage; three
+     swellings along its length are what make it read as jointed at the size the
+     game actually shows the hands at.
++
++    The staff hand builds its digits one PHALANX at a time - three short calls
++    with knuckles=1.0, so each gets a single swelling in its own middle and the
++    joints fall in the waists between them. `mat` is how those come out as plate
++    rather than as skin.
+     """
+     def ring(t, a):
+         r = lerp(r0, r1, t) * (1.0 + FINGER_KNUCKLE * sin(pi * t * knuckles) ** 2)
+         return (r * cos(a), r * flat * sin(a))
+-    return sweep_fn(name, pts, ring, M_SKIN, segs=10)
++    return sweep_fn(name, pts, ring, mat or M_SKIN, segs=10)
+ 
+ 
+ def build_grip_hand(tag, centre, axis, out_dir, shaft_r):
+-    """A fist closed around a cylinder of radius `shaft_r`.
++    """The staff hand: wrought silver, fused shut on the shaft.
++
++    The framing is unchanged from the flesh hand this replaces - fingers are swept
++    along arcs measured around the SHAFT axis, so they wrap the staff instead of
++    being parked near it, and `out_dir` still points from the shaft back toward
++    the wrist. What changed is what they are made of and how far they close.
+ 
+-    Fingers are swept along arcs measured around the shaft axis, so they wrap the
+-    staff instead of being parked near it. `out_dir` points from the shaft back
+-    toward the wrist.
++    Every curl radius here is a couple of millimetres tighter than the flesh hand
++    used, which is the whole point: the shells bite into the wood along their
++    entire length and there is no daylight anywhere between a finger and the
++    shaft. This grip closed once and there is nothing in it that could open.
+     """
+     axis = Vector(axis).normalized()
+     out_dir = (Vector(out_dir) - axis * Vector(out_dir).dot(axis)).normalized()
+     side = axis.cross(out_dir).normalized()
++    # Everything about this hand is measured toward the CAMERA side of the shaft.
++    # The digits used to sweep the other way, round the back, and all that reached
++    # the lens was four tips poking past the far edge of the wood - which every
++    # reader of the render called rivets, banding or a bound cord, never a hand.
++    # `fwd` is the direction they wrap now: out of the page, across the near face.
++    fwd = -side
+     centre = Vector(centre)
+ 
+-    # Back of the hand faces outward; the palm plate wraps the shaft.
++    # Back of the hand faces outward; the palm plate wraps the shaft. Near-black
++    # rather than skin - here the block is the core the knuckle tiles sit on, and
++    # what shows in the gap between them and around their ends. `fwd` as its long
++    # axis so the block's wide knuckle end points where the fingers actually go.
+     palm_c = centre + out_dir * (shaft_r + 0.030)
+-    build_palm("Palm_" + tag, palm_c, axis, out_dir, side,
+-               (0.062, 0.026, 0.052))
++    build_palm("Palm_" + tag, palm_c, axis, out_dir, fwd,
++               (0.062, 0.026, 0.052), mat=M_VOID)
++
++    # Knuckle guard: two tiles across the back of the fist, carrying the forearm's
++    # taper on to the knuckles. STRAIGHT tiles, not rings - a ring at this station
++    # would have to pass through the shaft, which is the same wall that stops the
++    # lame stack at PROS_T1.
++    for j, (soff, r_out, half) in enumerate(((-0.009, 0.0315, 0.052),
++                                             ( 0.016, 0.0292, 0.046))):
++        n = 20
++        f = []
++        for i in range(n):
++            u = lerp(-half, half, i / (n - 1))
++            q = u / half
++            # Bowed, so the tile follows the back of the hand down to the index
++            # and little-finger knuckles instead of standing off it at the ends.
++            # `slope` is d(bow)/du, which is what tilts the plate's normal with
++            # it - without that the shell twists off its own surface at the tips.
++            bow = r_out * (1.0 - 0.32 * q * q)
++            slope = -0.64 * r_out * q / half
++            nrm = (out_dir - axis * slope).normalized()
++            f.append((palm_c + fwd * soff + out_dir * bow + axis * u,
++                      nrm, fwd))
++        armour_shell("Pros_Knuckle_%s%d" % (tag, j), f,
++                     PROS_HL_HEAD, PROS_HL_LIP, PROS_D, PROS_LIFT, M_PROS,
++                     end_taper=0.34)
++        edge = [(p + nrm * (PROS_LIFT * 0.92 + PROS_D * 0.62)
++                   + al * (PROS_HL_LIP * 0.86), nrm, al)
++                for (p, nrm, al) in f]
++        armour_shell("Pros_KnuckleEdge_%s%d" % (tag, j), edge,
++                     PROS_EDGE_HL, PROS_EDGE_HL, PROS_EDGE_R, 0.0, M_PROS_HI,
++                     segs=12, end_taper=0.34, bev=0.008)
+ 
+     for k in range(4):
+-        # Index nearest the top of the grip, little finger lowest, and the
+-        # outer two shorter - a hand where all four fingers are the same length
+-        # reads as a mitten.
+-        z_off = (1.42 - k) * 0.027
+-        length = (0.94, 1.03, 1.00, 0.88)[k]
++        # Index nearest the top of the grip, little finger lowest, and the outer
++        # two shorter - a hand where all four fingers are the same length reads as
++        # a mitten. Spaced 36 mm and built fat: four SLIM digits at this scale
++        # average into a ribbed band, four fat ones read as four knuckles.
++        z_off = (1.5 - k) * 0.036
++        length = (0.94, 1.04, 1.00, 0.88)[k]
+         base = centre + axis * z_off
+-        a0, a1 = radians(16.0), radians(16.0 + 150.0 * length)
+-        n = 7
+-        pts = []
+-        for i in range(n):
+-            t = i / (n - 1)
+-            a = lerp(a0, a1, t)
+-            # The fingertip tucks in toward the shaft as it curls. These offsets
+-            # are smaller than the finger radius on purpose, so the finger
+-            # surface bites into the shaft rather than hovering beside it.
+-            rr = shaft_r + lerp(0.013, 0.004, t)
+-            pts.append(base + (_rot_about(axis, a) @ out_dir) * rr)
+-        build_digit("Finger_%s%d" % (tag, k), pts, 0.0145, 0.0098)
+-
+-    # Thumb lies ALONG the shaft across the backs of the fingers, which is how a
+-    # hand actually holds a staff. Wrapped round with the fingers it interlocks
+-    # with them and reads as a fifth finger.
+-    t0 = centre + axis * (-0.058) + out_dir * (shaft_r + 0.020)
+-    pts = [t0,
+-           t0 + axis * 0.030 + (_rot_about(axis, radians(-26.0)) @ out_dir) * 0.008,
+-           t0 + axis * 0.058 + (_rot_about(axis, radians(-44.0)) @ out_dir) * 0.012,
+-           t0 + axis * 0.080 + (_rot_about(axis, radians(-56.0)) @ out_dir) * 0.010]
+-    build_digit("Thumb_" + tag, pts, 0.0175, 0.0115, knuckles=2.0)
++        # NEGATIVE sweep: out of `out_dir` (which points back at the wrist) round
++        # through `fwd` and on to the far side. The middle of every finger now
++        # crosses the near face of the shaft where the camera can see it, and the
++        # tips come far enough round to break the staff's outline in silhouette -
++        # which is what stops the staff reading as a stick standing beside him.
++        a0, a1 = radians(-12.0), radians(-12.0 - 122.0 * length)
++        # Three phalanges per finger, each its own shell. The cuts are not even
++        # thirds: a real proximal phalanx is the longest of the three, and that
++        # unevenness is most of what stops the finger reading as a segmented hose.
++        cuts = (0.0, 0.44, 0.76, 1.0)
++        for j in range(3):
++            n = 6
++            pts = []
++            for i in range(n):
++                # Each shell starts slightly before its own cut and ends slightly
++                # after it, so consecutive shells interpenetrate at the joints.
++                # Butt-jointed they showed shaft through the seam three times down
++                # every finger, and a gap in this hand is the one thing the whole
++                # idea cannot survive.
++                t = lerp(cuts[j] - (0.035 if j else 0.0),
++                         cuts[j + 1] + (0.035 if j < 2 else 0.0), i / (n - 1))
++                a = lerp(a0, a1, t)
++                # Tighter than the flesh hand's 0.013 -> 0.004: with the shell's
++                # radial half-thickness at ~0.8 of its radius this buries the
++                # inner face well inside the nominal grip radius, which is past
++                # the wound cord and into the wood at every ridge and valley.
++                rr = shaft_r + lerp(0.009, 0.002, t)
++                pts.append(base + (_rot_about(axis, a) @ out_dir) * rr)
++            build_digit("Finger_%s%d%s" % (tag, k, "abc"[j]), pts,
++                        lerp(0.0186, 0.0132, cuts[j]),
++                        lerp(0.0186, 0.0124, cuts[j + 1]),
++                        knuckles=1.0, flat=0.80, mat=M_PROS)
++
++    # Thumb, and it crosses the FRONT of the fist rather than hiding behind it: it
++    # rides up and over the backs of the fingers at a larger radius than they use,
++    # so from the camera it is one unbroken diagonal bar laid across four rungs.
++    # That diagonal is most of what says "hand" at a glance - four parallel digits
++    # on their own are a grille. Two shells, not three: a thumb has two phalanges,
++    # and giving it three is the tell that it was drawn from the other fingers.
++    def _tp(deg, up, extra):
++        return (centre + axis * up
++                + (_rot_about(axis, radians(deg)) @ out_dir) * (shaft_r + extra))
++
++    tp = catmull([_tp(-20.0, -0.062, 0.020), _tp(-40.0, -0.030, 0.025),
++                  _tp(-60.0,  0.006, 0.027), _tp(-78.0,  0.038, 0.024)], 5)
++    # The slice overlaps by two samples for the same reason the fingers do.
++    build_digit("Thumb_%s0" % tag, tp[:10], 0.0205, 0.0160,
++                knuckles=1.0, flat=0.82, mat=M_PROS)
++    build_digit("Thumb_%s1" % tag, tp[8:], 0.0160, 0.0118,
++                knuckles=1.0, flat=0.82, mat=M_PROS)
+ 
+ 
+ def build_open_hand(tag, wrist, fwd, up):
+     """Relaxed open hand, fingers slightly curled. His left, held forward - the
+-    natural place for a future cast VFX attach point."""
++    natural place for a future cast VFX attach point.
++
++    GLOVED, not bare, and that changed the moment the other hand went to silver:
++    see M_GLOVE. Left as skin it was the only flesh left anywhere on the figure,
++    which turned a supporting detail into the second thing the eye went to."""
+     wrist = Vector(wrist)
+     fwd = Vector(fwd).normalized()
+     up = (Vector(up) - fwd * Vector(up).dot(fwd)).normalized()
+     side = fwd.cross(up).normalized()
+ 
+     palm_c = wrist + fwd * 0.046
+-    build_palm("Palm_" + tag, palm_c, side, up, fwd, (0.060, 0.023, 0.056))
++    build_palm("Palm_" + tag, palm_c, side, up, fwd, (0.060, 0.023, 0.056),
++               mat=M_GLOVE)
+ 
+     for k in range(4):
+         off = (k - 1.5) * 0.025
+@@ -1891,14 +3421,14 @@ def build_open_hand(tag, wrist, fwd, up):
+             pts.append(base + fwd * (0.068 * length * t)
+                             - up * (curl * t * t)
+                             + side * (off * 0.26 * t))
+-        build_digit("Finger_%s%d" % (tag, k), pts, 0.0145, 0.0098)
++        build_digit("Finger_%s%d" % (tag, k), pts, 0.0145, 0.0098, mat=M_GLOVE)
+ 
+     t0 = palm_c + side * 0.044 - fwd * 0.006
+     pts = [t0,
+            t0 + fwd * 0.024 + side * 0.014 - up * 0.006,
+            t0 + fwd * 0.046 + side * 0.024 - up * 0.016,
+            t0 + fwd * 0.062 + side * 0.030 - up * 0.026]
+-    build_digit("Thumb_" + tag, pts, 0.0175, 0.0115, knuckles=2.0)
++    build_digit("Thumb_" + tag, pts, 0.0175, 0.0115, knuckles=2.0, mat=M_GLOVE)
+ 
+ 
+ def build_arms():
+@@ -1906,10 +3436,19 @@ def build_arms():
+     build_sleeve("R", SHOULDER_R, ELBOW_R, WRIST_R, SLEEVE_END_R,
+                  SLEEVE_FLARE_R)
+     build_forearm("R", ELBOW_R, WRIST_R)
++    # Everything below mid-forearm on this side is wrought silver. The flesh
++    # forearm above still gets built: from the cuff down to PROS_T0 it is the
++    # near-black stump the plate emerges from, and below that it is buried inside
++    # the prosthetic's own core.
++    build_pros_vambrace("R", ELBOW_R, WRIST_R)
+     # The grip is taken from the staff spine, not from a hand-authored point, so
+     # re-posing the staff carries the hand with it.
+     tan = (Vector(STAFF_SPINE[4]) - Vector(STAFF_SPINE[2])).normalized()
+-    build_grip_hand("R", GRIP_C, tan, Vector((1.0, 0.15, 0.0)), GRIP_R)
++    # Out-direction read off the WRIST rather than written out again. The whole
++    # point of swinging WRIST_R forward was to bring the hand round to the camera
++    # side of the shaft; a hardcoded (1, 0.15, 0) would have left the palm parked
++    # where the wrist used to be and torn the hand off the arm.
++    build_grip_hand("R", GRIP_C, tan, WRIST_R - GRIP_C, GRIP_R)
+ 
+     set_side("L")
+     build_sleeve("L", SHOULDER_L, ELBOW_L, WRIST_L, SLEEVE_END_L,
+@@ -2022,7 +3561,10 @@ def build_hat():
+     sits inside the head sphere, and the crown's lower wall sits inside the
+     brim's inner ring. Change BRIM_PROFILE[0] or HAT_TILT and check the audit.
+     """
+-    brim = revolve("Hat_Brim", BRIM_PROFILE, segments=52, mat=M_ROBE,
++    # M_ROBE_Q, not M_ROBE: the brim is a broad disc seen almost edge-on from a
++    # chest-height camera, so its whole top surface sits past the nacre band's
++    # knee and it came back the brightest mass on the model. See NACRE_STR_QUIET.
++    brim = revolve("Hat_Brim", BRIM_PROFILE, segments=52, mat=M_ROBE_Q,
+                    origin=hat_xf((0.0, 0.0, Z_BRIM)), close_profile=True,
+                    radial_fn=lambda a: BRIM_WAVE * sin(3.0 * a))
+     brim.rotation_euler = (0.0, HAT_TILT, 0.0)
+@@ -2063,7 +3605,9 @@ def build_hat():
+                           - HAT_CREASE * (0.5 + 0.5 * cos(a - 0.9)) ** 3.0)
+         return (r * m * cos(a), r * m * sin(a))
+ 
+-    sweep_fn("Hat_Crown", spine, ring, M_ROBE, segs=30)
++    # Quiet silk for the same reason as the brim: a tapered cone shows its
++    # grazing flanks across most of its width from any angle.
++    sweep_fn("Hat_Crown", spine, ring, M_ROBE_Q, segs=30)
+ 
+     # Dark dome closing the crown just above the head, so the underside of the
+     # hat is black rather than lit blue.
