@@ -8,9 +8,10 @@
      Live · Compare) → design dossier slide-over (#/a/<asset>/d/<design>).
 
      No external requests. The script is v4.ts beside this file; served by
-     _tools/serve.py, which copies this page into the previews root at startup
-     and bundles v4.ts there as v4.js — RESTART THE SERVER after editing
-     either. serve.py also redirects /, /index.html and /live.html here.
+     _tools/serve.py, which copies this page into the previews root and
+     bundles v4.ts there as v4.js (with v4.js.map), at startup and again when
+     a request finds either source changed — RELOAD after editing either.
+     serve.py also redirects /, /index.html and /live.html here.
 
      Data contract (server computes nothing; the page polls static files):
        /fleet.json                  supervisor    fleet registry
@@ -584,8 +585,8 @@ dialog::backdrop { background: #05060acc; }
   </table>
 </dialog>
 
-<!-- The page script. v4.js is v4.ts (beside this file) bundled by serve.py at
-     startup into the previews root: build output, never edited or committed.
+<!-- The page script. v4.js is v4.ts (beside this file) bundled by serve.py
+     into the previews root: build output, never edited or committed.
      A module, so it runs strict and keeps its names out of the global scope;
      like the inline script it replaced, it runs once the DOM above is parsed. -->
 <script type="module" src="v4.js"></script>

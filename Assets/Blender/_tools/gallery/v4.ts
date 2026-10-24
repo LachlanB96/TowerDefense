@@ -2,10 +2,11 @@
 // image viewer and the chat. It was v4.html's inline <script> until 2026-10-24; the move to
 // TypeScript changed types only, not behaviour.
 //
-// This file is the source. serve.py bundles it at startup with the Bun pinned in
-// ~/AI/.typescript into the previews root as v4.js, beside its copy of v4.html, which loads
-// it as a module. The bundle is build output: never edit or commit a v4.js. Restart
-// serve.py after editing this file.
+// This file is the source. serve.py bundles it with the Bun pinned in ~/AI/.typescript into
+// the previews root as v4.js (and a source map, v4.js.map, so devtools show this file),
+// beside its copy of v4.html, which loads it as a module: at startup, and again when a
+// request for the page finds this file changed, so reload after editing it. The bundle is
+// build output: never edit or commit a v4.js.
 //
 // A module is always strict, which the inline script asked for with 'use strict'.
 

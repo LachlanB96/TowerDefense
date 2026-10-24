@@ -4,11 +4,12 @@ The page (`_tools/gallery/v4.html`, served at `http://localhost:8777/v4.html`) i
 **the Gloomfell suite** (2026-08-12): fleet overview → per-asset war room (tabs
 Overview · Live · Compare) → design dossier slide-over. It polls static files only;
 the server computes nothing. Its script is TypeScript, `_tools/gallery/v4.ts` (since
-2026-10-24). **Restart `serve.py` after editing either file** — at startup it copies
-the page into the previews root and bundles `v4.ts` there as `v4.js` with Bun (build
-output: never edited or committed). The old URLs `/`, `/index.html` and `/live.html`
-are server redirects into the suite (they map `?asset=x` onto the router), so they
-can never show stale data. Schemas here must stay byte-compatible with the page
+2026-10-24). **Reload the page after editing either file** — `serve.py` copies the
+page into the previews root and bundles `v4.ts` there as `v4.js` with Bun (with a
+source map, `v4.js.map`), at startup and again whenever a request for the page finds
+a source changed (build output: never edited or committed). The old URLs `/`,
+`/index.html` and `/live.html` are server redirects into the suite (they map
+`?asset=x` onto the router), so they can never show stale data. Schemas here must stay byte-compatible with the page
 source (`v4.ts`, whose interfaces mirror them); when you change one, change both and
 grep the other four skill docs for the field name.
 
