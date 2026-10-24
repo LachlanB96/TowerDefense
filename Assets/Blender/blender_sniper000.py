@@ -14,11 +14,19 @@ as "machined steel".
 
 import bpy
 import math
+import os
+import sys
 from mathutils import Vector
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-BLEND_PATH = r"C:\Users\LachlanB\TD\Assets\Blender\sniper000.blend"
-FBX_PATH   = r"C:\Users\LachlanB\TD\Assets\Models\sniper000.fbx"
+# Worked out from this file's own path (the name its code was compiled under, which
+# `blender -P`, build_one.py and exec(compile(src, PATH, "exec")) all set), so they
+# hold wherever the repo lives. A copy run from a worktree under .claude/worktrees/
+# still writes into the main checkout (CLAUDE.md, "Asset pipeline").
+_REPO = os.path.abspath(os.path.join(os.path.dirname(sys._getframe().f_code.co_filename), "..", ".."))
+_REPO = _REPO.split(os.sep + os.path.join(".claude", "worktrees") + os.sep)[0]
+BLEND_PATH = os.path.join(_REPO, "Assets", "Blender", "sniper000.blend")
+FBX_PATH   = os.path.join(_REPO, "Assets", "Models", "sniper000.fbx")
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  CLEAR SCENE
