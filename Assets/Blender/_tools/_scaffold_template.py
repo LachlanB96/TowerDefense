@@ -30,7 +30,8 @@ RENDER_DIR = os.path.join(_REPO, "Assets", "Blender", "___ASSET__")
 
 
 def _flag(name, default=False):
-    """Headless: blender -b -P blender___ASSET__.py -- save export render.
+    """Headless: blender -b -P blender___ASSET__.py -- save export render, queued with
+    the Process Warden (warden-run ... -- blender -b ...; CLAUDE.md, "Preview harness").
     In-session: seed the name in the namespace before exec'ing (build_one.py)."""
     import sys
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []

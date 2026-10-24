@@ -123,3 +123,8 @@ __pycache__.meta
 /[Aa]ssets/Blender/_tools/gallery/*.js.meta
 /[Aa]ssets/Blender/_tools/gallery/*.js.map
 /[Aa]ssets/Blender/_tools/gallery/*.js.map.meta
+
+# Written by Unity's IDE integration each time a checkout opens: the solution is named after
+# the folder (TD.slnx, check.slnx in a worktree) and VS Code's settings point at it.
+/*.slnx
+/.vscode/settings.json

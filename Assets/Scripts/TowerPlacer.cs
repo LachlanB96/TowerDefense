@@ -48,6 +48,25 @@ public class TowerPlacer : MonoBehaviour
     {
         _pathRenderer = FindAnyObjectByType<PathRenderer>();
 
+        BuildTables();
+        BuildShopPanel();
+
+        if (DEV_AUTO_PLACE)
+        {
+            DevPlaceTower("tack000", DEV_TACK_POS);
+            DevPlaceTower("sniper000", DEV_SNIPER_POS);
+            DevPlaceTower("knight000", DEV_KNIGHT_POS);
+        }
+    }
+
+    /// <summary>
+    /// Fills the base-code → prefab and base-code → setup tables. Kept apart from Start() so the
+    /// EditMode tests (Assets/Tests/Editor/TowerTablesTests.cs) can build them on the scene's
+    /// TowerPlacer without the shop UI or dev auto-placement running. The tests call it by name
+    /// through reflection, so renaming it means renaming it there too.
+    /// </summary>
+    void BuildTables()
+    {
         _prefabs = new Dictionary<string, GameObject>
         {
             { "tack000", _towerPrefab },
@@ -97,15 +116,6 @@ public class TowerPlacer : MonoBehaviour
                 }
             },
         };
-
-        BuildShopPanel();
-
-        if (DEV_AUTO_PLACE)
-        {
-            DevPlaceTower("tack000", DEV_TACK_POS);
-            DevPlaceTower("sniper000", DEV_SNIPER_POS);
-            DevPlaceTower("knight000", DEV_KNIGHT_POS);
-        }
     }
 
     void DevPlaceTower(string type, Vector3 pos)
