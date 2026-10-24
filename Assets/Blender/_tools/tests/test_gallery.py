@@ -13,6 +13,7 @@ Nothing here runs Blender.
 
 import http.client
 import importlib.util
+import json
 import os
 import shutil
 import socket
@@ -26,6 +27,13 @@ TOOLS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GALLERY = os.path.join(TOOLS, "gallery")
 SERVE = os.path.join(TOOLS, "serve.py")
 RESERVED_PORTS = {8777, 8778, 8779}
+# A Chromium for the tests that need the page to run. Headless, with a profile
+# of its own under tmp_path, so it never opens a window or touches a browser
+# that's already running. GLOOMFELL_BROWSER points at another chrome/msedge.
+BROWSERS = [os.environ.get("GLOOMFELL_BROWSER") or "",
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe"]
 
 
 def _load_serve():
@@ -92,6 +100,19 @@ class Served:
             return resp.status, resp.msg, resp.read()
         finally:
             conn.close()
+
+    def rendered(self, route, profile):
+        """The DOM after the page has run for 6 s of virtual time at `route`."""
+        browser = next((b for b in BROWSERS if b and os.path.isfile(b)), None)
+        if not browser:
+            pytest.skip("no Edge or Chrome to run the page in (set GLOOMFELL_BROWSER)")
+        r = subprocess.run(
+            [browser, "--headless=new", "--disable-gpu", "--no-first-run",
+             "--no-default-browser-check", "--disable-extensions",
+             "--user-data-dir=" + str(profile), "--virtual-time-budget=6000",
+             "--dump-dom", "http://127.0.0.1:%d%s" % (self.port, route)],
+            capture_output=True, encoding="utf-8", errors="replace", timeout=120)
+        return r.stdout
 
 
 # ------------------------------------------------------------------ the source
@@ -241,3 +262,36 @@ def test_console_never_chokes_on_what_it_reports(tmp_path):
         assert "bün→here".encode("utf-8") in page   # the page itself is UTF-8
     assert "bun not found at " in srv.output
     assert "suite:   http://localhost:%d/v4.html" % srv.port in srv.output
+
+
+# ------------------------------------------------------------------ the page
+
+
+def _manifest(run, chips):
+    """A preview.py manifest with one variant carrying `chips`."""
+    return {"asset": "chiptest", "run": run, "started": "2026-10-24T10:00:00", "done": True,
+            "tag": None, "seed": 1, "audit": None,
+            "variants": [{"n": 1, "label": "baseline", "diff": {}, "renders": [], "exit": 0,
+                          "seconds": 1.5, "stderr_tail": "", "clauses": [], "sheet": None,
+                          "chips": chips}]}
+
+
+def test_compare_tab_shows_chip_names_with_details(tmp_path):
+    """chips.py writes {chip, detail} objects into manifests; the Compare tab shows
+    the name with the detail as its tooltip, in the current run and in history,
+    and a plain-string chip still shows as itself."""
+    root = tmp_path / "root"
+    asset = root / "chiptest"
+    (asset / "run-002").mkdir(parents=True)
+    latest = _manifest(3, [{"chip": "INV-4 detached", "detail": "cape left the body",
+                            "blocks_auto": True}, "inert"])
+    (asset / "latest.json").write_text(json.dumps(latest), encoding="utf-8")
+    older = _manifest(2, [{"chip": "INV-2 lean", "detail": "leans 9 degrees"}])
+    (asset / "run-002" / "manifest.json").write_text(json.dumps(older), encoding="utf-8")
+    with Served(root) as srv:
+        dom = srv.rendered("/v4.html#/a/chiptest/compare", tmp_path / "profile")
+    assert 'id="cmp-head"' in dom, "the Compare tab never rendered:\n" + dom[-2000:]
+    assert '<span class="chip amber" title="cape left the body">INV-4 detached</span>' in dom
+    assert '<span class="chip amber">inert</span>' in dom
+    assert '<span class="chip amber" title="leans 9 degrees">INV-2 lean</span>' in dom
+    assert "[object Object]" not in dom

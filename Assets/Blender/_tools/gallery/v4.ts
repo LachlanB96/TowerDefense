@@ -1589,6 +1589,17 @@ function renderLive() {
 /* ============================ compare tab ==============================
    The preview.py --variants workflow, first-class: current run as columns,
    prior manifests as collapsible history, renderer fingerprint on show. */
+// A manifest chip is chips.py's {chip, detail, blocks_auto} object (309 of
+// them in the manifests on disk on 2026-10-24, shown as "[object Object]"
+// until then); a plain name still works. The chip's name is its text and its
+// detail the tooltip. Only manifests carry objects: record.py flattens the
+// cells' chips to names, and the shepherd writes names into pipeline.json.
+function chipName(c: string | Chip): string {
+  return typeof c === 'object' && c !== null ? c.chip : c;
+}
+function chipDetail(c: string | Chip): string | null {
+  return typeof c === 'object' && c !== null && c.detail ? c.detail : null;
+}
 function variantCol(asset: string, run: number, v: Variant): HTMLDivElement {
   const bad = v.exit !== 0 && v.exit !== null;
   const el = h('div', { class: 'col card' + (bad ? ' err' : '') });
@@ -1610,9 +1621,8 @@ function variantCol(asset: string, run: number, v: Variant): HTMLDivElement {
     });
     const foot = h('div', { class: 'row' });
     if (v.seconds != null) foot.appendChild(h('span', { class: 'chip num', text: v.seconds + 's' }));
-    // Known bug, kept as found by the move to TypeScript: chips.py writes {chip, detail}
-    // objects into a manifest, so a measured chip shows as "[object Object]" here.
-    for (const c of (v.chips || [])) foot.appendChild(h('span', { class: 'chip amber', text: c as string }));
+    for (const c of (v.chips || []))
+      foot.appendChild(h('span', { class: 'chip amber', text: chipName(c), title: chipDetail(c) }));
     el.appendChild(foot);
   }
   return el;
