@@ -115,3 +115,8 @@ Obsidian/TD/.obsidian/
 # Python bytecode from the preview harness, and the .meta Unity generates for it.
 __pycache__/
 __pycache__.meta
+
+# Written by Unity's IDE integration each time a checkout opens: the solution is named after
+# the folder (TD.slnx, check.slnx in a worktree) and VS Code's settings point at it.
+/*.slnx
+/.vscode/settings.json

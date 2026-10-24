@@ -5,6 +5,9 @@
         --variant path/to/variant.json \
         --out    path/to/out/dir
 
+(preview.py starts it. Run by hand, it goes through warden-run like any headless
+Blender: `warden-run --name build-one --cpus 4 --mem 4 --gpu --max 10m -- blender -b ...`.)
+
 Why a bootstrap rather than running the asset script directly: the asset script
 has no way to receive a variant dict from the command line, and we do not want
 to teach every script an argument parser. Pre-seeding a namespace and exec'ing
