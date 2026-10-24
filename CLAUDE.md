@@ -21,6 +21,12 @@ The harness and Unity parts start Blender and Unity, so `check.ps1` queues them 
 
 In a worktree, `Library` becomes a junction to one shared cache, `%LOCALAPPDATA%\GloomFell\check-library` (copied once from the main checkout's), so a branch reimports only what it changed instead of the whole project. Results and logs go to `%LOCALAPPDATA%\GloomFell\check\`.
 
+## The dashboard
+
+**Dashboard:** `gloomfell-dashboard.ts` (styled by `gloomfell-dashboard.css`), on the Dashboards server at http://127.0.0.1:27151/d/gloomfell (`gloomfell` in `Dashboards/dashboards.json`, with a card on the home page). It shows git (branches ahead of and behind main with their worktrees, commits not on GitHub, uncommitted files), the modelling fleet (`Assets/Blender/_previews~/fleet.json` and each `<asset>/pipeline.json`, heartbeat ages, whether serve.py answers on 8777), the Blender scripts (hook marker, FBX in `Assets/Models`), the towers (`TowerCosts.cs`'s `_towerInfo` and `_upgrades`, with the TBDs in `Obsidian/TD/Towers/<Name>/`), Unity (whether the editor holds `Temp/UnityLockfile`) and the last check. Its test is `test/dashboard.test.ts`, against a made-up repo; the check's ts part runs it.
+
+**Actions:** every button is `bun server.ts action gloomfell <action>` from `~\AI\Dashboards`, and `bun server.ts render gloomfell` shows the page. `startSuite` starts `python Assets/Blender/_tools/serve.py` from the repo root with no window, outside any session, through Start-Unfocused (`~\AI\Terminal\code\LBTerm\lbterm\motion\start-unfocused.ps1`, `-NoConsole`), and waits for http://localhost:8777/v4.html to answer; `check` runs `pwsh -NoProfile -NonInteractive -File check.ps1` as a job; `refresh` re-reads git, the fleet and serve.py. Everything else Lachlan does here, Claude does through UnityMCP (the editor), the Blender MCP and headless Blender through `warden-run` (models), and serve.py's endpoints (the suite).
+
 ## Working with Unity
 
 All iteration happens inside the Unity Editor via the **UnityMCP** package (`com.coplaydev.unity-mcp`, listed in `Packages/manifest.json`), which is how Claude Code drives the editor. The only command-line runs are the check's.
