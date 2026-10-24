@@ -123,7 +123,8 @@ A script is "conforming" (drivable by the harness) if its tunables are module-le
 globals, it has a single top-level build call with the `# --- variant hook ---`
 block immediately above it, its `render_view()` honours `RENDER_ONLY`, and its own
 save/export are behind `DO_SAVE` / `DO_EXPORT`. `_tools/_selftest_asset.py` is the
-shortest complete example. **Only `blender_knight000.py` conforms.**
+shortest complete example. **Five conform** (knight000, mage000, evilMage000, plague000,
+plaguedoc000; the dashboard's Blender scripts tile shows which, live).
 
 The other eight scripts save and/or export unconditionally at module scope, so a
 preview would rebuild the asset and overwrite the real `.blend` and `.fbx` with no
@@ -134,6 +135,12 @@ above its top-level build call, and put its `save_as_mainfile` / `export_scene.f
 calls behind `DO_SAVE` / `DO_EXPORT` (see `blender_knight000.py`'s `_flag()`).
 
 After changing anything in `_tools/`, run the harness tests: `pwsh -File check.ps1 -Only harness`.
+
+The modelling fleet is `/blender-model-modev4`, typed by Lachlan (never auto-invoked). Since
+2026-10-24 it runs **one asset per session**: the session is the shepherd, and its makers,
+designer batches and reviewers are its own subagents, at most 8 at once (4 while the warden
+halves the cap), each told to start none. A second asset is a second session in its own LBTerm
+tab. v1 to v3 of the skill are retired in `docs/shelved/skills/`.
 
 ## Design documentation
 
