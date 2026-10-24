@@ -171,5 +171,6 @@ foreach ($part in 'ts', 'harness', 'unity') {
 
 Say ('--- ' + (($results.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)" }) -join ', '))
 if ($results.Values -contains 'failed') { exit 1 }
-Say 'Check passed'
+# Only a run of every part is the check that lets a branch land.
+if ($results.Count -eq 3) { Say 'Check passed' } else { Say "Passed: $($results.Keys -join ', ') (not the whole check)" }
 exit 0
