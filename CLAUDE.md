@@ -153,7 +153,7 @@ When the user asks about tower behaviour, **read the Obsidian doc before the cod
 ## Git conventions
 
 - Rule 4 of the global CLAUDE.md, like every project in the megaproject (Lachlan, 2026-10-24): work happens on a branch (`feat/...`, `fix/...`) in a worktree under `.claude/worktrees/`, never in the main checkout, which stays on `main`. Drive a worktree with `git -C` and full paths; never `cd` into it. Commit each working step on the branch, then land it with `land <branch> -m "<what it does>. Check passed"` once `check.ps1` passes there. Never `git merge` into `main` by hand.
-- The junction `.claude/worktrees/.typescript` (to `~\AI\.typescript`) gives worktrees the shared TypeScript; it's gitignored and made once per machine (`~\.claude\reference\typescript.md`).
+- The junctions `.claude/worktrees/.typescript` (to `~\AI\.typescript`) and `.claude/worktrees/Dashboards` (to `~\AI\Dashboards`, for the dashboard's `../Dashboards/contract` import) give worktrees the shared TypeScript; they're gitignored and made once per machine (`~\.claude\reference\typescript.md`). Remove a junction with `rmdir`, never `rm -r`.
 - The blender-model-modev4 fleet keeps its own `mage000/dNN` and `model/<asset>` branches and worktrees while a design is in flight; it lands them the same way.
 - Commit messages are short and lowercase (e.g. `"added models for 5 heroes. introduced obsidian as LM"`, `"updated graphics"`).
 - The repo is public (`LachlanB96/TowerDefense` on GitHub): it's pushed only when Lachlan asks, and nothing private goes in it. `.claude/settings.local.json` is per-machine and git-ignored.
