@@ -134,7 +134,11 @@ def test_gallery_holds_sources_only():
     names = set(os.listdir(GALLERY))
     assert {"v4.html", "v4.ts"} <= names
     assert not names & {"index.html", "live.html", "index.html.meta"}
-    assert not [n for n in names if n.endswith((".js", ".js.part"))]
+    assert not _build_output_in(GALLERY)
+
+
+def _build_output_in(folder):
+    return [n for n in os.listdir(folder) if n.endswith((".js", ".js.map", ".js.part"))]
 
 
 # ------------------------------------------------------------------ the bundle
@@ -147,9 +151,23 @@ def test_bundle_builds_from_v4_ts(tmp_path):
     text = bundle.read_text(encoding="utf-8")
     assert "window.__gf = S" in text          # the suite's own debugging seam
     assert "interface " not in text           # types stripped
-    assert sorted(os.listdir(tmp_path)) == ["v4.js"]   # no .part left behind
-    # and nothing was written beside the sources
-    assert not [n for n in os.listdir(GALLERY) if n.endswith((".js", ".js.part"))]
+    # just the bundle and its map: the build folder is gone
+    assert sorted(os.listdir(tmp_path)) == ["v4.js", "v4.js.map"]
+    # and nothing was written beside the sources (bun 1.4.3 does that with a
+    # source map unless it runs from the build folder)
+    assert not _build_output_in(GALLERY)
+
+
+def test_bundle_links_a_source_map_of_v4_ts(tmp_path):
+    assert _load_serve().build_bundle(str(tmp_path)) is None
+    text = (tmp_path / "v4.js").read_text(encoding="utf-8")
+    assert text.rstrip().endswith("//# sourceMappingURL=v4.js.map")
+    smap = json.loads((tmp_path / "v4.js.map").read_text(encoding="utf-8"))
+    # named by its place under _tools/, not by a path out of the previews root
+    assert smap["sources"] == ["gallery/v4.ts"]
+    with open(os.path.join(GALLERY, "v4.ts"), encoding="utf-8") as fh:
+        assert smap["sourcesContent"] == [fh.read()]   # devtools need nothing else
+    assert smap["mappings"]
 
 
 def test_bundle_parses_as_javascript(tmp_path):
@@ -168,14 +186,15 @@ def test_failed_build_is_reported_and_leaves_nothing(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
     (src / "v4.ts").write_text("const broken: number = ;\n", encoding="utf-8")
-    serve.GALLERY = str(src)                  # build_bundle reads it at call time
     dest = tmp_path / "root"
     dest.mkdir()
     (dest / "v4.js").write_text("// last week's bundle\n", encoding="utf-8")
-    error = serve.build_bundle(str(dest))
+    (dest / "v4.js.map").write_text("{}", encoding="utf-8")
+    error = serve.build_bundle(str(dest), str(src))
     assert error and error.startswith("bun build failed")
     assert "Unexpected" in error              # bun's own message comes through
     assert os.listdir(dest) == []
+    assert os.listdir(src) == ["v4.ts"]
 
 
 # ------------------------------------------------------------------ the server
@@ -195,6 +214,10 @@ def test_served_page_gets_a_fresh_v4_js(tmp_path):
         assert headers.get("Cache-Control") == "no-store"
         assert b"stale bundle" not in js and b"window.__gf = S" in js
         assert js == (tmp_path / "v4.js").read_bytes()
+        status, headers, smap = srv.request("GET", "/v4.js.map")
+        assert status == 200
+        assert headers.get("Content-Type") == "application/json"
+        assert json.loads(smap)["sources"] == ["gallery/v4.ts"]
     assert "script:  v4.js, bundled from gallery/v4.ts" in srv.output
     # the stubs aren't copied into a fresh root any more
     assert not {"index.html", "live.html"} & set(os.listdir(tmp_path))
@@ -234,9 +257,11 @@ def test_missing_bun_is_reported_and_no_stale_bundle_is_served(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
     (root / "v4.js").write_text("// stale bundle from an earlier start\n", encoding="utf-8")
+    (root / "v4.js.map").write_text("{}", encoding="utf-8")
     nowhere = str(tmp_path / "no-bun-here" / "bun.exe")
     with Served(root, GLOOMFELL_BUN=nowhere) as srv:
         assert srv.request("GET", "/v4.js")[0] == 404
+        assert srv.request("GET", "/v4.js.map")[0] == 404
         status, _, page = srv.request("GET", "/v4.html")
         assert status == 200
         assert b'role="alert">page script not built: bun not found at' in page

@@ -29,6 +29,8 @@ import shutil
 import socketserver
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 import urllib.parse
 
@@ -69,6 +71,7 @@ _MAIN_REPO = _REPO.split(os.sep + os.path.join(".claude", "worktrees") + os.sep)
 TS_DIR = os.path.join(os.path.dirname(_MAIN_REPO), ".typescript")
 _BUN_IN_TS = os.path.join("node_modules", "@oven", "bun-windows-x64", "bin", "bun.exe")
 BUNDLE = "v4.js"
+SOURCE_MAP = BUNDLE + ".map"     # linked from the bundle, so devtools show v4.ts
 
 
 def find_bun():
@@ -97,40 +100,80 @@ def _replace(src, dst):
             time.sleep(0.05)
 
 
-def build_bundle(dest_dir):
-    """Bundle gallery/v4.ts into <dest_dir>/v4.js. Returns None, or what went wrong.
+def _tidy_map(path, src_dir):
+    """Name each source in the map by its path under _tools/ (gallery/v4.ts).
 
-    A bundle left by an earlier start is deleted when this build fails: a page
-    that says its script is missing beats one that quietly runs an old script.
+    Bun writes them relative to the build folder, which climbs out of the previews
+    root and spells out where the checkout lives. The map carries the source text
+    itself (sourcesContent), so the name is all devtools uses it for: the tree it
+    files the source under.
     """
-    out = os.path.join(dest_dir, BUNDLE)
-    part = out + ".part"     # built beside it and swapped in, so no request sees half a file
+    with open(path, encoding="utf-8") as fh:
+        smap = json.load(fh)
+    base, build_dir = os.path.dirname(os.path.abspath(src_dir)), os.path.dirname(path)
+    names = []
+    for s in smap.get("sources") or []:
+        full = os.path.normpath(os.path.join(build_dir, s))
+        try:
+            names.append(os.path.relpath(full, base).replace(os.sep, "/"))
+        except ValueError:                    # another drive: no relative path exists
+            names.append(os.path.basename(full))
+    smap["sources"] = names
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(smap, fh, separators=(",", ":"))
+
+
+def build_bundle(dest_dir, src_dir=None, keep_last_good=False):
+    """Bundle <src_dir>/v4.ts (gallery/ by default) into <dest_dir>/v4.js, with a
+    linked source map beside it, v4.js.map. Returns None, or what went wrong.
+
+    When the build fails, keep_last_good=False (a start) deletes the bundle and map
+    an earlier start left: a page that says its script is missing beats one that
+    quietly runs an old script. keep_last_good=True (a rebuild after an edit) leaves
+    the last good build this server made in place.
+    """
+    src_dir = src_dir or GALLERY
+    out, map_out = os.path.join(dest_dir, BUNDLE), os.path.join(dest_dir, SOURCE_MAP)
     bun = find_bun()
     error = None
     if not os.path.isfile(bun):
         error = ("bun not found at %s. Restore it with: npm ci --prefix \"%s\" "
                  "(or point GLOOMFELL_BUN at a bun.exe)" % (bun, TS_DIR))
     else:
+        # Bun builds into a folder of its own in the previews root, run from inside
+        # it: with a source map, bun 1.4.3 ignores --outfile's folder and writes
+        # into its working directory (it once put v4.js and v4.js.map in
+        # _tools/gallery/). The finished files are then swapped in, so no request
+        # ever sees half a file. The folder never holds a latest.json, so
+        # preview.py's assets.json never lists it.
+        work = None
         try:
+            work = tempfile.mkdtemp(prefix="_suite-build-", dir=dest_dir)
             r = subprocess.run(
-                [bun, "build", os.path.join(GALLERY, "v4.ts"), "--outfile", part,
-                 "--target", "browser", "--format", "esm"],
-                cwd=GALLERY, capture_output=True, encoding="utf-8", errors="replace",
+                [bun, "build", os.path.join(src_dir, "v4.ts"), "--outdir", work,
+                 "--target", "browser", "--format", "esm", "--sourcemap=linked"],
+                cwd=work, capture_output=True, encoding="utf-8", errors="replace",
                 timeout=120, env=dict(os.environ, NO_COLOR="1"),
                 # no console window flashing up when serve.py itself has none
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            if r.returncode != 0 or not os.path.isfile(part):
+            built, built_map = os.path.join(work, BUNDLE), os.path.join(work, SOURCE_MAP)
+            if r.returncode != 0 or not (os.path.isfile(built) and os.path.isfile(built_map)):
                 error = "bun build failed (exit %d):\n%s" % (
                     r.returncode, (r.stderr.strip() or r.stdout.strip() or "(no output)"))
-        except (OSError, subprocess.TimeoutExpired) as exc:
+            else:
+                _tidy_map(built_map, src_dir)
+                _replace(built_map, map_out)  # map first: v4.js never names a map that isn't there
+                _replace(built, out)
+        except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
             error = "bun build could not run: %s" % exc
-    if error:
-        for stale in (part, out):
+        finally:
+            if work:
+                shutil.rmtree(work, ignore_errors=True)
+    if error and not keep_last_good:
+        for stale in (out, map_out):
             if os.path.exists(stale):
                 os.remove(stale)
-        return error
-    _replace(part, out)
-    return None
+    return error
 
 
 def install_page(dest_dir, bundle_error):
@@ -155,9 +198,10 @@ def install_page(dest_dir, bundle_error):
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
     # Pinned rather than left to mimetypes, which reads the Windows registry:
     # where some installer has set .js to text/plain, the browser would refuse
-    # the page's script, because module scripts get a strict MIME check.
+    # the page's script, because module scripts get a strict MIME check. A
+    # source map is JSON; mimetypes doesn't know .map at all.
     extensions_map = dict(http.server.SimpleHTTPRequestHandler.extensions_map,
-                          **{".js": "text/javascript"})
+                          **{".js": "text/javascript", ".map": "application/json"})
 
     def log_message(self, fmt, *args):
         pass          # a 1 Hz poll would otherwise flood the console
