@@ -64,6 +64,38 @@ DEFAULT_VIEWS = ["hero_34", "front", "icon_184"]
 MAX_JOBS = 4          # each job is a whole Blender; beyond 4 they fight for cores
 STDERR_TAIL_LINES = 20
 
+
+def granted_cpus():
+    """How many logical CPUs this process may run on.
+
+    preview.py runs under `warden-run --cpus N` (CLAUDE.md, "Preview harness"), which pins
+    the job, and every Blender it starts, to the N CPUs the Process Warden granted. Starting
+    more Blenders than that only queues them on the same cores while each holds its own
+    memory, and the warden's memory cap is sized for the grant. Outside warden-run this is
+    simply every CPU, so MAX_JOBS stays the cap.
+    """
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        process_mask = ctypes.c_size_t()
+        system_mask = ctypes.c_size_t()
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        # Declared, because the pseudo-handle is -1 as 64 bits, and an undeclared argument
+        # is squeezed into a C int ("int too long to convert").
+        kernel32.GetProcessAffinityMask.argtypes = [wintypes.HANDLE,
+                                                    ctypes.POINTER(ctypes.c_size_t),
+                                                    ctypes.POINTER(ctypes.c_size_t)]
+        kernel32.GetProcessAffinityMask.restype = wintypes.BOOL
+        ok = kernel32.GetProcessAffinityMask(kernel32.GetCurrentProcess(),
+                                             ctypes.byref(process_mask),
+                                             ctypes.byref(system_mask))
+        if ok and process_mask.value:
+            return bin(process_mask.value).count("1")
+    elif hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    return os.cpu_count() or 1
+
 # Machine-wide cap on concurrent Blender builds, across every process that
 # calls this module. Several modeller agents may run preview.py at once, and
 # each call can itself spawn up to MAX_JOBS Blenders - without a cap the box
@@ -626,6 +658,8 @@ def run(asset, variants=None, views=None, sample_scale=0.5, timeout=180,
     # is not the one cell rendered cold. See warm_render_pipeline().
     warm_render_pipeline(script, variants[0], views, timeout)
 
+    # Never more Blenders at once than the warden granted CPUs. See granted_cpus().
+    jobs = max(1, min(jobs, granted_cpus()))
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(jobs, len(variants))) as pool:
         futures = {}
         for i, spec in enumerate(variants):
